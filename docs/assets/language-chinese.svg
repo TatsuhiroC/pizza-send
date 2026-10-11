@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="90" height="26" viewBox="0 0 90 26" role="img" aria-labelledby="title">
+  <title id="title">阅读简体中文版</title>
+  <rect x="0.5" y="0.5" width="89" height="25" rx="6" fill="#fff0e8" stroke="#edb298"/>
+  <g fill="none" stroke="#a43b13" stroke-width="1.1">
+    <circle cx="15" cy="13" r="6"/>
+    <ellipse cx="15" cy="13" rx="2.5" ry="6"/>
+    <path d="M9 13h12"/>
+  </g>
+  <text x="31" y="17" fill="#a43b13" font-family="system-ui, -apple-system, PingFang SC, Microsoft YaHei, sans-serif" font-size="12" font-weight="600">简体中文</text>
+</svg>

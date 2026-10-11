@@ -1,6 +1,6 @@
 # 🍕 PizzaSend · File transfer
 
-[简体中文](README.md) · **English**
+[![阅读简体中文版](docs/assets/language-chinese.svg)](README.md) · **English**
 
 Open a webpage and send files directly to another device. An independent implementation inspired by [FilePizza](https://github.com/kern/filepizza).
 

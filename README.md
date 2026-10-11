@@ -1,6 +1,6 @@
 # 🍕 PizzaSend · 文件快传
 
-**简体中文** · [English](README.en.md)
+**简体中文** · [![Read in English](docs/assets/language-english.svg)](README.en.md)
 
 打开网页，把文件直接送到另一台设备。受 [FilePizza](https://github.com/kern/filepizza) 启发，独立实现。
 
