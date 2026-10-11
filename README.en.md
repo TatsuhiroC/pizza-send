@@ -15,18 +15,19 @@ Choose files → Create a transfer → Share the link or QR code → The recipie
 - 32 KiB chunks, with flow control based on both the send buffer and receiver acknowledgments. Progress updates reflect what the receiver has acknowledged.
 - Incremental SHA-256 verification; a file is marked complete only after its integrity has been verified.
 - Stream files directly to disk after choosing a file or folder in desktop Chrome / Edge. Browsers without this API use an in-memory buffer, limited to 256 MiB in total.
-- Manual pairing by copying connection codes, without a signaling service.
+- Automatic pairing reconnects after network changes and resumes from the receiver’s confirmed position, preserving verification and the save location. Both pages must stay open.
+- Manual pairing by copying connection codes, without a signaling service. Automatic reconnection is not supported in manual mode.
 - Instant Chinese / English switching with a saved language preference; desktop and mobile layouts, with no third-party fonts or analytics scripts.
 
 ## Deployment architecture
 
 The frontend is a static Vite + TypeScript website hosted on GitHub Pages. A Cloudflare Worker with Durable Objects forwards pairing messages only, while STUN helps discover connection addresses. **File contents are never transferred through or stored by the signaling service. There is no TURN file relay.**
 
-Automatic pairing encrypts SDP information with an AES-256-GCM key generated in the browser. The key is stored in the share URL's `#` fragment and is not sent to the static website or signaling service in HTTP requests. The receiving page clears the fragment from the address bar after reading it. The signaling service can see the room, roles, connection times, network addresses, and encrypted message sizes. Room role tokens are stored as SHA-256 digests. Rooms expire after 30 minutes and accept only one receiver at a time. Closing the sender's page ends the room.
+Automatic pairing encrypts SDP information with an AES-256-GCM key generated in the browser. The key is stored in the share URL's `#` fragment and is not sent to the static website or signaling service in HTTP requests. The receiving page clears the fragment from the address bar after reading it. The signaling service can see the room, roles, connection times, network addresses, and encrypted message sizes. Room role tokens are stored as SHA-256 digests. Rooms expire after 30 minutes and accept only one receiver at a time. Explicitly ending a transfer closes the room. Unexpected signaling disconnections preserve the room so the same browser session can reconnect until it expires.
 
 Anyone with the share link can receive the files, so share it through a trusted channel. Manual pairing codes contain network connection information and should also be kept private. Users still need to trust the website's code and publisher; this product has not undergone an independent security audit.
 
-The initial release cannot guarantee a direct connection between every pair of networks. Symmetric NAT, UDP restrictions, corporate networks, VPN routing, and regional access restrictions can affect connectivity. Try the same Wi-Fi network first. Failed connections show an error; there is no relay fallback. Closing or refreshing the page, locking the device, or changing networks may interrupt a transfer. Resuming interrupted transfers is not yet supported.
+The initial release cannot guarantee a direct connection between every pair of networks. Symmetric NAT, UDP restrictions, corporate networks, VPN routing, and regional access restrictions can affect connectivity. Try the same Wi-Fi network first. Failed connections show an error; there is no relay fallback. With automatic pairing, network changes or temporary disconnections trigger address discovery and a new encrypted direct connection, then resume from the byte position already written by the receiver. Recovery waits up to two minutes. Completed files are skipped, and the current file’s disk stream or memory data and SHA-256 state are preserved. The whole file is still verified on completion. Recovery requires an accessible signaling service, an unexpired room, and a direct path through the new networks; recovery time and route speed are not guaranteed. Closing or refreshing a page, or having the browser discard it, loses the session. Locking a phone may cause this. Manual pairing does not reconnect automatically.
 
 ## Local development
 
@@ -61,10 +62,12 @@ Browser tests cover automatic and manual pairing over real DataChannels, 20 MiB 
 
 Tests use virtual media devices only in isolated browsers to help expose local ICE interfaces. The application itself does not access the camera or microphone. Transfer times measured by automated tests on one machine do not represent cross-device or internet performance and do not demonstrate a speed improvement over FilePizza.
 
+Recovery tests cover repeated connection interruptions, simultaneous signaling disconnections, retained disk streams, a lost completion receipt, invalid resume positions, corruption after recovery, and cancellation during recovery. These force real connections to close in isolated browsers; actual VPN switching and cross-network recovery have not yet been verified.
+
 See the [initial release validation record](docs/validation.md) (in Chinese) for detailed results.
 
 ## Future work
 
-Speed tests across real devices and different networks, connection-failure diagnostics, resumable transfers, a PWA offline shell, and performance optimizations guided by measurements. Keep file transfers direct; never silently upload files when a connection fails.
+Speed tests across real devices and different networks, actual VPN switching, connection-failure diagnostics, persistent resumption after page refreshes, a PWA offline shell, and performance optimizations guided by measurements. Keep file transfers direct; never silently upload files when a connection fails.
 
 MIT License.

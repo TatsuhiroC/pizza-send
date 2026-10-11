@@ -1,6 +1,6 @@
 import { registerStatic, setText, t, toggleLanguage } from './i18n';
 import QRCode from 'qrcode';
-import { Transfer, Signaling, bytes, randomToken, packDescription, unpackDescription, signalKey, type Config, type FileInfo, type TransferEvent } from './protocol';
+import { Transfer, AutoPair, bytes, randomToken, packDescription, unpackDescription, signalKey, type Config, type FileInfo, type TransferEvent } from './protocol';
 import './style.css';
 
 const icon = (name: string) => {
@@ -28,7 +28,7 @@ app.innerHTML = [
   '<div id="session-panel" class="session-panel" hidden><div class="session-heading"><span id="status-dot" class="status-dot"></span><h2 id="status">等待接收方</h2><button id="cancel" class="text-button">结束传输</button></div><p id="status-detail" class="subtle">传输期间请保持双方页面打开。</p><div id="share-box" hidden><label for="share-link">把链接发给对方，或者让对方扫码</label><div class="link-row"><input id="share-link" readonly/><button id="copy-link" class="icon-button" aria-label="复制分享链接">'+icon('copy')+'</button><button id="show-qr" class="icon-button" aria-label="显示分享二维码">'+icon('qr')+'</button></div><canvas id="share-qr" hidden></canvas><p class="subtle">链接 30 分钟内可配对，仅限一位接收方。请只分享给预期接收者。</p></div><div id="progress-box" hidden><div class="progress-meta"><span id="current-file"></span><span id="percent">0%</span></div><progress id="progress" max="100" value="0" aria-label="传输进度"></progress><div class="metrics"><div><span id="transferred">0 B</span><small>已接收</small></div><div><span id="speed">—</span><small>平均速度</small></div><div><span id="remaining">—</span><small>预计剩余</small></div></div><div class="path-label">'+icon('lock')+'<span id="connection-path">浏览器之间加密传输</span><span>SHA-256 校验</span></div></div></div>',
   '<div id="notice" class="notice" role="alert" hidden></div></section>',
   '<section class="benefits"><div>'+icon('bolt')+'<h3>直接送达</h3><p>两端连接后，即传即收。</p></div><div>'+icon('lock')+'<h3>加密传输</h3><p>文件在浏览器之间加密传递。</p></div><div>'+icon('file')+'<h3>原样分享</h3><p>保留内容，逐个校验文件。</p></div></section>',
-  '<details class="faq"><summary>开始之前，你可能想知道</summary><div><p><strong>要一直打开页面吗？</strong> 是的。发送和接收期间请保持页面打开，手机尽量不要锁屏。关闭页面会中断传输。</p><p><strong>大文件能传吗？</strong> 桌面 Chrome / Edge 支持直接写入磁盘。其他浏览器会先缓存在内存里，首版限制为总计 256 MB。</p><p><strong>所有网络都能连上吗？</strong> 首版使用直连，不提供文件中继。部分移动、公司或受限网络可能无法连接，可以尝试同一 Wi-Fi。</p><p><strong>可以断点续传吗？</strong> 首版中断后需要重新创建传输，暂不支持刷新或断线续传。</p><p><strong>“加密”意味着什么？</strong> WebRTC 数据通道使用 DTLS 加密。自动配对信息也在浏览器里加密，配对密钥放在链接片段中。使用网页仍需要信任本站提供的程序代码。</p></div></details>',
+  '<details class="faq"><summary>开始之前，你可能想知道</summary><div><p><strong>要一直打开页面吗？</strong> 是的。发送和接收期间请保持页面打开，手机尽量不要锁屏。关闭页面会中断传输。</p><p><strong>大文件能传吗？</strong> 桌面 Chrome / Edge 支持直接写入磁盘。其他浏览器会先缓存在内存里，首版限制为总计 256 MB。</p><p><strong>所有网络都能连上吗？</strong> 首版使用直连，不提供文件中继。部分移动、公司或受限网络可能无法连接，可以尝试同一 Wi-Fi。</p><p><strong>可以断点续传吗？</strong> 自动配对支持页面保持打开时断线重连、从已接收位置续传。刷新或关闭页面后不能续传；手动配对暂不支持自动重连。</p><p><strong>“加密”意味着什么？</strong> WebRTC 数据通道使用 DTLS 加密。自动配对信息也在浏览器里加密，配对密钥放在链接片段中。使用网页仍需要信任本站提供的程序代码。</p></div></details>',
   '<details class="settings"><summary>连接设置</summary><div class="settings-body"><label for="signal-url">配对服务地址</label><input id="signal-url" placeholder="https://pizza-send-signal.…workers.dev"/><label for="stun-url">STUN 服务地址</label><input id="stun-url" placeholder="stun:stun.cloudflare.com:3478"/><button id="save-settings" class="secondary">保存设置</button><p class="subtle">没有配对服务时，可用手动配对码连接。STUN 只帮助建立连接，不中转文件。</p></div></details>',
   '</main><footer><span>🍕 一点披萨精神，一份直接的分享。</span><span>受 <a href="https://github.com/kern/filepizza" target="_blank" rel="noopener">FilePizza</a> 启发 · 开源制作</span></footer>',
   '<dialog id="pair-dialog"><div class="dialog-heading"><h2>手动配对</h2><button id="close-dialog" class="icon-button" aria-label="关闭配对窗口">'+icon('close')+'</button></div><p id="pair-instructions"></p><label id="outgoing-label" for="outgoing-code">配对码</label><textarea id="outgoing-code" rows="4" readonly></textarea><div class="dialog-actions"><button id="copy-code" class="secondary">'+icon('copy')+'复制配对码</button><button id="pair-qr-button" class="secondary">'+icon('qr')+'二维码</button></div><canvas id="pair-qr" hidden></canvas><div id="answer-section"><label for="answer-code">对方返回的应答码</label><textarea id="answer-code" rows="3" placeholder="粘贴接收方返回的 PS1. 应答码"></textarea><button id="apply-answer" class="primary wide">完成配对 '+icon('arrow')+'</button></div><p class="subtle">仅交换连接信息，文件仍通过加密直连发送。请只向预期接收者提供配对码。</p></dialog>',
@@ -40,7 +40,7 @@ const escapeHtml = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<
 let config: Config = { signalUrl: '', iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }], memoryLimitBytes: 268435456 };
 let files: File[] = [];
 let transfer: Transfer | undefined;
-let signaling: Signaling | undefined;
+let signaling: AutoPair | undefined;
 let shareLink = '';
 let pairingKind: 'offer' | 'answer' = 'offer';
 let busy = false;
@@ -126,7 +126,14 @@ function events(event: TransferEvent) {
     status('传输完成，原样送达。', transfer?.role === 'sender' ? '接收方已收到并校验全部文件。' : '全部文件通过 SHA-256 校验；若下方有保存按钮，请点击保存。', 'done');
     $<HTMLProgressElement>('progress').value = 100; setText($('percent'), '100%'); setText($('remaining'), '完成');
     setText($('cancel'), '开始新的传输');
-    signaling?.close(); signaling = undefined;
+    // The receiver keeps pairing available until the sender confirms completion,
+    // so a lost final receipt can be recovered without re-downloading the files.
+    if (transfer?.role === 'sender') { signaling?.close(); signaling = undefined; }
+  } else if (event.type === 'recovering') {
+    status('网络切换，正在恢复连接', '已接收的进度会保留，请保持双方页面打开。正在寻找可用的直连路径。');
+    setText($('remaining'), '等待网络恢复');
+  } else if (event.type === 'resumed') {
+    status('连接已恢复，继续传输', '从接收方确认的位置继续，完成后仍会校验整个文件。', 'connected');
   } else if (event.type === 'error') {
     $('downloads').innerHTML = ''; $('accept-files').hidden = true;
     notice(event.data); status('传输未完成', '可以结束这次传输，重新配对后再试。', 'error');
@@ -161,13 +168,7 @@ async function automaticSender(t: Transfer) {
   const secret = randomToken(), key = await signalKey(secret);
   if (transfer !== t || t.stopped) return;
   if (!/^[a-f0-9]{64}$/.test(session.room) || !/^[a-f0-9]{64}$/.test(session.receiver)) throw Error('配对服务返回信息无效');
-  let offered = false;
-  const connection = new Signaling(key, async message => {
-    if (transfer !== t || t.stopped) return;
-    if (message.type === 'peer-ready' && !offered) { offered = true; status('正在连接接收方', '双方正在建立加密直连。'); await connection.send({ type: 'offer', description: await t.offer() }); }
-    else if (message.type === 'answer') await t.finish(message.description);
-    else if (message.type === 'peer-left') signalFailure('接收方已离开，请重新创建传输。');
-  }, message => { if (transfer === t && !t.stopped) signalFailure(message); });
+  const connection = new AutoPair(t, key, message => { if (transfer === t && !t.stopped) signalFailure(message); });
   signaling = connection;
   await connection.connect(api, session.room, 'sender', session.sender);
   if (transfer !== t || t.stopped) { connection.close(); return; }
@@ -183,14 +184,9 @@ async function automaticReceiver(params: URLSearchParams) {
   if (!/^[a-f0-9]{64}$/.test(room) || !/^[a-f0-9]{64}$/.test(token)) throw Error('分享链接不完整');
   const t = createTransfer('receiver');
   status('正在连接发送方', '确认连接后，会显示对方分享的文件。');
-  let answered = false;
   const key = await signalKey(secret);
   if (transfer !== t || t.stopped) return;
-  const connection = new Signaling(key, async message => {
-    if (transfer !== t || t.stopped) return;
-    if (message.type === 'offer' && !answered) { answered = true; await connection.send({ type: 'answer', description: await t.answer(message.description) }); }
-    else if (message.type === 'peer-left') signalFailure('发送方已结束分享。');
-  }, message => { if (transfer === t && !t.stopped) signalFailure(message); });
+  const connection = new AutoPair(t, key, message => { if (transfer === t && !t.stopped) signalFailure(message); });
   signaling = connection;
   await connection.connect(api, room, 'receiver', token);
   if (transfer !== t || t.stopped) { connection.close(); return; }

@@ -74,6 +74,8 @@ export async function unseal(key: CryptoKey, payload: string): Promise<any> {
   return JSON.parse(new TextDecoder().decode(decoded));
 }
 
+class TransportInterrupted extends Error {}
+
 export class Transfer {
   pc: RTCPeerConnection;
   channel?: RTCDataChannel;
@@ -81,6 +83,16 @@ export class Transfer {
   manifest: FileInfo[] = [];
   stopped = false;
   completed = false;
+  recovering = false;
+  private recovery?: () => void;
+  private generation = 0;
+  private resumedGeneration = -1;
+  private opened = false;
+  private lastSeen = Date.now();
+  private heartbeat?: ReturnType<typeof setInterval>;
+  private recoveryTimer?: ReturnType<typeof setTimeout>;
+  private hashes = new Map<string, ReturnType<typeof sha256.create>>();
+  private networkChanged = () => { if (this.opened && !this.completed) this.requestRecovery(); };
   private accepted = false;
   private incoming?: { info: FileInfo; received: number; hash: ReturnType<typeof sha256.create>; parts: Uint8Array<ArrayBuffer>[]; writer?: FileSystemWritableFileStream; ack: number };
   private handles: FileSystemFileHandle[] = [];
@@ -98,17 +110,64 @@ export class Transfer {
   private fileConfirmed = -1;
   private outputs: { info: FileInfo; url: string }[] = [];
   constructor(public config: Config, public role: 'sender' | 'receiver', private emit: (event: TransferEvent) => void) {
-    this.pc = new RTCPeerConnection({ iceServers: config.iceServers });
-    this.pc.onconnectionstatechange = () => {
-      const state = this.pc.connectionState;
+    this.pc = this.createPeer();
+  }
+  enableRecovery(callback: () => void) {
+    this.recovery = callback;
+    window.addEventListener('offline', this.networkChanged);
+    window.addEventListener('online', this.networkChanged);
+  }
+  private createPeer() {
+    const pc = new RTCPeerConnection({ iceServers: this.config.iceServers });
+    pc.onconnectionstatechange = () => {
+      if (pc !== this.pc || this.stopped) return;
+      const state = pc.connectionState;
       if (state === 'connected') {
         clearTimeout(this.connectTimer); clearTimeout(this.disconnectedTimer);
-        void this.describePath();
+        void this.describePath().catch(() => {});
       }
-      if (state === 'failed') this.fail('无法建立直连。请尝试同一 Wi-Fi 或更换网络；首版没有中继兜底。');
-      if (state === 'disconnected') this.disconnectedTimer = setTimeout(() => this.fail('连接已中断，请重新创建传输。'), 12000);
+      if (state === 'failed') this.requestRecovery();
+      if (state === 'disconnected') {
+        clearTimeout(this.disconnectedTimer);
+        this.disconnectedTimer = setTimeout(() => this.requestRecovery(), this.recovery ? 1500 : 12000);
+      }
     };
-    this.pc.ondatachannel = event => this.attach(event.channel);
+    pc.ondatachannel = event => { if (pc === this.pc) this.attach(event.channel); };
+    return pc;
+  }
+  requestRecovery() {
+    if (this.stopped || this.completed) return;
+    if (!this.recovery) { this.fail('连接已中断，请重新创建传输。'); return; }
+    this.pauseRecovery();
+    this.recovery();
+  }
+  pauseRecovery() {
+    if (this.stopped || this.completed) return;
+    if (!this.recovering) {
+      this.recovering = true;
+      this.emit({ type: 'recovering' });
+      this.recoveryTimer = setTimeout(() => this.fail('暂时无法恢复直连，已等待两分钟。请检查双方网络，或重新创建传输。'), 120000);
+    }
+  }
+  async replaceTransport() {
+    this.generation++;
+    clearTimeout(this.connectTimer); clearTimeout(this.disconnectedTimer); clearInterval(this.heartbeat);
+    const channel = this.channel;
+    if (channel) channel.onclose = channel.onerror = channel.onmessage = channel.onopen = channel.onbufferedamountlow = null;
+    this.pc.onconnectionstatechange = null; this.pc.ondatachannel = null;
+    channel?.close(); this.pc.close(); this.channel = undefined; this.wake();
+    // Finish writes already received on the old connection before reporting the offset.
+    await this.queue;
+    if (this.stopped) throw new TransportInterrupted();
+    this.pc = this.createPeer();
+    if (this.role === 'sender') this.attach(this.pc.createDataChannel('pizza-send-v2', { ordered: true }));
+  }
+  private restored() {
+    const wasRecovering = this.recovering;
+    this.recovering = false; this.lastSeen = Date.now(); clearTimeout(this.recoveryTimer);
+    if (wasRecovering && this.accepted && !this.completed) this.emit({ type: 'resumed' });
+    else if (wasRecovering && !this.completed) this.emit({ type: 'connected' });
+    this.wake();
   }
   private async describePath() {
     const stats = await this.pc.getStats();
@@ -122,37 +181,56 @@ export class Transfer {
     });
   }
   private attach(channel: RTCDataChannel) {
+    const generation = this.generation;
     this.channel = channel; channel.binaryType = 'arraybuffer'; channel.bufferedAmountLowThreshold = 256 * 1024;
     channel.onbufferedamountlow = () => this.wake();
     channel.onopen = () => {
       clearTimeout(this.connectTimer);
-      this.emit({ type: 'connected' });
-      if (this.role === 'sender') this.control({ type: 'manifest', files: this.manifest });
+      this.lastSeen = Date.now();
+      if (!this.opened) this.emit({ type: 'connected' });
+      this.opened = true;
+      if (this.role === 'sender') this.control({ type: 'manifest', files: this.manifest, version: 2 });
+      clearInterval(this.heartbeat);
+      this.heartbeat = setInterval(() => {
+        if (this.stopped || this.completed || this.recovering) return;
+        if (Date.now() - this.lastSeen > 8000) { this.requestRecovery(); return; }
+        try { this.control({ type: 'ping' }); } catch { this.requestRecovery(); }
+      }, 2000);
     };
     channel.onmessage = event => {
+      this.lastSeen = Date.now();
       const size = event.data instanceof ArrayBuffer ? event.data.byteLength : 0;
       if (size > 65536 || this.receivingQueuedBytes + size > 8 * 1048576) { this.fail('接收队列超出安全限制'); return; }
       this.receivingQueuedBytes += size;
-      this.queue = this.queue.then(() => this.handle(event.data)).catch(e => this.fail(e.message)).finally(() => { this.receivingQueuedBytes -= size; });
+      this.queue = this.queue.then(() => this.handle(event.data, generation)).catch(e => this.fail(e.message)).finally(() => { this.receivingQueuedBytes -= size; });
     };
-    channel.onclose = () => { if (!this.stopped && !this.completed) this.fail('对方已结束传输，或页面已关闭。'); this.wake(); };
-    channel.onerror = () => this.fail('传输连接出现错误，请重新配对。');
+    channel.onclose = () => { this.requestRecovery(); this.wake(); };
+    channel.onerror = () => this.requestRecovery();
   }
   prepare(files: File[]) {
     this.files = files;
     this.manifest = validateManifest(files.map((f, id) => ({ id, name: f.name, size: f.size, type: f.type })));
-    this.attach(this.pc.createDataChannel('pizza-send-v1', { ordered: true }));
+    this.attach(this.pc.createDataChannel('pizza-send-v2', { ordered: true }));
   }
   private control(message: unknown) {
-    if (this.channel?.readyState !== 'open') throw Error('连接已关闭');
-    this.channel.send(JSON.stringify(message));
+    if (this.channel?.readyState !== 'open') throw new TransportInterrupted('连接已关闭');
+    try { this.channel.send(JSON.stringify(message)); } catch { throw new TransportInterrupted('连接已关闭'); }
+  }
+  private reply(message: unknown, generation: number) {
+    // A receipt can be lost while switching networks. The next resume handshake replaces it.
+    if (generation === this.generation && this.channel?.readyState === 'open') {
+      try { this.control(message); } catch { this.requestRecovery(); }
+    }
   }
   private wake() { for (const resolve of this.waiters) resolve(); this.waiters.clear(); }
-  private async waitFor(predicate: () => boolean, timeout = 60000) {
-    const deadline = Date.now() + timeout;
-    while (!predicate()) {
-      if (this.stopped || this.channel?.readyState !== 'open') throw Error('传输已结束');
-      if (Date.now() > deadline) throw Error('对方长时间没有响应，请重新传输');
+  private async waitFor(predicate: () => boolean, generation: number, timeout = 60000) {
+    let deadline = Date.now() + timeout;
+    while (true) {
+      if (this.stopped || generation !== this.generation) throw new TransportInterrupted();
+      if (this.channel?.readyState !== 'open') throw new TransportInterrupted('连接已关闭');
+      if (!this.recovering && predicate()) return;
+      if (this.recovering) deadline = Date.now() + timeout;
+      else if (Date.now() > deadline) throw Error('对方长时间没有响应，请重新传输');
       await new Promise<void>(resolve => {
         const timer = setTimeout(() => { this.waiters.delete(done); resolve(); }, 250);
         const done = () => { clearTimeout(timer); resolve(); };
@@ -169,7 +247,7 @@ export class Transfer {
     const elapsed = Math.max((now - this.started) / 1000, .001);
     this.emit({ type: 'progress', data: { transferred, total, seconds: elapsed, speed: transferred / elapsed } });
   }
-  private async handle(data: string | ArrayBuffer) {
+  private async handle(data: string | ArrayBuffer, generation: number) {
     if (this.stopped) return;
     if (typeof data !== 'string') {
       const incoming = this.incoming;
@@ -180,27 +258,49 @@ export class Transfer {
       else incoming.parts.push(chunk);
       incoming.received += data.byteLength; this.received += data.byteLength; incoming.ack += data.byteLength;
       if (incoming.ack >= 256 * 1024 || incoming.received === incoming.info.size) {
-        this.control({ type: 'ack', bytes: this.received }); incoming.ack = 0;
+        this.reply({ type: 'ack', bytes: this.received }, generation); incoming.ack = 0;
       }
       this.progress(); return;
     }
     if (data.length > 65536) throw Error('控制信息过大');
     const message = JSON.parse(data);
+    if (message.type === 'ping') { this.reply({ type: 'pong' }, generation); return; }
+    if (message.type === 'pong') return;
     if (message.type === 'manifest' && this.role === 'receiver') {
-      if (this.manifest.length) throw Error('重复的文件列表');
-      this.manifest = validateManifest(message.files); this.emit({ type: 'manifest', data: this.manifest });
+      const manifest = validateManifest(message.files);
+      if (this.manifest.length) {
+        if (JSON.stringify(manifest) !== JSON.stringify(this.manifest)) throw Error('续传文件列表不一致');
+        this.reply({ type: 'resume', file: this.receivedFiles, offset: this.incoming?.received || 0, bytes: this.received, accepted: this.accepted, complete: this.completed }, generation);
+        this.restored();
+      } else { this.manifest = manifest; this.restored(); this.emit({ type: 'manifest', data: this.manifest }); }
+    } else if (message.type === 'resume' && this.role === 'sender') {
+      if (!generation || this.resumedGeneration === generation) throw Error('重复或无效的续传信息');
+      const { file, offset, bytes: received, accepted, complete } = message;
+      const expected = this.manifest.slice(0, file).reduce((sum, info) => sum + info.size, 0) + offset;
+      if (!Number.isInteger(file) || file < 0 || file > this.files.length || !Number.isSafeInteger(offset) || offset < 0 ||
+          offset > (this.files[file]?.size || 0) || received !== expected || received > this.sent || received < this.acknowledged || file <= this.fileConfirmed ||
+          typeof accepted !== 'boolean' || typeof complete !== 'boolean' || (this.accepted && !accepted) ||
+          (complete && (file !== this.files.length || offset !== 0))) throw Error('续传位置无效');
+      this.sent = this.acknowledged = received; this.fileConfirmed = file - 1; this.accepted = accepted;
+      this.resumedGeneration = generation;
+      this.restored(); this.progress(true);
+      if (complete) { this.completed = true; clearInterval(this.heartbeat); this.emit({ type: 'done' }); }
+      else if (accepted) this.startSending(file, offset);
     } else if (message.type === 'accept' && this.role === 'sender') {
       if (this.accepted) throw Error('重复的下载请求');
       this.accepted = true;
-      void this.sendFiles().catch(e => this.fail(e.message));
+      this.startSending(0, 0);
     } else if (message.type === 'ack' && this.role === 'sender') {
       if (!Number.isSafeInteger(message.bytes) || message.bytes < this.acknowledged || message.bytes > this.sent) throw Error('接收确认信息无效');
       this.acknowledged = message.bytes; this.wake(); this.progress();
     } else if (message.type === 'file-start' && this.role === 'receiver') {
       const info = this.manifest[this.receivedFiles];
-      if (!this.accepted || this.incoming || !info || message.id !== info.id) throw Error('文件顺序无效');
-      const writer = this.handles[info.id] ? await this.handles[info.id].createWritable() : undefined;
-      this.incoming = { info, writer, received: 0, parts: [], hash: sha256.create(), ack: 0 };
+      const offset = message.offset ?? 0;
+      if (!this.accepted || !info || message.id !== info.id || offset !== (this.incoming?.received || 0)) throw Error('文件顺序无效');
+      if (!this.incoming) {
+        const writer = this.handles[info.id] ? await this.handles[info.id].createWritable() : undefined;
+        this.incoming = { info, writer, received: 0, parts: [], hash: sha256.create(), ack: 0 };
+      }
       this.emit({ type: 'file', data: info.name });
     } else if (message.type === 'file-end' && this.role === 'receiver') {
       const current = this.incoming;
@@ -212,17 +312,17 @@ export class Transfer {
         this.emit({ type: 'download', data: { info: current.info, url } });
       }
       this.incoming = undefined; this.receivedFiles++;
-      this.control({ type: 'file-saved', id: message.id });
+      this.reply({ type: 'file-saved', id: message.id }, generation);
     } else if (message.type === 'file-saved' && this.role === 'sender') {
       if (!Number.isInteger(message.id) || message.id !== this.fileConfirmed + 1 || message.id >= this.manifest.length) throw Error('文件保存确认无效');
       this.fileConfirmed = message.id; this.wake();
     } else if (message.type === 'done' && this.role === 'receiver') {
       if (this.incoming || this.receivedFiles !== this.manifest.length) throw Error('文件传输未完整结束');
-      this.completed = true; this.progress(true); this.control({ type: 'complete' });
+      this.completed = true; clearInterval(this.heartbeat); this.progress(true); this.reply({ type: 'complete' }, generation);
       this.emit({ type: 'done' });
     } else if (message.type === 'complete' && this.role === 'sender') {
       if (this.fileConfirmed !== this.manifest.length - 1) throw Error('文件尚未保存完整');
-      this.completed = true; this.progress(true); this.emit({ type: 'done' });
+      this.completed = true; clearInterval(this.heartbeat); this.progress(true); this.emit({ type: 'done' });
     } else if (message.type === 'cancel') { this.fail('对方已取消传输。'); }
     else throw Error('收到不支持的传输消息');
   }
@@ -247,23 +347,44 @@ export class Transfer {
     this.accepted = true; this.started = performance.now();
     this.emit({ type: 'started' }); this.control({ type: 'accept' });
   }
-  private async sendFiles() {
-    this.started = performance.now(); this.emit({ type: 'started' });
+  private startSending(file: number, offset: number) {
+    const generation = this.generation;
+    void this.sendFiles(file, offset, generation).catch(e => {
+      if (this.stopped || generation !== this.generation) return;
+      if (e instanceof TransportInterrupted) this.requestRecovery();
+      else this.fail(e.message);
+    });
+  }
+  private async sendFiles(firstFile: number, firstOffset: number, generation: number) {
+    if (!this.started) { this.started = performance.now(); this.emit({ type: 'started' }); }
     const maxMessage = this.pc.sctp?.maxMessageSize || 65536;
     const chunkSize = Math.min(32768, maxMessage);
     if (chunkSize < 1024) throw Error('对方浏览器的数据通道限制过小');
-    for (let id = 0; id < this.files.length; id++) {
-      const file = this.files[id]; const hash = sha256.create();
-      this.control({ type: 'file-start', id }); this.emit({ type: 'file', data: file.name });
-      for (let offset = 0; offset < file.size; offset += chunkSize) {
-        await this.waitFor(() => this.channel!.bufferedAmount < 1048576 && this.sent - this.acknowledged < 4 * 1048576);
+    for (let id = firstFile; id < this.files.length; id++) {
+      const file = this.files[id], start = id === firstFile ? firstOffset : 0;
+      let hash = this.hashes.get(id + ':' + start)?.clone();
+      if (!hash) {
+        hash = sha256.create();
+        for (let offset = 0; offset < start; offset += 1048576) {
+          const prefix = await file.slice(offset, Math.min(offset + 1048576, start)).arrayBuffer();
+          if (this.stopped || generation !== this.generation) throw new TransportInterrupted();
+          hash.update(new Uint8Array(prefix));
+        }
+      }
+      await this.waitFor(() => true, generation);
+      this.control({ type: 'file-start', id, offset: start }); this.emit({ type: 'file', data: file.name });
+      for (let offset = start; offset < file.size; offset += chunkSize) {
+        await this.waitFor(() => this.channel!.bufferedAmount < 1048576 && this.sent - this.acknowledged < 4 * 1048576, generation);
         const buffer = await file.slice(offset, Math.min(offset + chunkSize, file.size)).arrayBuffer();
-        if (this.stopped) throw Error('传输已取消');
+        if (this.stopped || generation !== this.generation) throw new TransportInterrupted();
         hash.update(new Uint8Array(buffer));
-        this.channel!.send(buffer); this.sent += buffer.byteLength;
+        try { this.channel!.send(buffer); } catch { throw new TransportInterrupted('连接已关闭'); }
+        this.sent += buffer.byteLength;
+        this.hashes.set(id + ':' + (offset + buffer.byteLength), hash.clone());
+        if (this.hashes.size > 160) this.hashes.delete(this.hashes.keys().next().value!);
       }
       this.control({ type: 'file-end', id, hash: hex(hash.digest()) });
-      await this.waitFor(() => this.fileConfirmed >= id);
+      await this.waitFor(() => this.fileConfirmed >= id, generation);
     }
     this.control({ type: 'done' });
   }
@@ -301,7 +422,9 @@ export class Transfer {
     if (notify && this.channel?.readyState === 'open' && !this.completed) {
       try { this.control({ type: 'cancel' }); } catch {}
     }
-    this.stopped = true; clearTimeout(this.connectTimer); clearTimeout(this.disconnectedTimer);
+    this.stopped = true; clearTimeout(this.connectTimer); clearTimeout(this.disconnectedTimer); clearTimeout(this.recoveryTimer); clearInterval(this.heartbeat);
+    window.removeEventListener('online', this.networkChanged); window.removeEventListener('offline', this.networkChanged);
+    this.hashes.clear();
     void this.incoming?.writer?.abort().catch(() => {});
     this.incoming = undefined; this.handles = []; this.files = [];
     this.channel?.close(); this.pc.close(); this.wake();
@@ -312,24 +435,40 @@ export class Transfer {
 export class Signaling {
   private socket?: WebSocket;
   private queue = Promise.resolve();
+  private sendQueue = Promise.resolve();
   private sequence = 0;
   private lastReceived = 0;
+  private endpoint?: string;
+  private role = '';
+  private closed = false;
+  private connecting?: Promise<void>;
+  private retry?: ReturnType<typeof setTimeout>;
+  private heartbeat?: ReturnType<typeof setInterval>;
+  private failures = 0;
+  private lastSeen = Date.now();
+  private client = randomToken();
   constructor(private key: CryptoKey, private onMessage: (message: any) => Promise<void>, private onError: (message: string) => void) {}
   async connect(endpoint: string, room: string, role: string, token: string) {
     const url = new URL(endpoint);
     url.protocol = url.protocol === 'http:' ? 'ws:' : 'wss:';
     url.pathname = '/rooms/' + room;
-    url.search = new URLSearchParams({ role, token }).toString();
-    const socket = this.socket = new WebSocket(url);
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => { socket.close(); reject(Error('配对服务连接超时')); }, 15000);
-      socket.onopen = () => { clearTimeout(timeout); resolve(); };
-      socket.onerror = () => { clearTimeout(timeout); reject(Error('无法连接配对服务')); };
-      socket.onclose = () => { clearTimeout(timeout); reject(Error('配对服务拒绝连接')); };
-    });
+    url.search = new URLSearchParams({ role, token, client: this.client }).toString();
+    this.endpoint = url.toString(); this.role = role;
+    await this.open();
+  }
+  private open(): Promise<void> {
+    if (this.closed) return Promise.reject(Error('配对服务已断开'));
+    if (this.socket?.readyState === WebSocket.OPEN) return Promise.resolve();
+    if (this.connecting) return this.connecting;
+    const socket = this.socket = new WebSocket(this.endpoint!);
+    this.lastSeen = Date.now();
+    // Install message handlers before open; peer-ready may arrive immediately.
     socket.onmessage = event => {
+      if (socket !== this.socket || this.closed) return;
+      this.lastSeen = Date.now();
       this.queue = this.queue.then(async () => {
         const message = JSON.parse(event.data);
+        if (message.type === 'keepalive') return;
         if (message.type === 'signal') {
           const decoded = await unseal(this.key, message.payload);
           if (!Number.isInteger(decoded.sequence) || decoded.sequence <= this.lastReceived) throw Error('重复或无效的配对消息');
@@ -337,16 +476,126 @@ export class Signaling {
         } else await this.onMessage(message);
       }).catch(e => this.onError(e.message));
     };
-    socket.onerror = () => this.onError('配对服务连接异常');
-    socket.onclose = () => this.onError('配对服务已断开；已建立的文件直连可以继续');
+    const attempt = new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => { socket.close(); reject(Error('配对服务连接超时')); }, 10000);
+      socket.onopen = () => {
+        clearTimeout(timeout); this.failures = 0;
+        clearInterval(this.heartbeat);
+        this.heartbeat = setInterval(() => {
+          if (Date.now() - this.lastSeen > 30000) { socket.close(); return; }
+          if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'keepalive' }));
+        }, 10000);
+        resolve();
+      };
+      socket.onerror = () => { clearTimeout(timeout); reject(Error('无法连接配对服务')); };
+      socket.onclose = () => {
+        clearTimeout(timeout); clearInterval(this.heartbeat);
+        reject(Error('配对服务已断开'));
+        if (socket !== this.socket || this.closed) return;
+        this.onError('配对服务已断开；已建立的文件直连可以继续');
+        this.scheduleRetry();
+      };
+    });
+    this.connecting = attempt.finally(() => { this.connecting = undefined; });
+    return this.connecting;
+  }
+  private scheduleRetry() {
+    clearTimeout(this.retry);
+    this.retry = setTimeout(() => {
+      if (!this.closed) void this.open().catch(() => this.scheduleRetry());
+    }, Math.min(1000 * 2 ** this.failures++, 8000));
+  }
+  async ready() {
+    const deadline = Date.now() + 60000;
+    while (!this.closed && Date.now() < deadline) {
+      try { await this.open(); return; } catch {}
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    throw Error('配对服务已断开');
   }
   async send(message: unknown) {
-    const payload = await seal(this.key, { sequence: ++this.sequence, message });
-    if (this.socket?.readyState !== WebSocket.OPEN) throw Error('配对服务已断开');
-    this.socket.send(JSON.stringify({ type: 'signal', payload }));
+    const task = this.sendQueue.then(async () => {
+      await this.ready();
+      const payload = await seal(this.key, { sequence: ++this.sequence, message });
+      if (this.socket?.readyState !== WebSocket.OPEN) throw Error('配对服务已断开');
+      this.socket.send(JSON.stringify({ type: 'signal', payload }));
+    });
+    this.sendQueue = task.catch(() => {});
+    return task;
   }
   close() {
-    if (this.socket) { this.socket.onclose = null; this.socket.onerror = null; this.socket.onmessage = null; this.socket.close(); }
+    this.closed = true; clearTimeout(this.retry); clearInterval(this.heartbeat);
+    if (this.socket) {
+      if (this.socket.readyState === WebSocket.OPEN && this.role === 'sender') this.socket.send(JSON.stringify({ type: 'end' }));
+      this.socket.onclose = null; this.socket.onerror = null; this.socket.onmessage = null; this.socket.close();
+    }
   }
+}
+
+// The sender is the only offerer, so simultaneous network changes cannot create
+// competing offers. Each new connection has a monotonically increasing epoch.
+export class AutoPair {
+  private signal: Signaling;
+  private epoch = 0;
+  private offered = false;
+  private negotiating = false;
+  private closed = false;
+  private lastAttempt = 0;
+  private finishedAt = 0;
+  private retry: ReturnType<typeof setInterval>;
+  constructor(private transfer: Transfer, key: CryptoKey, onError: (message: string) => void) {
+    this.signal = new Signaling(key, message => this.handle(message), onError);
+    transfer.enableRecovery(() => { void this.recover(); });
+    this.retry = setInterval(() => {
+      if (transfer.completed) {
+        this.finishedAt ||= Date.now();
+        if (Date.now() - this.finishedAt > 180000) this.close();
+      } else if (transfer.recovering) void this.recover();
+    }, 6000);
+  }
+  connect(endpoint: string, room: string, role: string, token: string) { return this.signal.connect(endpoint, room, role, token); }
+  private async handle(message: any) {
+    const t = this.transfer;
+    if (this.closed || t.stopped) return;
+    if (message.type === 'peer-ready') {
+      if (t.role === 'sender' && !this.offered) {
+        this.offered = true;
+        await this.signal.send({ type: 'offer', epoch: this.epoch, description: await t.offer() });
+      } else if (t.recovering) void this.recover();
+      else if (this.offered && !t.completed && t.channel?.readyState !== 'open' && !this.negotiating) t.requestRecovery();
+    } else if (message.type === 'restart-request' && t.role === 'sender') {
+      t.requestRecovery();
+    } else if (message.type === 'offer' && t.role === 'receiver') {
+      if (!Number.isInteger(message.epoch) || message.epoch < 0 || message.epoch < this.epoch) return;
+      if (this.offered && message.epoch === this.epoch) return;
+      if (this.offered) { t.pauseRecovery(); await t.replaceTransport(); }
+      this.offered = true; this.epoch = message.epoch;
+      await this.signal.send({ type: 'answer', epoch: this.epoch, description: await t.answer(message.description) });
+    } else if (message.type === 'answer' && t.role === 'sender') {
+      if (message.epoch === this.epoch) await t.finish(message.description);
+    } else if (message.type === 'ended') {
+      if (t.completed) this.close();
+      else t.fail('对方已结束传输，或页面已关闭。');
+    }
+    else if (message.type === 'peer-left' && !t.completed) t.requestRecovery();
+  }
+  private async recover() {
+    const t = this.transfer;
+    if (this.closed || t.stopped || t.completed || this.negotiating || Date.now() - this.lastAttempt < 10000) return;
+    this.negotiating = true;
+    try {
+      await this.signal.ready();
+      if (this.closed || t.stopped) return;
+      this.lastAttempt = Date.now();
+      if (t.role === 'receiver') await this.signal.send({ type: 'restart-request' });
+      else {
+        this.epoch++; this.offered = true;
+        await t.replaceTransport();
+        await this.signal.send({ type: 'offer', epoch: this.epoch, description: await t.offer() });
+      }
+    } catch { /* Keep the checkpoint and retry until the transfer's recovery deadline. */ }
+    finally { this.negotiating = false; }
+  }
+  close() { this.closed = true; clearInterval(this.retry); this.signal.close(); }
 }
 
