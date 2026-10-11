@@ -1,0 +1,9 @@
+{
+  "signalUrl": "https://pizza-send-signal.jimchenqizheng.workers.dev",
+  "iceServers": [
+    {
+      "urls": "stun:stun.cloudflare.com:3478"
+    }
+  ],
+  "memoryLimitBytes": 268435456
+}

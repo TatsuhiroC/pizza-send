@@ -1,0 +1,26 @@
+{
+  "name": "pizza-send",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "playwright test",
+    "signal:dev": "wrangler dev --config signal/wrangler.jsonc --port 8787",
+    "signal:deploy": "wrangler deploy --config signal/wrangler.jsonc",
+    "signal:check": "wrangler deploy --dry-run --config signal/wrangler.jsonc"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.0",
+    "@types/qrcode": "^1.5.6",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "wrangler": "^4.149.0"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.4.0",
+    "qrcode": "^1.5.4"
+  }
+}
