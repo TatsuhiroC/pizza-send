@@ -542,6 +542,8 @@ export class AutoPair {
   private closed = false;
   private lastAttempt = 0;
   private finishedAt = 0;
+  private lastOffer?: RTCSessionDescriptionInit;
+  private lastAnswer?: RTCSessionDescriptionInit;
   private retry: ReturnType<typeof setInterval>;
   constructor(private transfer: Transfer, key: CryptoKey, onError: (message: string) => void) {
     this.signal = new Signaling(key, message => this.handle(message), onError);
@@ -560,19 +562,29 @@ export class AutoPair {
     if (message.type === 'peer-ready') {
       if (t.role === 'sender' && !this.offered) {
         this.offered = true;
-        await this.signal.send({ type: 'offer', epoch: this.epoch, description: await t.offer() });
+        this.lastOffer = await t.offer();
+        await this.signal.send({ type: 'offer', epoch: this.epoch, description: this.lastOffer });
+      } else if (t.role === 'sender' && t.recovering && this.lastOffer && !this.negotiating) {
+        // An offer sent while the other socket was offline was not delivered.
+        // Re-send this epoch immediately instead of waiting for the retry interval.
+        await this.signal.send({ type: 'offer', epoch: this.epoch, description: this.lastOffer });
       } else if (t.recovering) void this.recover();
       else if (this.offered && !t.completed && t.channel?.readyState !== 'open' && !this.negotiating) t.requestRecovery();
     } else if (message.type === 'restart-request' && t.role === 'sender') {
       t.requestRecovery();
+      if (!this.negotiating && this.lastOffer) await this.signal.send({ type: 'offer', epoch: this.epoch, description: this.lastOffer });
     } else if (message.type === 'offer' && t.role === 'receiver') {
       if (!Number.isInteger(message.epoch) || message.epoch < 0 || message.epoch < this.epoch) return;
-      if (this.offered && message.epoch === this.epoch) return;
+      if (this.offered && message.epoch === this.epoch) {
+        if (this.lastAnswer) await this.signal.send({ type: 'answer', epoch: this.epoch, description: this.lastAnswer });
+        return;
+      }
       if (this.offered) { t.pauseRecovery(); await t.replaceTransport(); }
       this.offered = true; this.epoch = message.epoch;
-      await this.signal.send({ type: 'answer', epoch: this.epoch, description: await t.answer(message.description) });
+      this.lastAnswer = await t.answer(message.description);
+      await this.signal.send({ type: 'answer', epoch: this.epoch, description: this.lastAnswer });
     } else if (message.type === 'answer' && t.role === 'sender') {
-      if (message.epoch === this.epoch) await t.finish(message.description);
+      if (message.epoch === this.epoch && t.pc.signalingState === 'have-local-offer') await t.finish(message.description);
     } else if (message.type === 'ended') {
       if (t.completed) this.close();
       else t.fail('对方已结束传输，或页面已关闭。');
@@ -590,8 +602,10 @@ export class AutoPair {
       if (t.role === 'receiver') await this.signal.send({ type: 'restart-request' });
       else {
         this.epoch++; this.offered = true;
+        this.lastOffer = undefined;
         await t.replaceTransport();
-        await this.signal.send({ type: 'offer', epoch: this.epoch, description: await t.offer() });
+        this.lastOffer = await t.offer();
+        await this.signal.send({ type: 'offer', epoch: this.epoch, description: this.lastOffer });
       }
     } catch { /* Keep the checkpoint and retry until the transfer's recovery deadline. */ }
     finally { this.negotiating = false; }
