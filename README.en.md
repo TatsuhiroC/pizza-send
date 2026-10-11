@@ -11,6 +11,8 @@ Choose files → Create a transfer → Share the link or QR code → The recipie
 ## Initial release features
 
 - Multiple files, shareable links, and QR codes; up to 100 files per transfer.
+- Compact share links carry one 43-character secret instead of three random fields. The default URL shrinks from about 241 to 86 characters; older links remain supported.
+- The receiving page scans QR codes using the rear camera or an image. Decoding stays on this device. The camera stops after recognition, when the dialog closes, or when the page goes into the background. No microphone access is requested.
 - Direct file transfer over an ordered, reliable WebRTC DataChannel with DTLS encryption.
 - 32 KiB chunks, with flow control based on both the send buffer and receiver acknowledgments. Progress updates reflect what the receiver has acknowledged.
 - Incremental SHA-256 verification; a file is marked complete only after its integrity has been verified.
@@ -25,6 +27,8 @@ Choose files → Create a transfer → Share the link or QR code → The recipie
 The frontend is a static Vite + TypeScript website hosted on GitHub Pages. A Cloudflare Worker with Durable Objects forwards pairing messages only, while STUN helps discover connection addresses. **File contents are never transferred through or stored by the signaling service. There is no TURN file relay.**
 
 Automatic pairing encrypts SDP information with an AES-256-GCM key generated in the browser. The key is stored in the share URL's `#` fragment and is not sent to the static website or signaling service in HTTP requests. The receiving page clears the fragment from the address bar after reading it. The signaling service can see the room, roles, connection times, network addresses, and encrypted message sizes. Room role tokens are stored as SHA-256 digests. Rooms expire after 30 minutes and accept only one receiver at a time. Explicitly ending a transfer closes the room. Unexpected signaling disconnections preserve the room so the same browser session can reconnect until it expires.
+
+Compact links use `#2.<43 characters>`. The fragment retains a full 256-bit random secret. Distinct HKDF-SHA-256 labels derive the room ID and receiver credential in the browser; room creation sends only the room ID and the SHA-256 digest of that credential. The secret is not submitted or stored on the server, and no URL-shortening redirect service is needed.
 
 Anyone with the share link can receive the files, so share it through a trusted channel. Manual pairing codes contain network connection information and should also be kept private. Users still need to trust the website's code and publisher; this product has not undergone an independent security audit.
 
@@ -63,7 +67,7 @@ npm run signal:check
 
 Browser tests cover automatic and manual pairing over real DataChannels, 20 MiB multi-file downloads with independent SHA-256 verification, empty files, Chinese filenames, rejection of corrupted files, cancellation, origin restrictions, encrypted-message tampering, and responsive layouts. Large-file tests write 200 MiB and 1 GiB files to real browser OPFS disk streams, then read them back and independently verify them. This replaces the native save dialog in tests; it does not automate the system save dialog.
 
-Tests use virtual media devices only in isolated browsers to help expose local ICE interfaces. The application itself does not access the camera or microphone. Transfer times measured by automated tests on one machine do not represent cross-device or internet performance and do not demonstrate a speed improvement over FilePizza.
+Tests use virtual media devices only in isolated browsers to expose local ICE interfaces and verify video scanning. The application requests camera access only after the user clicks the scan button and does not access the microphone. Transfer times measured by automated tests on one machine do not represent cross-device or internet performance and do not demonstrate a speed improvement over FilePizza.
 
 Recovery tests cover repeated connection interruptions, simultaneous signaling disconnections, retained disk streams, a lost completion receipt, invalid resume positions, corruption after recovery, and cancellation during recovery. These force real connections to close in isolated browsers; actual VPN switching and cross-network recovery have not yet been verified.
 

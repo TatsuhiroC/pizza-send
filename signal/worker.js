@@ -3,6 +3,27 @@ import { DurableObject } from 'cloudflare:workers';
 const TTL = 30 * 60 * 1000;
 const token = () => Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, '0')).join('');
 const digest = async value => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))), b => b.toString(16).padStart(2, '0')).join('');
+async function roomOptions(request) {
+  if (!request.body) return null;
+  const reader = request.body.getReader(), parts = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > 1024) throw Error('Room configuration too large');
+      parts.push(value);
+    }
+  } finally { await reader.cancel(); }
+  if (!size) return null; // Keep the original room API available for old links.
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const part of parts) { bytes.set(part, offset); offset += part.byteLength; }
+  const value = JSON.parse(new TextDecoder().decode(bytes));
+  if (value?.v !== 2 || !/^[a-f0-9]{64}$/.test(value.room) || !/^[a-f0-9]{64}$/.test(value.receiverHash)) throw Error('Invalid room configuration');
+  return value;
+}
 function response(body, status, origin) {
   return new Response(status === 204 ? null : JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'access-control-allow-origin': origin, 'vary': 'Origin', 'cache-control': 'no-store', 'access-control-allow-methods': 'GET, POST, OPTIONS', 'access-control-allow-headers': 'content-type' } });
 }
@@ -17,10 +38,13 @@ export default {
       const ip = request.headers.get('CF-Connecting-IP') || 'local';
       const limiter = env.LIMITS.get(env.LIMITS.idFromName(await digest(ip)));
       if (!await limiter.allow()) return response({ error: 'Too many requests' }, 429, origin);
-      const room = token(), sender = token(), receiver = token();
+      let options;
+      try { options = await roomOptions(request); }
+      catch { return response({ error: 'Invalid room configuration' }, 400, origin); }
+      const room = options?.room || token(), sender = token(), receiver = options ? null : token();
       const stub = env.ROOMS.get(env.ROOMS.idFromName(room));
-      await stub.initialize(await digest(sender), await digest(receiver));
-      return response({ room, sender, receiver, expiresAt: Date.now() + TTL }, 201, origin);
+      if (!await stub.initialize(await digest(sender), options?.receiverHash || await digest(receiver))) return response({ error: 'Room already exists' }, 409, origin);
+      return response({ v: options ? 2 : 1, room, sender, ...(receiver ? { receiver } : {}), expiresAt: Date.now() + TTL }, 201, origin);
     }
     const match = url.pathname.match(/^\/rooms\/([a-f0-9]{64})$/);
     if (!match || (request.method !== 'GET')) return response({ error: 'Not found' }, 404, origin);
@@ -44,9 +68,13 @@ export class RateLimit extends DurableObject {
 export class Room extends DurableObject {
   sockets(role) { return this.ctx.getWebSockets(role).filter(socket => socket.readyState === WebSocket.OPEN); }
   async initialize(sender, receiver) {
-    if (await this.ctx.storage.get('room')) throw Error('Room already exists');
-    await this.ctx.storage.put('room', { sender, receiver, expiresAt: Date.now() + TTL, ended: false });
-    await this.ctx.storage.setAlarm(Date.now() + TTL);
+    const created = await this.ctx.storage.transaction(async storage => {
+      if (await storage.get('room')) return false;
+      await storage.put('room', { sender, receiver, expiresAt: Date.now() + TTL, ended: false });
+      return true;
+    });
+    if (created) await this.ctx.storage.setAlarm(Date.now() + TTL);
+    return created;
   }
   async fetch(request) {
     const state = await this.ctx.storage.get('room');

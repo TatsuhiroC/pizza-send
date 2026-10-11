@@ -1,5 +1,7 @@
 import { registerStatic, setText, t, toggleLanguage } from './i18n';
 import QRCode from 'qrcode';
+import { deriveShare, receiverDigest, shareFragment, parseShare, isSharingURL } from './share';
+import { CameraScanner } from './scanner';
 import { Transfer, AutoPair, bytes, randomToken, packDescription, unpackDescription, signalKey, type Config, type FileInfo, type TransferEvent } from './protocol';
 import './style.css';
 
@@ -13,6 +15,7 @@ const icon = (name: string) => {
     copy: '<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/>',
     check: '<path d="m5 12 4 4L19 6"/>',
     close: '<path d="m6 6 12 12M18 6 6 18"/>',
+    camera: '<path d="M4 6h4l2-3h4l2 3h4v15H4z"/><circle cx="12" cy="13" r="4"/>',
     qr: '<path d="M3 3h6v6H3zM15 3h6v6h-6zM3 15h6v6H3zM15 15h3v3h-3zM21 15v6h-6"/>',
     bolt: '<path d="m13 2-9 12h7l-1 8 10-13h-7l1-7Z"/>'
   };
@@ -24,7 +27,7 @@ app.innerHTML = [
   '<main><section class="intro"><div class="eyebrow"><span></span>好东西，直接分享。</div><h1>文件送到，<br/><span>热乎刚好。</span><img class="hero-pizza" src="./pizza.svg" alt="" width="104" height="104"/></h1><p>不用安装，不用注册。<br class="mobile-break"/>打开网页，把文件直接送到另一台设备。</p></section>',
   '<section class="transfer-card" aria-label="文件传输"><div class="card-top"><div class="tabs" role="tablist" aria-label="传输角色"><button id="send-tab" class="tab active" role="tab" aria-selected="true">'+icon('upload')+'发送文件</button><button id="receive-tab" class="tab" role="tab" aria-selected="false">'+icon('down')+'接收文件</button></div><span class="secure">'+icon('lock')+'加密直传</span></div>',
   '<div id="send-view"><button id="drop-zone" class="drop-zone" type="button"><span class="drop-icon">'+icon('upload')+'</span><strong>把文件放在这里</strong><span>拖放文件，或点击选择</span><small>支持多个文件 · 文件内容不上传到服务器</small></button><input id="file-input" type="file" multiple hidden/><div id="files" class="file-list" aria-live="polite"></div><div class="send-bottom"><span id="selection-summary">先选一个文件，就可以开始。</span><button id="start-send" class="primary" disabled>创建传输 '+icon('arrow')+'</button></div></div>',
-  '<div id="receive-view" hidden><div class="receive-intro"><span class="drop-icon">'+icon('down')+'</span><h2>接住这一份分享</h2><p>打开对方发来的分享链接即可连接。<br/>也可以在这里粘贴链接或配对码。</p></div><label class="sr-only" for="receive-code">分享链接或配对码</label><textarea id="receive-code" rows="3" placeholder="粘贴 PizzaSend 分享链接或 PS1. 配对码"></textarea><button id="connect-receive" class="primary wide">连接发送方 '+icon('arrow')+'</button><div id="incoming-files" class="file-list"></div><button id="accept-files" class="primary wide" hidden>选择保存位置并接收 '+icon('down')+'</button><p id="save-note" class="subtle" hidden></p><div id="downloads" class="downloads"></div></div>',
+  '<div id="receive-view" hidden><div class="receive-intro"><span class="drop-icon">'+icon('down')+'</span><h2>接住这一份分享</h2><p>打开对方发来的分享链接即可连接。<br/>也可以在这里粘贴链接或配对码。</p></div><button id="open-scanner" class="secondary wide scan-button" type="button">'+icon('camera')+'打开相机扫描</button><p class="scan-alternative subtle">或粘贴分享链接／配对码</p><label class="sr-only" for="receive-code">分享链接或配对码</label><textarea id="receive-code" rows="3" placeholder="粘贴 PizzaSend 分享链接或 PS1. 配对码"></textarea><button id="connect-receive" class="primary wide">连接发送方 '+icon('arrow')+'</button><div id="incoming-files" class="file-list"></div><button id="accept-files" class="primary wide" hidden>选择保存位置并接收 '+icon('down')+'</button><p id="save-note" class="subtle" hidden></p><div id="downloads" class="downloads"></div></div>',
   '<div id="session-panel" class="session-panel" hidden><div class="session-heading"><span id="status-dot" class="status-dot"></span><h2 id="status">等待接收方</h2><button id="cancel" class="text-button">结束传输</button></div><p id="status-detail" class="subtle">传输期间请保持双方页面打开。</p><div id="share-box" hidden><label for="share-link">把链接发给对方，或者让对方扫码</label><div class="link-row"><input id="share-link" readonly/><button id="copy-link" class="icon-button" aria-label="复制分享链接">'+icon('copy')+'</button><button id="show-qr" class="icon-button" aria-label="显示分享二维码">'+icon('qr')+'</button></div><canvas id="share-qr" hidden></canvas><p class="subtle">链接 30 分钟内可配对，仅限一位接收方。请只分享给预期接收者。</p></div><div id="progress-box" hidden><div class="progress-meta"><span id="current-file"></span><span id="percent">0%</span></div><progress id="progress" max="100" value="0" aria-label="传输进度"></progress><div class="metrics"><div><span id="transferred">0 B</span><small>已接收</small></div><div><span id="speed">—</span><small>平均速度</small></div><div><span id="remaining">—</span><small>预计剩余</small></div></div><div class="path-label">'+icon('lock')+'<span id="connection-path">浏览器之间加密传输</span><span>SHA-256 校验</span></div></div></div>',
   '<div id="notice" class="notice" role="alert" hidden></div></section>',
   '<section class="benefits"><div>'+icon('bolt')+'<h3>直接送达</h3><p>两端连接后，即传即收。</p></div><div>'+icon('lock')+'<h3>加密传输</h3><p>文件在浏览器之间加密传递。</p></div><div>'+icon('file')+'<h3>原样分享</h3><p>保留内容，逐个校验文件。</p></div></section>',
@@ -32,6 +35,7 @@ app.innerHTML = [
   '<details class="settings"><summary>连接设置</summary><div class="settings-body"><label for="signal-url">配对服务地址</label><input id="signal-url" placeholder="https://pizza-send-signal.…workers.dev"/><label for="stun-url">STUN 服务地址</label><input id="stun-url" placeholder="stun:stun.cloudflare.com:3478"/><button id="save-settings" class="secondary">保存设置</button><p class="subtle">没有配对服务时，可用手动配对码连接。STUN 只帮助建立连接，不中转文件。</p></div></details>',
   '</main><footer><span>🍕 一点披萨精神，一份直接的分享。</span><span>受 <a href="https://github.com/kern/filepizza" target="_blank" rel="noopener">FilePizza</a> 启发 · 开源制作</span></footer>',
   '<dialog id="pair-dialog"><div class="dialog-heading"><h2>手动配对</h2><button id="close-dialog" class="icon-button" aria-label="关闭配对窗口">'+icon('close')+'</button></div><p id="pair-instructions"></p><label id="outgoing-label" for="outgoing-code">配对码</label><textarea id="outgoing-code" rows="4" readonly></textarea><div class="dialog-actions"><button id="copy-code" class="secondary">'+icon('copy')+'复制配对码</button><button id="pair-qr-button" class="secondary">'+icon('qr')+'二维码</button></div><canvas id="pair-qr" hidden></canvas><div id="answer-section"><label for="answer-code">对方返回的应答码</label><textarea id="answer-code" rows="3" placeholder="粘贴接收方返回的 PS1. 应答码"></textarea><button id="apply-answer" class="primary wide">完成配对 '+icon('arrow')+'</button></div><p class="subtle">仅交换连接信息，文件仍通过加密直连发送。请只向预期接收者提供配对码。</p></dialog>',
+  '<dialog id="scan-dialog" class="scan-dialog"><div class="dialog-heading"><h2>扫描分享二维码</h2><button id="close-scanner" class="icon-button" aria-label="关闭相机">'+icon('close')+'</button></div><div class="scan-frame"><video id="scan-video" autoplay muted playsinline aria-label="相机画面"></video><div class="scan-guide" aria-hidden="true"></div></div><p id="scan-status" role="status">请允许相机权限，将对方的二维码放入画面。</p><p class="subtle">画面仅在本机识别，关闭后相机会停止。</p><div class="dialog-actions"><button id="scan-again" class="secondary" hidden>重试相机</button><button id="choose-qr-image" class="secondary">'+icon('file')+'从图片识别</button></div><input id="qr-image-input" type="file" accept="image/*" hidden/></dialog>',
   '<div id="toast" class="toast" role="status" hidden></div>'
 ].join('');
 registerStatic(app);
@@ -46,6 +50,47 @@ let pairingKind: 'offer' | 'answer' = 'offer';
 let busy = false;
 let toastTimer: ReturnType<typeof setTimeout>;
 let originalHash = location.hash;
+let scannerSession = 0;
+const scanner = new CameraScanner($<HTMLVideoElement>('scan-video'), scannedCode, message => scanMessage(message, true));
+function scanMessage(message: string, retry = false) {
+  setText($('scan-status'), message); $('scan-again').hidden = !retry;
+}
+function closeScanner() {
+  scannerSession++; scanner.stop();
+  if ($<HTMLDialogElement>('scan-dialog').open) $<HTMLDialogElement>('scan-dialog').close();
+}
+async function openScanner() {
+  if (busy) return;
+  const dialog = $<HTMLDialogElement>('scan-dialog');
+  if (!dialog.open) { scannerSession++; dialog.showModal(); }
+  scanMessage('请允许相机权限，将对方的二维码放入画面。');
+  await scanner.start();
+}
+async function connectValue(input: string) {
+  try { await receiveInput(input); }
+  catch (e) { transfer?.close(false); signaling?.close(); transfer = undefined; setBusy(false); throw e; }
+}
+async function scannedCode(text: string): Promise<boolean> {
+  const session = scannerSession, value = text.trim();
+  if (!$<HTMLDialogElement>('scan-dialog').open || busy) return false;
+  try {
+    if (value.startsWith('PS1.')) await unpackDescription(value, 'offer');
+    else {
+      const url = new URL(value);
+      if (!isSharingURL(url, new URL(location.href))) throw Error('Unknown website');
+      const params = new URLSearchParams(url.hash.slice(1));
+      if (params.has('offer')) await unpackDescription(params.get('offer')!, 'offer');
+      else await parseShare(url.hash);
+    }
+  } catch {
+    if (session === scannerSession) scanMessage('这不是有效的 PizzaSend 分享二维码，请扫描对方生成的二维码。');
+    return false;
+  }
+  if (session !== scannerSession || !$<HTMLDialogElement>('scan-dialog').open || busy) return false;
+  closeScanner(); view('receiver'); $<HTMLTextAreaElement>('receive-code').value = value;
+  await run(() => connectValue(value));
+  return true;
+}
 function toast(message: string) { setText($('toast'), message); $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').hidden = true, 2600); }
 function notice(message: string) { setText($('notice'), message); $('notice').hidden = false; }
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : String(error); }
@@ -81,8 +126,10 @@ function setBusy(value: boolean) {
   $<HTMLButtonElement>('drop-zone').disabled = value;
   document.querySelectorAll<HTMLButtonElement>('.remove-file').forEach(b => b.disabled = value);
   $<HTMLButtonElement>('connect-receive').disabled = value;
+  $<HTMLButtonElement>('open-scanner').disabled = value;
 }
 function reset() {
+  closeScanner();
   signaling?.close(); signaling = undefined;
   transfer?.close(); transfer = undefined;
   shareLink = ''; setBusy(false);
@@ -164,26 +211,27 @@ function signalFailure(message: string) {
 }
 async function automaticSender(t: Transfer) {
   const api = endpoint();
-  const response = await fetch(api + '/rooms', { method: 'POST', signal: AbortSignal.timeout(15000) });
+  const secret = randomToken(), credentials = await deriveShare(secret), key = await signalKey(secret);
+  if (transfer !== t || t.stopped) return;
+  const response = await fetch(api + '/rooms', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ v: 2, room: credentials.room, receiverHash: await receiverDigest(credentials.receiver) }), signal: AbortSignal.timeout(15000) });
   if (!response.ok) throw Error('配对服务暂不可用（' + response.status + '），请使用手动配对');
   const session = await response.json();
-  const secret = randomToken(), key = await signalKey(secret);
   if (transfer !== t || t.stopped) return;
-  if (!/^[a-f0-9]{64}$/.test(session.room) || !/^[a-f0-9]{64}$/.test(session.receiver)) throw Error('配对服务返回信息无效');
+  if (session.v !== 2 || session.room !== credentials.room || !/^[a-f0-9]{64}$/.test(session.sender)) throw Error('配对服务返回信息无效');
   const connection = new AutoPair(t, key, message => { if (transfer === t && !t.stopped) signalFailure(message); });
   signaling = connection;
   await connection.connect(api, session.room, 'sender', session.sender);
   if (transfer !== t || t.stopped) { connection.close(); return; }
-  const url = new URL(location.href); url.hash = new URLSearchParams({ r: session.room, t: session.receiver, k: secret }).toString();
+  const url = new URL(location.href); url.search = ''; url.hash = shareFragment(secret);
   shareLink = url.toString();
   $<HTMLInputElement>('share-link').value = shareLink; $('share-box').hidden = false;
   status('等待接收方', '把分享链接发给对方。传输期间请保持本页打开。');
 }
-async function automaticReceiver(params: URLSearchParams) {
+async function automaticReceiver(fragment: string) {
   const api = endpoint();
   if (!api) throw Error('本站尚未配置自动配对服务，请使用手动配对码');
-  const room = params.get('r') || '', token = params.get('t') || '', secret = params.get('k') || '';
-  if (!/^[a-f0-9]{64}$/.test(room) || !/^[a-f0-9]{64}$/.test(token)) throw Error('分享链接不完整');
+  const { room, receiver: token, secret } = await parseShare(fragment);
   const t = createTransfer('receiver');
   status('正在连接发送方', '确认连接后，会显示对方分享的文件。');
   const key = await signalKey(secret);
@@ -225,7 +273,7 @@ async function receiveInput(input: string) {
     try { url = new URL(value); } catch { throw Error('请粘贴完整的分享链接或 PS1. 配对码'); }
     const params = new URLSearchParams(url.hash.slice(1));
     if (params.has('offer')) await manualReceiver(params.get('offer')!);
-    else await automaticReceiver(params);
+    else await automaticReceiver(url.hash);
   }
 }
 $('language-toggle').onclick = () => {
@@ -250,9 +298,35 @@ $('start-send').onclick = () => run(async () => {
   catch (e) { if (transfer !== t || t.stopped) return; t.close(false); signaling?.close(); transfer = undefined; setBusy(false); throw e; }
 });
 $('connect-receive').onclick = () => run(async () => {
-  try { await receiveInput($<HTMLTextAreaElement>('receive-code').value); }
-  catch (e) { transfer?.close(false); signaling?.close(); transfer = undefined; setBusy(false); throw e; }
+  await connectValue($<HTMLTextAreaElement>('receive-code').value);
 });
+$('open-scanner').onclick = () => { void openScanner(); };
+$('scan-again').onclick = () => { void openScanner(); };
+$('close-scanner').onclick = closeScanner;
+$<HTMLDialogElement>('scan-dialog').addEventListener('close', () => { scannerSession++; scanner.stop(); });
+$<HTMLDialogElement>('scan-dialog').addEventListener('cancel', () => { scannerSession++; scanner.stop(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && $<HTMLDialogElement>('scan-dialog').open) {
+    scannerSession++; scanner.stop(); scanMessage('扫描已暂停，点击重试相机继续。', true);
+  }
+});
+$('choose-qr-image').onclick = () => {
+  scannerSession++; scanner.stop(); scanMessage('请选择二维码图片，或点击重试相机。', true);
+  $<HTMLInputElement>('qr-image-input').click();
+};
+$<HTMLInputElement>('qr-image-input').onchange = () => {
+  const input = $<HTMLInputElement>('qr-image-input'), file = input.files?.[0];
+  input.value = '';
+  if (!file || !$<HTMLDialogElement>('scan-dialog').open) return;
+  const session = ++scannerSession; scanner.stop();
+  void (async () => {
+    try {
+      scanMessage('正在识别二维码图片…');
+      const text = await scanner.readImage(file);
+      if (session === scannerSession) await scannedCode(text);
+    } catch (e) { if (session === scannerSession) scanMessage(errorMessage(e), true); }
+  })();
+};
 $('accept-files').onclick = () => run(async () => {
   $<HTMLButtonElement>('accept-files').disabled = true;
   try { await transfer?.accept(); } finally { $<HTMLButtonElement>('accept-files').disabled = false; }
@@ -288,7 +362,7 @@ $('save-settings').onclick = () => run(async () => {
 window.addEventListener('beforeunload', event => {
   if (transfer && !transfer.completed && !transfer.stopped) { event.preventDefault(); event.returnValue = ''; }
 });
-window.addEventListener('pagehide', () => { signaling?.close(); transfer?.close(false); });
+window.addEventListener('pagehide', () => { closeScanner(); signaling?.close(); transfer?.close(false); });
 async function init() {
   try {
     const response = await fetch('./app.config.json', { cache: 'no-store' });
@@ -300,10 +374,10 @@ async function init() {
   $<HTMLInputElement>('stun-url').value = String(config.iceServers[0]?.urls || '');
   if (!('RTCPeerConnection' in window) || !crypto.subtle) { notice('请在支持 WebRTC 的现代浏览器中，通过 HTTPS 打开本站。'); $<HTMLButtonElement>('drop-zone').disabled = true; return; }
   const params = new URLSearchParams(originalHash.slice(1));
-  if (params.has('r') || params.has('offer')) {
+  if (originalHash.startsWith('#2.') || params.has('r') || params.has('offer')) {
     view('receiver');
     await run(async () => {
-      try { if (params.has('offer')) await manualReceiver(params.get('offer')!); else await automaticReceiver(params); }
+      try { if (params.has('offer')) await manualReceiver(params.get('offer')!); else await automaticReceiver(originalHash); }
       catch (e) { transfer?.close(false); signaling?.close(); transfer = undefined; setBusy(false); throw e; }
     });
   }
