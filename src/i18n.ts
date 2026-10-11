@@ -1,0 +1,175 @@
+export type Language = 'zh' | 'en';
+type Params = Record<string, string | number>;
+const messages: Record<string, string> = {
+  '文件快传': 'File transfer',
+  '第一片 · v0.1': 'First slice · v0.1',
+  '好东西，直接分享。': 'Good things. Shared directly.',
+  '文件送到，': 'Send files.',
+  '热乎刚好。': 'Fresh & direct.',
+  '不用安装，不用注册。': 'No installs. No sign-ups.',
+  '打开网页，把文件直接送到另一台设备。': 'Open a page. Send files straight to another device.',
+  '文件传输': 'File transfer', '传输角色': 'Transfer role',
+  '发送文件': 'Send files', '接收文件': 'Receive files', '加密直传': 'Encrypted',
+  '把文件放在这里': 'Drop your files here',
+  '拖放文件，或点击选择': 'Drag and drop, or click to choose',
+  '支持多个文件 · 文件内容不上传到服务器': 'Multiple files · No file uploads to a server',
+  '先选一个文件，就可以开始。': 'Choose a file to get started.',
+  '创建传输': 'Start sharing',
+  '接住这一份分享': 'Receive something good',
+  '打开对方发来的分享链接即可连接。': 'Open the sender’s link to connect.',
+  '也可以在这里粘贴链接或配对码。': 'Or paste a link or pairing code below.',
+  '分享链接或配对码': 'Share link or pairing code',
+  '粘贴 PizzaSend 分享链接或 PS1. 配对码': 'Paste a PizzaSend link or PS1. pairing code',
+  '连接发送方': 'Connect to sender',
+  '选择保存位置并接收': 'Save and receive',
+  '等待接收方': 'Waiting for receiver', '结束传输': 'End transfer',
+  '传输期间请保持双方页面打开。': 'Keep both pages open during the transfer.',
+  '把链接发给对方，或者让对方扫码': 'Share this link, or let the receiver scan the QR code',
+  '复制分享链接': 'Copy share link', '显示分享二维码': 'Show share QR code',
+  '链接 30 分钟内可配对，仅限一位接收方。请只分享给预期接收者。': 'Pair within 30 minutes. One receiver only. Share with your intended recipient.',
+  '传输进度': 'Transfer progress', '已接收': 'Received', '平均速度': 'Average speed', '预计剩余': 'Time remaining',
+  '浏览器之间加密传输': 'Encrypted between browsers', 'SHA-256 校验': 'SHA-256 verified',
+  '直接送达': 'Direct delivery', '两端连接后，即传即收。': 'Connect both devices and start sending.',
+  '加密传输': 'Encrypted transfer', '文件在浏览器之间加密传递。': 'Files travel encrypted between browsers.',
+  '原样分享': 'Every byte intact', '保留内容，逐个校验文件。': 'Original content. Every file verified.',
+  '开始之前，你可能想知道': 'Before you start',
+  '要一直打开页面吗？': 'Should I keep the pages open?',
+  '是的。发送和接收期间请保持页面打开，手机尽量不要锁屏。关闭页面会中断传输。': 'Yes. Keep both pages open and avoid locking your phone. Closing a page interrupts the transfer.',
+  '大文件能传吗？': 'Can I send large files?',
+  '桌面 Chrome / Edge 支持直接写入磁盘。其他浏览器会先缓存在内存里，首版限制为总计 256 MB。': 'Desktop Chrome / Edge can write directly to disk. Other browsers buffer files in memory, with a total limit of 256 MB in this release.',
+  '所有网络都能连上吗？': 'Will every network connect?',
+  '首版使用直连，不提供文件中继。部分移动、公司或受限网络可能无法连接，可以尝试同一 Wi-Fi。': 'This release uses direct connections without a file relay. Some mobile, corporate or restricted networks may not connect. Try the same Wi-Fi.',
+  '可以断点续传吗？': 'Can I resume an interrupted transfer?',
+  '首版中断后需要重新创建传输，暂不支持刷新或断线续传。': 'Start a new transfer after an interruption. This release does not support resuming after a refresh or disconnection.',
+  '“加密”意味着什么？': 'What does “encrypted” mean?',
+  'WebRTC 数据通道使用 DTLS 加密。自动配对信息也在浏览器里加密，配对密钥放在链接片段中。使用网页仍需要信任本站提供的程序代码。': 'WebRTC data channels use DTLS encryption. Automatic pairing information is also encrypted in the browser, with its key in the link fragment. You still need to trust the code served by this site.',
+  '连接设置': 'Connection settings', '配对服务地址': 'Pairing service URL', 'STUN 服务地址': 'STUN server URL', '保存设置': 'Save settings',
+  '没有配对服务时，可用手动配对码连接。STUN 只帮助建立连接，不中转文件。': 'Use manual pairing codes without a pairing service. STUN helps establish connections; it does not relay files.',
+  '🍕 一点披萨精神，一份直接的分享。': '🍕 A little pizza spirit. A direct connection.',
+  '受': 'Inspired by', '启发 · 开源制作': '· Open source',
+  '手动配对': 'Manual pairing', '关闭配对窗口': 'Close pairing dialog', '配对码': 'Pairing code', '复制配对码': 'Copy code', '二维码': 'QR code',
+  '对方返回的应答码': 'Answer code from the receiver',
+  '粘贴接收方返回的 PS1. 应答码': 'Paste the receiver’s PS1. answer code', '完成配对': 'Finish pairing',
+  '仅交换连接信息，文件仍通过加密直连发送。请只向预期接收者提供配对码。': 'Only connection information is exchanged. Files use an encrypted direct connection. Share codes only with your intended recipient.',
+  '已取消选择保存位置': 'Save location selection cancelled',
+  '移除 {name}': 'Remove {name}', '待接收': 'Ready to receive',
+  '一次最多选择 100 个文件': 'Choose up to 100 files at a time',
+  '文件名过长，请缩短后重试': 'The filename is too long. Shorten it and try again.',
+  '{count} 个文件 · {size}': '{count} files · {size}',
+  '已连接，等待对方确认': 'Connected. Waiting for confirmation', '已连接，准备接收': 'Connected. Ready to receive',
+  '请保持双方页面打开。': 'Keep both pages open.',
+  '选择保存位置后开始传输。文件会写入磁盘，并在完成时校验。': 'Choose a save location to begin. Files are written to disk and verified on completion.',
+  '当前浏览器将文件暂存在内存中，总计最多 {size}。完成后请点击保存。': 'This browser buffers files in memory, up to {size} in total. Click Save when finished.',
+  '正在传输': 'Transferring', '请保持页面打开，手机不要锁屏。': 'Keep the pages open and your phone unlocked.',
+  '{path} · DTLS 加密': '{path} · DTLS encrypted',
+  '{count} 分钟': '{count} min', '{count} 秒': '{count}s', '即将完成': 'Almost done',
+  '保存 {name}': 'Save {name}',
+  '传输完成，原样送达。': 'Transfer complete. Every byte intact.',
+  '接收方已收到并校验全部文件。': 'The receiver has received and verified all files.',
+  '全部文件通过 SHA-256 校验；若下方有保存按钮，请点击保存。': 'All files passed SHA-256 verification. If Save buttons appear below, click them to save your files.',
+  '完成': 'Done', '开始新的传输': 'Start a new transfer',
+  '传输未完成': 'Transfer incomplete', '可以结束这次传输，重新配对后再试。': 'End this transfer and pair again to retry.', '重新开始': 'Start again',
+  '配对服务需要 HTTPS 地址': 'The pairing service requires an HTTPS URL',
+  '配对地址不能包含凭据或额外参数': 'The pairing URL cannot contain credentials or extra parameters',
+  '配对服务已断开，文件直传继续': 'Pairing service disconnected. File transfer continues.',
+  '配对服务不可用': 'Pairing service unavailable',
+  '可以结束后使用手动配对，或检查连接设置。': 'End this session and use manual pairing, or check the connection settings.',
+  '配对服务暂不可用（{code}），请使用手动配对': 'Pairing service unavailable ({code}). Use manual pairing.',
+  '配对服务返回信息无效': 'The pairing service returned invalid information',
+  '正在连接接收方': 'Connecting to receiver', '双方正在建立加密直连。': 'Establishing an encrypted direct connection.',
+  '接收方已离开，请重新创建传输。': 'The receiver has left. Start a new transfer.',
+  '把分享链接发给对方。传输期间请保持本页打开。': 'Send the share link to the receiver. Keep this page open during the transfer.',
+  '本站尚未配置自动配对服务，请使用手动配对码': 'Automatic pairing is not configured. Use manual pairing codes.',
+  '分享链接不完整': 'The share link is incomplete',
+  '正在连接发送方': 'Connecting to sender', '确认连接后，会显示对方分享的文件。': 'The shared files will appear once connected.',
+  '发送方已结束分享。': 'The sender has ended this session.',
+  '正在准备配对码': 'Preparing pairing code', '正在收集直连信息，通常需要几秒钟。': 'Gathering connection information. This usually takes a few seconds.',
+  '把配对码发给对方。对方在「接收文件」中粘贴后，会得到应答码，再把应答码返回这里。': 'Send this code to the receiver. They paste it under “Receive files” and return their answer code for you to paste below.',
+  '发给接收方的配对码': 'Pairing code for the receiver',
+  '等待手动配对': 'Waiting for manual pairing', '没有自动配对服务时，双方交换配对码即可直连。': 'Exchange pairing codes to connect without an automatic pairing service.',
+  '正在准备应答码': 'Preparing answer code', '正在建立连接信息，通常需要几秒钟。': 'Preparing connection information. This usually takes a few seconds.',
+  '把下面的应答码复制给发送方。对方完成配对后，这里会显示文件列表。': 'Copy this answer code to the sender. The file list will appear once they finish pairing.',
+  '返回给发送方的应答码': 'Answer code for the sender', '等待发送方完成配对': 'Waiting for sender to finish pairing', '请将应答码返回给发送方。': 'Send the answer code back to the sender.',
+  '请粘贴完整的分享链接或 PS1. 配对码': 'Paste a complete share link or PS1. pairing code',
+  '请先结束当前传输': 'End the current transfer first',
+  '正在创建传输': 'Creating transfer', '正在准备连接，请稍候。': 'Preparing the connection. Please wait.',
+  '分享链接已复制': 'Share link copied', '配对码已复制': 'Pairing code copied',
+  '请先创建一次发送': 'Start a sharing session first', '正在建立加密直连': 'Establishing encrypted connection', '配对信息已交换，请稍候。': 'Pairing information exchanged. Please wait.',
+  '请先结束当前传输，再修改连接设置': 'End the current transfer before changing connection settings',
+  '请使用 HTTPS 配对服务地址': 'Use an HTTPS pairing service URL', '请输入有效的 stun: 或 stuns: 地址': 'Enter a valid stun: or stuns: URL',
+  '连接设置已保存': 'Connection settings saved',
+  '请在支持 WebRTC 的现代浏览器中，通过 HTTPS 打开本站。': 'Open this site over HTTPS in a modern browser that supports WebRTC.',
+  '文件列表无效（最多 100 个文件）': 'Invalid file list (up to 100 files)', '文件信息无效': 'Invalid file information', '文件总大小超出支持范围': 'The total file size exceeds the supported range',
+  '这不是有效的 PizzaSend 配对码': 'This is not a valid PizzaSend pairing code', '配对信息过大': 'Pairing information is too large', '配对码类型不正确': 'Incorrect pairing code type',
+  '无法建立直连。请尝试同一 Wi-Fi 或更换网络；首版没有中继兜底。': 'Unable to connect directly. Try the same Wi-Fi or another network. This release has no relay fallback.',
+  '连接已中断，请重新创建传输。': 'Connection interrupted. Start a new transfer.', '设备直连': 'Device-to-device', '网络直连': 'Direct network connection',
+  '接收队列超出安全限制': 'The receive queue exceeds its safety limit', '对方已结束传输，或页面已关闭。': 'The other device ended the transfer or closed its page.',
+  '传输连接出现错误，请重新配对。': 'Transfer connection error. Pair again.', '连接已关闭': 'Connection closed', '传输已结束': 'Transfer ended', '对方长时间没有响应，请重新传输': 'The other device is not responding. Start a new transfer.',
+  '接收到不符合文件信息的数据': 'Received data does not match the file information', '控制信息过大': 'Control message is too large', '重复的文件列表': 'Duplicate file list', '重复的下载请求': 'Duplicate download request',
+  '接收确认信息无效': 'Invalid receipt acknowledgement', '文件顺序无效': 'Invalid file order', '文件完整性校验失败，请重新传输': 'File integrity check failed. Send the file again.',
+  '文件保存确认无效': 'Invalid save acknowledgement', '文件传输未完整结束': 'The file transfer has not finished', '文件尚未保存完整': 'Files have not been fully saved', '对方已取消传输。': 'The other device cancelled the transfer.', '收到不支持的传输消息': 'Unsupported transfer message',
+  '这个浏览器暂不支持大文件流式保存。请使用桌面 Chrome 或 Edge；当前接收上限为 {size}': 'This browser cannot stream large files to disk. Use desktop Chrome or Edge. The current receive limit is {size}.',
+  '对方浏览器的数据通道限制过小': 'The other browser’s data channel limit is too small', '传输已取消': 'Transfer cancelled',
+  '连接等待超时。请确认对方页面仍然打开，或尝试同一 Wi-Fi。': 'Connection timed out. Make sure the other page is open, or try the same Wi-Fi.',
+  '配对服务连接超时': 'Pairing service connection timed out', '无法连接配对服务': 'Unable to connect to the pairing service', '配对服务拒绝连接': 'The pairing service refused the connection',
+  '重复或无效的配对消息': 'Duplicate or invalid pairing message', '配对服务连接异常': 'Pairing service connection error', '配对服务已断开；已建立的文件直连可以继续': 'Pairing service disconnected. An established direct transfer can continue.', '配对服务已断开': 'Pairing service disconnected'
+};
+let language: Language = 'zh';
+try { if (localStorage.getItem('pizza-send-language') === 'en') language = 'en'; } catch {}
+const fill = (value: string, params: Params) => value.replace(/\{(\w+)\}/g, (match, key) => String(key === 'path' && typeof params[key] === 'string' ? t(params[key]) : params[key] ?? match));
+const patterns = Object.entries(messages).filter(([key]) => key.includes('{')).map(([key, value]) => {
+  const names: string[] = [];
+  const pattern = key.split(/(\{\w+\})/g).map(part => {
+    if (/^\{\w+\}$/.test(part)) { names.push(part.slice(1, -1)); return '(.+?)'; }
+    return part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }).join('');
+  return { expression: new RegExp('^' + pattern + '$'), names, value };
+});
+export function t(key: string, params: Params = {}): string {
+  if (language === 'zh') return fill(key, params);
+  if (messages[key]) return fill(params.count === 1 ? messages[key].replace('{count} files', '{count} file') : messages[key], params);
+  for (const pattern of patterns) {
+    const match = key.match(pattern.expression);
+    if (match) return fill(pattern.value, Object.fromEntries(pattern.names.map((name, index) => [name, match[index + 1]])));
+  }
+  return key;
+}
+export function setText(element: HTMLElement, key: string, params: Params = {}) {
+  element.dataset.i18nText = key;
+  element.dataset.i18nParams = JSON.stringify(params);
+  element.textContent = t(key, params);
+}
+const staticText: { node: Text; key: string; prefix: string; suffix: string }[] = [];
+const staticAttributes: { element: Element; name: string; key: string }[] = [];
+export function registerStatic(root: HTMLElement) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text;
+    const text = node.data, key = text.trim();
+    if (messages[key]) staticText.push({ node, key, prefix: text.slice(0, text.indexOf(key)), suffix: text.slice(text.indexOf(key) + key.length) });
+  }
+  for (const element of root.querySelectorAll('*')) for (const name of ['aria-label', 'placeholder', 'title']) {
+    const key = element.getAttribute(name);
+    if (key && messages[key]) staticAttributes.push({ element, name, key });
+  }
+  refreshLanguage();
+}
+function refreshLanguage() {
+  document.documentElement.lang = language === 'zh' ? 'zh-CN' : 'en';
+  document.documentElement.classList.toggle('lang-en', language === 'en');
+  document.title = language === 'zh' ? 'PizzaSend · 文件快传' : 'PizzaSend · File transfer';
+  document.querySelector('meta[name="description"]')?.setAttribute('content', language === 'zh' ? 'PizzaSend 文件快传：免安装、免注册，浏览器之间加密直传文件。' : 'PizzaSend: encrypted file transfers between browsers. No installs. No sign-ups.');
+  for (const { node, key, prefix, suffix } of staticText) if (node.isConnected) node.data = prefix + t(key) + suffix;
+  for (const { element, name, key } of staticAttributes) if (element.isConnected) element.setAttribute(name, t(key));
+  for (const element of document.querySelectorAll<HTMLElement>('[data-i18n-text]')) element.textContent = t(element.dataset.i18nText!, JSON.parse(element.dataset.i18nParams || '{}'));
+  const button = document.getElementById('language-toggle');
+  button?.setAttribute('aria-label', language === 'zh' ? '切换为 English' : 'Switch to Chinese');
+  button?.setAttribute('title', language === 'zh' ? '切换为 English' : 'Switch to Chinese');
+  button?.querySelector('[data-language="zh"]')?.classList.toggle('selected', language === 'zh');
+  button?.querySelector('[data-language="en"]')?.classList.toggle('selected', language === 'en');
+}
+export function toggleLanguage() {
+  language = language === 'zh' ? 'en' : 'zh';
+  try { localStorage.setItem('pizza-send-language', language); } catch {}
+  refreshLanguage();
+}

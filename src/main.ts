@@ -1,3 +1,4 @@
+import { registerStatic, setText, t, toggleLanguage } from './i18n';
 import QRCode from 'qrcode';
 import { Transfer, Signaling, bytes, randomToken, packDescription, unpackDescription, signalKey, type Config, type FileInfo, type TransferEvent } from './protocol';
 import './style.css';
@@ -19,7 +20,7 @@ const icon = (name: string) => {
 };
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = [
-  '<header class="header"><a class="brand" href="./"><img src="./pizza.svg" alt="" width="38" height="38"/><span>PizzaSend<small>文件快传</small></span></a><div class="header-right"><span class="version">第一片 · v0.1</span><a class="github" href="https://github.com/TatsuhiroC/pizza-send" target="_blank" rel="noopener">GitHub ↗</a></div></header>',
+  '<header class="header"><a class="brand" href="./"><img src="./pizza.svg" alt="" width="38" height="38"/><span>PizzaSend<small>文件快传</small></span></a><div class="header-right"><span class="version">第一片 · v0.1</span><button id="language-toggle" class="language-toggle" type="button"><span data-language="zh">中</span><span class="language-divider" aria-hidden="true">/</span><span data-language="en">EN</span></button><a class="github" href="https://github.com/TatsuhiroC/pizza-send" target="_blank" rel="noopener">GitHub ↗</a></div></header>',
   '<main><section class="intro"><div class="eyebrow"><span></span>好东西，直接分享。</div><h1>文件送到，<br/><span>热乎刚好。</span><img class="hero-pizza" src="./pizza.svg" alt="" width="104" height="104"/></h1><p>不用安装，不用注册。<br class="mobile-break"/>打开网页，把文件直接送到另一台设备。</p></section>',
   '<section class="transfer-card" aria-label="文件传输"><div class="card-top"><div class="tabs" role="tablist" aria-label="传输角色"><button id="send-tab" class="tab active" role="tab" aria-selected="true">'+icon('upload')+'发送文件</button><button id="receive-tab" class="tab" role="tab" aria-selected="false">'+icon('down')+'接收文件</button></div><span class="secure">'+icon('lock')+'加密直传</span></div>',
   '<div id="send-view"><button id="drop-zone" class="drop-zone" type="button"><span class="drop-icon">'+icon('upload')+'</span><strong>把文件放在这里</strong><span>拖放文件，或点击选择</span><small>支持多个文件 · 文件内容不上传到服务器</small></button><input id="file-input" type="file" multiple hidden/><div id="files" class="file-list" aria-live="polite"></div><div class="send-bottom"><span id="selection-summary">先选一个文件，就可以开始。</span><button id="start-send" class="primary" disabled>创建传输 '+icon('arrow')+'</button></div></div>',
@@ -33,6 +34,7 @@ app.innerHTML = [
   '<dialog id="pair-dialog"><div class="dialog-heading"><h2>手动配对</h2><button id="close-dialog" class="icon-button" aria-label="关闭配对窗口">'+icon('close')+'</button></div><p id="pair-instructions"></p><label id="outgoing-label" for="outgoing-code">配对码</label><textarea id="outgoing-code" rows="4" readonly></textarea><div class="dialog-actions"><button id="copy-code" class="secondary">'+icon('copy')+'复制配对码</button><button id="pair-qr-button" class="secondary">'+icon('qr')+'二维码</button></div><canvas id="pair-qr" hidden></canvas><div id="answer-section"><label for="answer-code">对方返回的应答码</label><textarea id="answer-code" rows="3" placeholder="粘贴接收方返回的 PS1. 应答码"></textarea><button id="apply-answer" class="primary wide">完成配对 '+icon('arrow')+'</button></div><p class="subtle">仅交换连接信息，文件仍通过加密直连发送。请只向预期接收者提供配对码。</p></dialog>',
   '<div id="toast" class="toast" role="status" hidden></div>'
 ].join('');
+registerStatic(app);
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 let config: Config = { signalUrl: '', iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }], memoryLimitBytes: 268435456 };
@@ -44,8 +46,8 @@ let pairingKind: 'offer' | 'answer' = 'offer';
 let busy = false;
 let toastTimer: ReturnType<typeof setTimeout>;
 let originalHash = location.hash;
-function toast(message: string) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').hidden = true, 2600); }
-function notice(message: string) { $('notice').textContent = message; $('notice').hidden = false; }
+function toast(message: string) { setText($('toast'), message); $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').hidden = true, 2600); }
+function notice(message: string) { setText($('notice'), message); $('notice').hidden = false; }
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : String(error); }
 async function run(fn: () => Promise<void>) {
   try { await fn(); } catch (e) { if (e instanceof DOMException && e.name === 'AbortError') toast('已取消选择保存位置'); else notice(errorMessage(e)); }
@@ -56,11 +58,11 @@ function view(role: 'sender' | 'receiver') {
   $('send-tab').setAttribute('aria-selected', String(role === 'sender')); $('receive-tab').setAttribute('aria-selected', String(role === 'receiver'));
 }
 function status(title: string, detail?: string, mode = 'waiting') {
-  $('session-panel').hidden = false; $('status').textContent = title; $('status-dot').className = 'status-dot ' + mode;
-  if (detail) $('status-detail').textContent = detail;
+  $('session-panel').hidden = false; setText($('status'), title); $('status-dot').className = 'status-dot ' + mode;
+  if (detail) setText($('status-detail'), detail);
 }
 function fileMarkup(list: { name: string; size: number }[], removable = false) {
-  return list.map((f, i) => '<div class="file-row"><span class="file-symbol">'+icon('file')+'</span><div><strong>'+escapeHtml(f.name)+'</strong><small>'+bytes(f.size)+'</small></div>'+(removable ? '<button class="icon-button remove-file" data-index="'+i+'" aria-label="移除 '+escapeHtml(f.name)+'">'+icon('close')+'</button>' : '<span class="file-ready">待接收</span>')+'</div>').join('');
+  return list.map((f, i) => '<div class="file-row"><span class="file-symbol">'+icon('file')+'</span><div><strong>'+escapeHtml(f.name)+'</strong><small>'+bytes(f.size)+'</small></div>'+(removable ? '<button class="icon-button remove-file" data-index="'+i+'" aria-label="'+escapeHtml(t('移除 {name}', { name: f.name }))+'">'+icon('close')+'</button>' : '<span class="file-ready">'+t('待接收')+'</span>')+'</div>').join('');
 }
 function select(next: File[]) {
   if (busy) return;
@@ -71,7 +73,7 @@ function select(next: File[]) {
 }
 function renderFiles() {
   $('files').innerHTML = fileMarkup(files, true); $('drop-zone').classList.toggle('compact', files.length > 0);
-  $('selection-summary').textContent = files.length ? files.length + ' 个文件 · ' + bytes(files.reduce((n, f) => n + f.size, 0)) : '先选一个文件，就可以开始。';
+  setText($('selection-summary'), files.length ? '{count} 个文件 · {size}' : '先选一个文件，就可以开始。', { count: files.length, size: bytes(files.reduce((n, f) => n + f.size, 0)) });
   $<HTMLButtonElement>('start-send').disabled = !files.length || busy;
 }
 function setBusy(value: boolean) {
@@ -87,7 +89,7 @@ function reset() {
   $('share-box').hidden = true; $('progress-box').hidden = true; $('session-panel').hidden = true;
   $('notice').hidden = true; $('incoming-files').innerHTML = ''; $('downloads').innerHTML = '';
   $('accept-files').hidden = true; $('save-note').hidden = true;
-  $('cancel').textContent = '结束传输';
+  setText($('cancel'), '结束传输');
   $<HTMLButtonElement>('accept-files').disabled = false;
   $<HTMLDialogElement>('pair-dialog').close();
   history.replaceState(null, '', location.pathname + location.search);
@@ -101,33 +103,34 @@ function events(event: TransferEvent) {
     $('incoming-files').innerHTML = fileMarkup(manifest);
     $('accept-files').hidden = false; $('save-note').hidden = false;
     const supportsDisk = manifest.length === 1 ? typeof (window as any).showSaveFilePicker === 'function' : typeof (window as any).showDirectoryPicker === 'function';
-    $('save-note').textContent = supportsDisk ? '选择保存位置后开始传输。文件会写入磁盘，并在完成时校验。' : '当前浏览器将文件暂存在内存中，总计最多 ' + bytes(config.memoryLimitBytes) + '。完成后请点击保存。';
+    setText($('save-note'), supportsDisk ? '选择保存位置后开始传输。文件会写入磁盘，并在完成时校验。' : '当前浏览器将文件暂存在内存中，总计最多 {size}。完成后请点击保存。', { size: bytes(config.memoryLimitBytes) });
   } else if (event.type === 'started') {
     $('progress-box').hidden = false; $('share-box').hidden = true; $('accept-files').hidden = true;
     status('正在传输', '请保持页面打开，手机不要锁屏。', 'connected');
-    $('progress').setAttribute('value', '0'); $('percent').textContent = '0%';
+    $('progress').setAttribute('value', '0'); setText($('percent'), '0%');
   } else if (event.type === 'file') $('current-file').textContent = event.data;
-  else if (event.type === 'path') $('connection-path').textContent = event.data + ' · DTLS 加密';
+  else if (event.type === 'path') setText($('connection-path'), '{path} · DTLS 加密', { path: event.data });
   else if (event.type === 'progress') {
     const p = event.data; const percent = p.total ? Math.min(100, p.transferred / p.total * 100) : 0;
-    $<HTMLProgressElement>('progress').value = percent; $('percent').textContent = Math.floor(percent) + '%';
-    $('transferred').textContent = bytes(p.transferred) + ' / ' + bytes(p.total);
-    $('speed').textContent = bytes(p.speed) + '/s';
+    $<HTMLProgressElement>('progress').value = percent; setText($('percent'), Math.floor(percent) + '%');
+    setText($('transferred'), bytes(p.transferred) + ' / ' + bytes(p.total));
+    setText($('speed'), bytes(p.speed) + '/s');
     const seconds = p.speed > 0 ? Math.ceil((p.total - p.transferred) / p.speed) : 0;
-    $('remaining').textContent = seconds > 60 ? Math.ceil(seconds / 60) + ' 分钟' : seconds ? seconds + ' 秒' : '即将完成';
+    setText($('remaining'), seconds > 60 ? Math.ceil(seconds / 60) + ' 分钟' : seconds ? seconds + ' 秒' : '即将完成');
   } else if (event.type === 'download') {
     const a = document.createElement('a'); a.href = event.data.url; a.download = event.data.info.name;
-    a.className = 'download-file'; a.innerHTML = icon('down') + '<span>保存 '+escapeHtml(event.data.info.name)+'</span>'+icon('check');
+    a.className = 'download-file'; a.innerHTML = icon('down') + '<span></span>'+icon('check');
+    setText(a.querySelector('span')!, '保存 {name}', { name: event.data.info.name });
     $('downloads').append(a);
   } else if (event.type === 'done') {
     status('传输完成，原样送达。', transfer?.role === 'sender' ? '接收方已收到并校验全部文件。' : '全部文件通过 SHA-256 校验；若下方有保存按钮，请点击保存。', 'done');
-    $<HTMLProgressElement>('progress').value = 100; $('percent').textContent = '100%'; $('remaining').textContent = '完成';
-    $('cancel').textContent = '开始新的传输';
+    $<HTMLProgressElement>('progress').value = 100; setText($('percent'), '100%'); setText($('remaining'), '完成');
+    setText($('cancel'), '开始新的传输');
     signaling?.close(); signaling = undefined;
   } else if (event.type === 'error') {
     $('downloads').innerHTML = ''; $('accept-files').hidden = true;
     notice(event.data); status('传输未完成', '可以结束这次传输，重新配对后再试。', 'error');
-    signaling?.close(); signaling = undefined; $('cancel').textContent = '重新开始';
+    signaling?.close(); signaling = undefined; setText($('cancel'), '重新开始');
     $<HTMLDialogElement>('pair-dialog').close();
   }
 }
@@ -198,8 +201,8 @@ async function manualSender(t: Transfer) {
   const code = await packDescription(await t.offer());
   if (transfer !== t || t.stopped) return;
   pairingKind = 'offer'; $<HTMLTextAreaElement>('outgoing-code').value = code;
-  $('pair-instructions').textContent = '把配对码发给对方。对方在「接收文件」中粘贴后，会得到应答码，再把应答码返回这里。';
-  $('outgoing-label').textContent = '发给接收方的配对码'; $('answer-section').hidden = false;
+  setText($('pair-instructions'), '把配对码发给对方。对方在「接收文件」中粘贴后，会得到应答码，再把应答码返回这里。');
+  setText($('outgoing-label'), '发给接收方的配对码'); $('answer-section').hidden = false;
   $('pair-qr').hidden = true; $<HTMLTextAreaElement>('answer-code').value = '';
   $<HTMLDialogElement>('pair-dialog').showModal();
   status('等待手动配对', '没有自动配对服务时，双方交换配对码即可直连。');
@@ -211,8 +214,8 @@ async function manualReceiver(code: string) {
   const answer = await packDescription(await t.answer(description));
   if (transfer !== t || t.stopped) return;
   pairingKind = 'answer'; $<HTMLTextAreaElement>('outgoing-code').value = answer;
-  $('pair-instructions').textContent = '把下面的应答码复制给发送方。对方完成配对后，这里会显示文件列表。';
-  $('outgoing-label').textContent = '返回给发送方的应答码'; $('answer-section').hidden = true; $('pair-qr').hidden = true;
+  setText($('pair-instructions'), '把下面的应答码复制给发送方。对方完成配对后，这里会显示文件列表。');
+  setText($('outgoing-label'), '返回给发送方的应答码'); $('answer-section').hidden = true; $('pair-qr').hidden = true;
   $<HTMLDialogElement>('pair-dialog').showModal(); status('等待发送方完成配对', '请将应答码返回给发送方。');
 }
 async function receiveInput(input: string) {
@@ -227,6 +230,10 @@ async function receiveInput(input: string) {
     else await automaticReceiver(params);
   }
 }
+$('language-toggle').onclick = () => {
+  toggleLanguage(); setBusy(busy);
+  if (transfer?.manifest.length && transfer.role === 'receiver') $('incoming-files').innerHTML = fileMarkup(transfer.manifest);
+};
 $('send-tab').onclick = () => { if (busy && transfer?.role !== 'sender') { toast('请先结束当前传输'); return; } view('sender'); };
 $('receive-tab').onclick = () => { if (busy && transfer?.role !== 'receiver') { toast('请先结束当前传输'); return; } view('receiver'); };
 $('drop-zone').onclick = () => $<HTMLInputElement>('file-input').click();
