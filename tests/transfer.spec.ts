@@ -1,6 +1,6 @@
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import { createHash } from 'node:crypto';
-import { readFile, mkdir } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 async function setup(context: BrowserContext, signal = true) {
   const signalUrl = signal ? (process.env.TEST_SIGNAL_URL || 'http://127.0.0.1:8787') : '';
@@ -127,7 +127,7 @@ test('cancelling while room creation is pending does not restore the session', a
     await expect(page.locator('#session-panel')).toBeHidden();
   } finally { release(); }
 });
-test('crypto envelopes reject tampering; manifest rejects invalid sizes; layout fits mobile', async ({ page, context }) => {
+test('crypto envelopes reject tampering; manifest rejects invalid sizes; layout fits mobile', async ({ page, context }, info) => {
   await setup(context, false);
   await page.goto('./');
   const result = await page.evaluate(async () => {
@@ -142,11 +142,10 @@ test('crypto envelopes reject tampering; manifest rejects invalid sizes; layout 
     return { opened, tampered, invalid, safe: p.safeName('../x') };
   });
   expect(result.opened.value).toBe('test'); expect(result.tampered).toBe(true); expect(result.invalid).toBe(true); expect(result.safe).not.toContain('/');
-  await mkdir('../../work/qa', { recursive: true });
   await page.setViewportSize({ width: 1280, height: 1000 });
-  await page.screenshot({ path: '../../work/qa/pizza-send-desktop.png', fullPage: true });
+  await page.screenshot({ path: info.outputPath('pizza-send-desktop.png'), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.screenshot({ path: '../../work/qa/pizza-send-mobile.png', fullPage: true });
+  await page.screenshot({ path: info.outputPath('pizza-send-mobile.png'), fullPage: true });
 });
 

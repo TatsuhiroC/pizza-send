@@ -11,7 +11,21 @@ const hex = (b: Uint8Array) => Array.from(b, n => n.toString(16).padStart(2, '0'
 export const randomToken = () => hex(crypto.getRandomValues(new Uint8Array(32)));
 export const bytes = (n: number) => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : n < 1073741824 ? (n / 1048576).toFixed(1) + ' MB' : (n / 1073741824).toFixed(2) + ' GB';
 export function safeName(name: string): string {
-  return name.replace(/[\\/\u0000-\u001f\u007f]/g, '_').replace(/^\.+$/, '_').slice(0, 180) || 'received-file';
+  let clean = name.replace(/[\\/<>:"|?*\u0000-\u001f\u007f]/g, '_').replace(/[. ]+$/, '');
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(clean)) clean = '_' + clean;
+  const dot = clean.lastIndexOf('.');
+  const extension = dot > 0 && clean.length - dot <= 20 ? clean.slice(dot) : '';
+  const stem = extension ? clean.slice(0, dot) : clean;
+  const encoder = new TextEncoder();
+  let length = encoder.encode(extension).length, result = '';
+  // Bound both UTF-16 and UTF-8 lengths, reserving space for collision prefixes.
+  // Iterate code points so shortening cannot split an emoji surrogate pair.
+  for (const character of stem) {
+    const size = encoder.encode(character).length;
+    if (result.length + character.length + extension.length > 180 || length + size > 240) break;
+    result += character; length += size;
+  }
+  return result + extension || 'received-file';
 }
 export function validateManifest(value: unknown): FileInfo[] {
   if (!Array.isArray(value) || !value.length || value.length > 100) throw Error('文件列表无效（最多 100 个文件）');
@@ -59,7 +73,7 @@ export async function unpackDescription(code: string, expected: 'offer' | 'answe
 }
 export async function signalKey(secret: string): Promise<CryptoKey> {
   if (!/^[a-f0-9]{64}$/.test(secret)) throw Error('分享链接不完整');
-  return crypto.subtle.importKey('raw', fromBase64(toBase64(Uint8Array.from(secret.match(/../g)!, n => parseInt(n, 16)))), 'AES-GCM', false, ['encrypt', 'decrypt']);
+  return crypto.subtle.importKey('raw', Uint8Array.from(secret.match(/../g)!, n => parseInt(n, 16)), 'AES-GCM', false, ['encrypt', 'decrypt']);
 }
 export async function seal(key: CryptoKey, payload: unknown): Promise<string> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -114,6 +128,7 @@ export class Transfer {
   private waiters = new Set<() => void>();
   private queue = Promise.resolve();
   private receivingQueuedBytes = 0;
+  private receivingQueuedMessages = 0;
   private connectTimer?: ReturnType<typeof setTimeout>;
   private disconnectedTimer?: ReturnType<typeof setTimeout>;
   private fileConfirmed = -1;
@@ -216,11 +231,15 @@ export class Transfer {
       }, 2000);
     };
     channel.onmessage = event => {
+      if (this.stopped || generation !== this.generation) return;
       this.lastSeen = Date.now();
-      const size = event.data instanceof ArrayBuffer ? event.data.byteLength : 0;
-      if (size > 65536 || this.receivingQueuedBytes + size > 8 * 1048576) { this.fail('接收队列超出安全限制'); return; }
-      this.receivingQueuedBytes += size;
-      this.queue = this.queue.then(() => this.handle(event.data, generation)).catch(e => this.fail(e.message)).finally(() => { this.receivingQueuedBytes -= size; });
+      const binary = event.data instanceof ArrayBuffer;
+      const size = binary ? event.data.byteLength : event.data.length * 2;
+      if ((binary ? size : event.data.length) > 65536 || this.receivingQueuedBytes + size > 8 * 1048576 || this.receivingQueuedMessages >= 4096) { this.fail('接收队列超出安全限制'); return; }
+      this.receivingQueuedBytes += size; this.receivingQueuedMessages++;
+      this.queue = this.queue.then(() => this.handle(event.data, generation)).catch(e => this.fail(e.message)).finally(() => {
+        this.receivingQueuedBytes -= size; this.receivingQueuedMessages--;
+      });
     };
     channel.onclose = () => { this.requestRecovery(); this.wake(); };
     channel.onerror = () => this.requestRecovery();
@@ -236,7 +255,7 @@ export class Transfer {
   }
   private reply(message: unknown, generation: number) {
     // A receipt can be lost while switching networks. The next resume handshake replaces it.
-    if (generation === this.generation && this.channel?.readyState === 'open') {
+    if (!this.stopped && generation === this.generation && this.channel?.readyState === 'open') {
       try { this.control(message); } catch { this.requestRecovery(); }
     }
   }
@@ -274,6 +293,7 @@ export class Transfer {
       incoming.hash.update(chunk);
       if (incoming.writer) await incoming.writer.write(data);
       else incoming.parts.push(chunk);
+      if (this.stopped) return;
       incoming.received += data.byteLength; this.received += data.byteLength; incoming.ack += data.byteLength;
       if (incoming.ack >= 256 * 1024 || incoming.received === incoming.info.size) {
         this.reply({ type: 'ack', bytes: this.received }, generation); incoming.ack = 0;
@@ -317,6 +337,7 @@ export class Transfer {
       if (!this.accepted || !info || message.id !== info.id || offset !== (this.incoming?.received || 0)) throw Error('文件顺序无效');
       if (!this.incoming) {
         const writer = this.handles[info.id] ? await this.handles[info.id].createWritable() : undefined;
+        if (this.stopped) { await writer?.abort().catch(() => {}); return; }
         this.incoming = { info, writer, received: 0, parts: [], hash: sha256.create(), ack: 0 };
       }
       this.emit({ type: 'file', data: info.name });
@@ -329,6 +350,7 @@ export class Transfer {
         this.outputs.push({ info: current.info, url });
         this.emit({ type: 'download', data: { info: current.info, url } });
       }
+      if (this.stopped) return;
       this.incoming = undefined; this.receivedFiles++;
       this.reply({ type: 'file-saved', id: message.id }, generation);
     } else if (message.type === 'file-saved' && this.role === 'sender') {
@@ -348,20 +370,26 @@ export class Transfer {
     if (this.accepted || !this.manifest.length) return;
     const picker = window as PickerWindow;
     const total = this.manifest.reduce((n, f) => n + f.size, 0);
+    const handles: FileSystemFileHandle[] = [];
     if (picker.showSaveFilePicker && this.manifest.length === 1) {
-      this.handles = [await picker.showSaveFilePicker({ suggestedName: this.manifest[0].name })];
+      handles.push(await picker.showSaveFilePicker({ suggestedName: this.manifest[0].name }));
     } else if (picker.showDirectoryPicker && this.manifest.length > 1) {
       const directory = await picker.showDirectoryPicker({ mode: 'readwrite' });
       const used = new Set<string>();
+      // Avoid overwriting existing files or colliding with directories, including
+      // on case-insensitive filesystems. Commit handles only after a full selection.
+      for await (const name of directory.keys()) used.add(name.toLowerCase());
       for (const info of this.manifest) {
         let name = info.name;
-        while (used.has(name)) name = info.id + '-' + name;
-        used.add(name); this.handles.push(await directory.getFileHandle(name, { create: true }));
+        let suffix = 0;
+        while (used.has(name.toLowerCase())) name = ++suffix + '-' + info.name;
+        used.add(name.toLowerCase()); handles.push(await directory.getFileHandle(name, { create: true }));
       }
     } else if (total > this.config.memoryLimitBytes) {
       throw Error('这个浏览器暂不支持大文件流式保存。请使用桌面 Chrome 或 Edge；当前接收上限为 ' + bytes(this.config.memoryLimitBytes));
     }
     if (this.stopped) return;
+    this.handles = handles;
     this.accepted = true; this.started = performance.now();
     this.emit({ type: 'started' }); this.control({ type: 'accept' });
   }
@@ -518,7 +546,9 @@ export class Signaling {
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => { socket.close(); reject(Error('配对服务连接超时')); }, 10000);
         socket.onopen = () => {
-          clearTimeout(timeout); this.failures = 0;
+          clearTimeout(timeout);
+          if (this.closed || socket !== this.socket) { socket.close(); reject(Error('配对服务已断开')); return; }
+          this.failures = 0;
           clearInterval(this.heartbeat);
           this.heartbeat = setInterval(() => {
             if (Date.now() - this.lastSeen > 30000) { socket.close(); return; }
@@ -529,9 +559,10 @@ export class Signaling {
         };
         socket.onerror = () => { clearTimeout(timeout); reject(Error('无法连接配对服务')); };
         socket.onclose = () => {
-          clearTimeout(timeout); clearInterval(this.heartbeat);
+          clearTimeout(timeout);
           reject(Error('配对服务已断开'));
           if (socket !== this.socket || this.closed) return;
+          clearInterval(this.heartbeat);
           this.onError('配对服务已断开；已建立的文件直连可以继续');
           this.scheduleRetry();
         };
@@ -542,6 +573,7 @@ export class Signaling {
   }
   private scheduleRetry() {
     clearTimeout(this.retry);
+    if (this.closed) return;
     this.retry = setTimeout(() => {
       if (!this.closed) void this.open().catch(() => this.scheduleRetry());
     }, Math.min(1000 * 2 ** this.failures++, 8000));
@@ -568,7 +600,7 @@ export class Signaling {
     this.closed = true; clearTimeout(this.retry); clearInterval(this.heartbeat);
     if (this.socket) {
       if (this.socket.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify({ type: this.role === 'sender' ? 'end' : 'leave' }));
-      this.socket.onclose = null; this.socket.onerror = null; this.socket.onmessage = null; this.socket.close();
+      this.socket.onopen = null; this.socket.onclose = null; this.socket.onerror = null; this.socket.onmessage = null; this.socket.close();
     }
   }
 }

@@ -49,7 +49,8 @@ let shareLink = '';
 let pairingKind: 'offer' | 'answer' = 'offer';
 let busy = false;
 let toastTimer: ReturnType<typeof setTimeout>;
-let originalHash = location.hash;
+const originalHash = location.hash;
+let sessionRevision = 0;
 let scannerSession = 0;
 const scanner = new CameraScanner($<HTMLVideoElement>('scan-video'), scannedCode, message => scanMessage(message, true));
 function scanMessage(message: string, retry = false) {
@@ -67,8 +68,14 @@ async function openScanner() {
   await scanner.start();
 }
 async function connectValue(input: string) {
-  try { await receiveInput(input); }
-  catch (e) { transfer?.close(false); signaling?.close(); transfer = undefined; setBusy(false); throw e; }
+  if (busy) return;
+  const revision = ++sessionRevision;
+  setBusy(true);
+  try { await receiveInput(input, revision); }
+  catch (e) {
+    if (revision !== sessionRevision) return;
+    transfer?.close(false); signaling?.close(); signaling = undefined; transfer = undefined; setBusy(false); throw e;
+  }
 }
 async function scannedCode(text: string): Promise<boolean> {
   const session = scannerSession, value = text.trim();
@@ -129,6 +136,7 @@ function setBusy(value: boolean) {
   $<HTMLButtonElement>('open-scanner').disabled = value;
 }
 function reset() {
+  sessionRevision++;
   closeScanner();
   signaling?.close(); signaling = undefined;
   transfer?.close(); transfer = undefined;
@@ -196,7 +204,7 @@ function createTransfer(role: 'sender' | 'receiver') {
   return transfer;
 }
 function endpoint() {
-  const saved = localStorage.getItem('pizza-send-signal');
+  const saved = readPreference('pizza-send-signal');
   const value = saved !== null ? saved : config.signalUrl;
   if (!value) return '';
   const url = new URL(value);
@@ -228,10 +236,11 @@ async function automaticSender(t: Transfer) {
   $<HTMLInputElement>('share-link').value = shareLink; $('share-box').hidden = false;
   status('等待接收方', '把分享链接发给对方。传输期间请保持本页打开。');
 }
-async function automaticReceiver(fragment: string) {
+async function automaticReceiver(fragment: string, revision: number) {
   const api = endpoint();
   if (!api) throw Error('本站尚未配置自动配对服务，请使用手动配对码');
   const { room, receiver: token, secret } = await parseShare(fragment);
+  if (revision !== sessionRevision) return;
   const t = createTransfer('receiver');
   status('正在连接发送方', '确认连接后，会显示对方分享的文件。');
   const key = await signalKey(secret);
@@ -253,8 +262,9 @@ async function manualSender(t: Transfer) {
   $<HTMLDialogElement>('pair-dialog').showModal();
   status('等待手动配对', '没有自动配对服务时，双方交换配对码即可直连。');
 }
-async function manualReceiver(code: string) {
+async function manualReceiver(code: string, revision: number) {
   const description = await unpackDescription(code.trim(), 'offer');
+  if (revision !== sessionRevision) return;
   const t = createTransfer('receiver');
   status('正在准备应答码', '正在建立连接信息，通常需要几秒钟。');
   const answer = await packDescription(await t.answer(description));
@@ -264,16 +274,16 @@ async function manualReceiver(code: string) {
   setText($('outgoing-label'), '返回给发送方的应答码'); $('answer-section').hidden = true; $('pair-qr').hidden = true;
   $<HTMLDialogElement>('pair-dialog').showModal(); status('等待发送方完成配对', '请将应答码返回给发送方。');
 }
-async function receiveInput(input: string) {
-  if (busy) return;
+async function receiveInput(input: string, revision: number) {
   const value = input.trim();
-  if (value.startsWith('PS1.')) await manualReceiver(value);
+  if (value.startsWith('PS1.')) await manualReceiver(value, revision);
   else {
     let url: URL;
     try { url = new URL(value); } catch { throw Error('请粘贴完整的分享链接或 PS1. 配对码'); }
     const params = new URLSearchParams(url.hash.slice(1));
-    if (params.has('offer')) await manualReceiver(params.get('offer')!);
-    else await automaticReceiver(url.hash);
+    if (!isSharingURL(url, new URL(location.href))) throw Error('请粘贴本站的 PizzaSend 分享链接或 PS1. 配对码');
+    if (params.has('offer')) await manualReceiver(params.get('offer')!, revision);
+    else await automaticReceiver(url.hash, revision);
   }
 }
 $('language-toggle').onclick = () => {
@@ -292,6 +302,7 @@ window.addEventListener('dragover', event => event.preventDefault());
 window.addEventListener('drop', event => event.preventDefault());
 $('start-send').onclick = () => run(async () => {
   if (busy || !files.length) return;
+  sessionRevision++;
   const t = createTransfer('sender'); t.prepare(files);
   status('正在创建传输', '正在准备连接，请稍候。');
   try { if (endpoint()) await automaticSender(t); else await manualSender(t); }
@@ -345,15 +356,23 @@ $('pair-qr-button').onclick = () => run(async () => {
   }
 });
 $('apply-answer').onclick = () => run(async () => {
+  const t = transfer;
+  if (!t || t.role !== 'sender') throw Error('请先创建一次发送');
   const answer = await unpackDescription($<HTMLTextAreaElement>('answer-code').value.trim(), 'answer');
-  if (!transfer || transfer.role !== 'sender') throw Error('请先创建一次发送');
-  await transfer.finish(answer); status('正在建立加密直连', '配对信息已交换，请稍候。'); $<HTMLDialogElement>('pair-dialog').close();
+  if (transfer !== t || t.stopped) return;
+  await t.finish(answer);
+  if (transfer !== t || t.stopped) return;
+  status('正在建立加密直连', '配对信息已交换，请稍候。'); $<HTMLDialogElement>('pair-dialog').close();
 });
 $('save-settings').onclick = () => run(async () => {
   if (busy) throw Error('请先结束当前传输，再修改连接设置');
   const url = $<HTMLInputElement>('signal-url').value.trim();
   const stun = $<HTMLInputElement>('stun-url').value.trim();
-  if (url) { const parsed = new URL(url); if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(parsed.hostname))) throw Error('请使用 HTTPS 配对服务地址'); }
+  if (url) {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(parsed.hostname))) throw Error('请使用 HTTPS 配对服务地址');
+    if (parsed.username || parsed.password || parsed.search || parsed.hash) throw Error('配对地址不能包含凭据或额外参数');
+  }
   if (stun && !/^stuns?:[^\s]+$/.test(stun)) throw Error('请输入有效的 stun: 或 stuns: 地址');
   localStorage.setItem('pizza-send-signal', url); localStorage.setItem('pizza-send-stun', stun);
   config.iceServers = stun ? [{ urls: stun }] : [];
@@ -363,23 +382,24 @@ window.addEventListener('beforeunload', event => {
   if (transfer && !transfer.completed && !transfer.stopped) { event.preventDefault(); event.returnValue = ''; }
 });
 window.addEventListener('pagehide', () => { closeScanner(); signaling?.close(); transfer?.close(false); });
+function readPreference(key: string) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
 async function init() {
   try {
     const response = await fetch('./app.config.json', { cache: 'no-store' });
     if (response.ok) config = { ...config, ...await response.json() };
   } catch {}
-  const stun = localStorage.getItem('pizza-send-stun');
+  const stun = readPreference('pizza-send-stun');
   if (stun !== null) config.iceServers = stun ? [{ urls: stun }] : [];
-  $<HTMLInputElement>('signal-url').value = localStorage.getItem('pizza-send-signal') ?? config.signalUrl;
+  $<HTMLInputElement>('signal-url').value = readPreference('pizza-send-signal') ?? config.signalUrl;
   $<HTMLInputElement>('stun-url').value = String(config.iceServers[0]?.urls || '');
   if (!('RTCPeerConnection' in window) || !crypto.subtle) { notice('请在支持 WebRTC 的现代浏览器中，通过 HTTPS 打开本站。'); $<HTMLButtonElement>('drop-zone').disabled = true; return; }
   const params = new URLSearchParams(originalHash.slice(1));
-  if (originalHash.startsWith('#2.') || params.has('r') || params.has('offer')) {
+  if (!busy && sessionRevision === 0 && (originalHash.startsWith('#2.') || params.has('r') || params.has('offer'))) {
     view('receiver');
-    await run(async () => {
-      try { if (params.has('offer')) await manualReceiver(params.get('offer')!); else await automaticReceiver(originalHash); }
-      catch (e) { transfer?.close(false); signaling?.close(); transfer = undefined; setBusy(false); throw e; }
-    });
+    const url = new URL(location.href); url.hash = originalHash;
+    await run(() => connectValue(url.toString()));
   }
 }
 void init();

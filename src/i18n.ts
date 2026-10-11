@@ -119,13 +119,11 @@ const messages: Record<string, string> = {
   '可以结束后使用手动配对，或检查连接设置。': 'End this session and use manual pairing, or check the connection settings.',
   '配对服务暂不可用（{code}），请使用手动配对': 'Pairing service unavailable ({code}). Use manual pairing.',
   '配对服务返回信息无效': 'The pairing service returned invalid information',
-  '正在连接接收方': 'Connecting to receiver', '双方正在建立加密直连。': 'Establishing an encrypted direct connection.',
-  '接收方已离开，请重新创建传输。': 'The receiver has left. Start a new transfer.',
   '把分享链接发给对方。传输期间请保持本页打开。': 'Send the share link to the receiver. Keep this page open during the transfer.',
   '本站尚未配置自动配对服务，请使用手动配对码': 'Automatic pairing is not configured. Use manual pairing codes.',
   '分享链接不完整': 'The share link is incomplete',
+  '请粘贴本站的 PizzaSend 分享链接或 PS1. 配对码': 'Paste a PizzaSend share link from this site or a PS1. pairing code',
   '正在连接发送方': 'Connecting to sender', '确认连接后，会显示对方分享的文件。': 'The shared files will appear once connected.',
-  '发送方已结束分享。': 'The sender has ended this session.',
   '正在准备配对码': 'Preparing pairing code', '正在收集直连信息，通常需要几秒钟。': 'Gathering connection information. This usually takes a few seconds.',
   '把配对码发给对方。对方在「接收文件」中粘贴后，会得到应答码，再把应答码返回这里。': 'Send this code to the receiver. They paste it under “Receive files” and return their answer code for you to paste below.',
   '发给接收方的配对码': 'Pairing code for the receiver',
@@ -144,18 +142,16 @@ const messages: Record<string, string> = {
   '请在支持 WebRTC 的现代浏览器中，通过 HTTPS 打开本站。': 'Open this site over HTTPS in a modern browser that supports WebRTC.',
   '文件列表无效（最多 100 个文件）': 'Invalid file list (up to 100 files)', '文件信息无效': 'Invalid file information', '文件总大小超出支持范围': 'The total file size exceeds the supported range',
   '这不是有效的 PizzaSend 配对码': 'This is not a valid PizzaSend pairing code', '配对信息过大': 'Pairing information is too large', '配对码类型不正确': 'Incorrect pairing code type',
-  '无法建立直连。请尝试同一 Wi-Fi 或更换网络；首版没有中继兜底。': 'Unable to connect directly. Try the same Wi-Fi or another network. This release has no relay fallback.',
   '连接已中断，请重新创建传输。': 'Connection interrupted. Start a new transfer.', '设备直连': 'Device-to-device', '网络直连': 'Direct network connection',
   '接收队列超出安全限制': 'The receive queue exceeds its safety limit', '对方已结束传输，或页面已关闭。': 'The other device ended the transfer or closed its page.',
-  '传输连接出现错误，请重新配对。': 'Transfer connection error. Pair again.', '连接已关闭': 'Connection closed', '传输已结束': 'Transfer ended', '对方长时间没有响应，请重新传输': 'The other device is not responding. Start a new transfer.',
-  '接收到不符合文件信息的数据': 'Received data does not match the file information', '控制信息过大': 'Control message is too large', '重复的文件列表': 'Duplicate file list', '重复的下载请求': 'Duplicate download request',
+  '连接已关闭': 'Connection closed', '对方长时间没有响应，请重新传输': 'The other device is not responding. Start a new transfer.',
+  '接收到不符合文件信息的数据': 'Received data does not match the file information', '控制信息过大': 'Control message is too large', '重复的下载请求': 'Duplicate download request',
   '接收确认信息无效': 'Invalid receipt acknowledgement', '文件顺序无效': 'Invalid file order', '文件完整性校验失败，请重新传输': 'File integrity check failed. Send the file again.',
   '文件保存确认无效': 'Invalid save acknowledgement', '文件传输未完整结束': 'The file transfer has not finished', '文件尚未保存完整': 'Files have not been fully saved', '对方已取消传输。': 'The other device cancelled the transfer.', '收到不支持的传输消息': 'Unsupported transfer message',
   '这个浏览器暂不支持大文件流式保存。请使用桌面 Chrome 或 Edge；当前接收上限为 {size}': 'This browser cannot stream large files to disk. Use desktop Chrome or Edge. The current receive limit is {size}.',
-  '对方浏览器的数据通道限制过小': 'The other browser’s data channel limit is too small', '传输已取消': 'Transfer cancelled',
-  '连接等待超时。请确认对方页面仍然打开，或尝试同一 Wi-Fi。': 'Connection timed out. Make sure the other page is open, or try the same Wi-Fi.',
-  '配对服务连接超时': 'Pairing service connection timed out', '无法连接配对服务': 'Unable to connect to the pairing service', '配对服务拒绝连接': 'The pairing service refused the connection',
-  '重复或无效的配对消息': 'Duplicate or invalid pairing message', '配对服务连接异常': 'Pairing service connection error', '配对服务已断开；已建立的文件直连可以继续': 'Pairing service disconnected. An established direct transfer can continue.', '配对服务已断开': 'Pairing service disconnected'
+  '对方浏览器的数据通道限制过小': 'The other browser’s data channel limit is too small',
+  '配对服务连接超时': 'Pairing service connection timed out', '无法连接配对服务': 'Unable to connect to the pairing service',
+  '重复或无效的配对消息': 'Duplicate or invalid pairing message', '配对服务已断开；已建立的文件直连可以继续': 'Pairing service disconnected. An established direct transfer can continue.', '配对服务已断开': 'Pairing service disconnected'
 };
 let language: Language = 'zh';
 try { if (localStorage.getItem('pizza-send-language') === 'en') language = 'en'; } catch {}

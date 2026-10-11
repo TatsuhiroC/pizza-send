@@ -1,7 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { mkdir } from 'node:fs/promises';
 
-test('compact language switch translates the full page, preserves files and remembers the choice', async ({ page }) => {
+test('compact language switch translates the full page, preserves files and remembers the choice', async ({ page }, info) => {
   await page.goto('./');
   const toggle = page.locator('#language-toggle');
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
@@ -28,15 +27,14 @@ test('compact language switch translates the full page, preserves files and reme
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
   await expect(page).toHaveTitle('PizzaSend · File transfer');
-  await mkdir('../../work/qa', { recursive: true });
   await page.setViewportSize({ width: 1280, height: 1000 });
-  await page.screenshot({ path: '../../work/qa/pizza-send-english.png', fullPage: true });
+  await page.screenshot({ path: info.outputPath('pizza-send-english.png'), fullPage: true });
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 844 });
     const bounds = await toggle.boundingBox();
     expect(bounds!.width).toBeLessThanOrEqual(70);
     expect(bounds!.height).toBeLessThanOrEqual(32);
-    await page.screenshot({ path: `../../work/qa/pizza-send-english-${width}.png` });
+    await page.screenshot({ path: info.outputPath(`pizza-send-english-${width}.png`) });
     const overflow = await page.evaluate(() => Array.from(document.querySelectorAll('*')).filter(e => e.getBoundingClientRect().right > innerWidth + 1).map(e => ({ tag: e.tagName, id: e.id, class: e.className, right: e.getBoundingClientRect().right })));
     expect(overflow).toEqual([]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

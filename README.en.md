@@ -17,6 +17,7 @@ Choose files → Create a transfer → Share the link or QR code → The recipie
 - 32 KiB chunks, with flow control based on both the send buffer and receiver acknowledgments. Progress updates reflect what the receiver has acknowledged.
 - Incremental SHA-256 verification; a file is marked complete only after its integrity has been verified.
 - Stream files directly to disk after choosing a file or folder in desktop Chrome / Edge. Browsers without this API use an in-memory buffer, limited to 256 MiB in total.
+- Folder reception avoids existing file and directory names. Retrying a failed save-location selection uses only the newly selected locations.
 - Automatic pairing incrementally exchanges connection addresses (Trickle ICE), including late candidates, and distinguishes sender availability, direct-path discovery, occupied links, and expired sessions.
 - Automatic pairing reconnects after network changes and resumes from the receiver’s confirmed position, preserving verification and the save location. Both pages must stay open.
 - Manual pairing by copying connection codes, without a signaling service. Automatic reconnection is not supported in manual mode.
