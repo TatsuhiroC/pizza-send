@@ -6,7 +6,7 @@ const messages: Record<string, string> = {
   '好东西，直接分享。': 'Good things. Shared directly.',
   '文件送到，': 'Send files.',
   '热乎刚好。': 'Fresh & direct.',
-  '不用安装，不用注册。': 'No installs. No sign-ups.',
+  '不用安装，不用注册。': 'No installs. No sign-ups. ',
   '打开网页，把文件直接送到另一台设备。': 'Open a page. Send files straight to another device.',
   '文件传输': 'File transfer', '传输角色': 'Transfer role',
   '发送文件': 'Send files', '接收文件': 'Receive files', '加密直传': 'Encrypted',
