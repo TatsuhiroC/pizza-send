@@ -16,7 +16,7 @@ async function setup(context: BrowserContext, signal = true) {
   }, { signalUrl });
 }
 async function automatic(sender: Page, receiver: Page, payload: { name: string; mimeType: string; buffer: Buffer }[]) {
-  await sender.goto('/');
+  await sender.goto('./');
   await sender.locator('#file-input').setInputFiles(payload);
   await sender.locator('#start-send').click();
   await expect(sender.locator('#share-box')).toBeVisible();
@@ -62,12 +62,12 @@ test('manual pairing works without signaling', async ({ page, context }) => {
   await setup(context, false);
   const receiver = await context.newPage();
   const buffer = Buffer.from('manual connection, no signal server');
-  await page.goto('/');
+  await page.goto('./');
   await page.locator('#file-input').setInputFiles({ name: 'manual.txt', mimeType: 'text/plain', buffer });
   await page.locator('#start-send').click();
   await expect(page.locator('#pair-dialog')).toBeVisible();
   const offer = await page.locator('#outgoing-code').inputValue();
-  await receiver.goto('/'); await receiver.locator('#receive-tab').click();
+  await receiver.goto('./'); await receiver.locator('#receive-tab').click();
   await receiver.locator('#receive-code').fill(offer); await receiver.locator('#connect-receive').click();
   await expect(receiver.locator('#pair-dialog')).toBeVisible();
   const answer = await receiver.locator('#outgoing-code').inputValue();
@@ -115,7 +115,7 @@ test('cancelling while room creation is pending does not restore the session', a
     await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ room: 'a'.repeat(64), sender: 'b'.repeat(64), receiver: 'c'.repeat(64) }), headers: { 'access-control-allow-origin': 'http://127.0.0.1:5173' } });
   });
   try {
-    await page.goto('/');
+    await page.goto('./');
     await page.locator('#file-input').setInputFiles({ name: 'cancel.txt', mimeType: 'text/plain', buffer: Buffer.from('cancel') });
     await page.locator('#start-send').evaluate(button => (button as HTMLButtonElement).click());
     await expect.poll(() => requested, { timeout: 5000 }).toBe(true);
@@ -129,7 +129,7 @@ test('cancelling while room creation is pending does not restore the session', a
 });
 test('crypto envelopes reject tampering; manifest rejects invalid sizes; layout fits mobile', async ({ page, context }) => {
   await setup(context, false);
-  await page.goto('/');
+  await page.goto('./');
   const result = await page.evaluate(async () => {
     const p = await import('/src/protocol.ts');
     const key = await p.signalKey(p.randomToken());

@@ -47,7 +47,7 @@ for (const megabytes of [200, 1024]) {
       } });
     });
     try {
-      await page.goto('/');
+      await page.goto('./');
       await page.locator('#file-input').setInputFiles(path);
       await page.locator('#start-send').click();
       await expect(page.locator('#share-box')).toBeVisible();
