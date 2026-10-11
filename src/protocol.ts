@@ -85,6 +85,15 @@ export class Transfer {
   completed = false;
   recovering = false;
   private recovery?: () => void;
+  private candidate?: (candidate: RTCIceCandidateInit | null) => void;
+  get hasAccepted() { return this.accepted; }
+  pairingStage(data: string) { if (!this.opened && !this.stopped) this.emit({ type: 'pairing', data }); }
+  waitForReceiver() {
+    this.opened = false; this.recovering = false;
+    clearTimeout(this.recoveryTimer);
+    this.pairingStage('等待接收方');
+  }
+  enableCandidates(callback: (candidate: RTCIceCandidateInit | null) => void) { this.candidate = callback; }
   private generation = 0;
   private resumedGeneration = -1;
   private opened = false;
@@ -119,6 +128,9 @@ export class Transfer {
   }
   private createPeer() {
     const pc = new RTCPeerConnection({ iceServers: this.config.iceServers });
+    pc.onicecandidate = event => {
+      if (pc === this.pc && !this.stopped) this.candidate?.(event.candidate?.toJSON() ?? null);
+    };
     pc.onconnectionstatechange = () => {
       if (pc !== this.pc || this.stopped) return;
       const state = pc.connectionState;
@@ -149,12 +161,18 @@ export class Transfer {
       this.recoveryTimer = setTimeout(() => this.fail('暂时无法恢复直连，已等待两分钟。请检查双方网络，或重新创建传输。'), 120000);
     }
   }
-  async replaceTransport() {
+  private transportQueue = Promise.resolve();
+  replaceTransport() {
+    const task = this.transportQueue.then(() => this.replaceTransportNow());
+    this.transportQueue = task.catch(() => {});
+    return task;
+  }
+  private async replaceTransportNow() {
     this.generation++;
     clearTimeout(this.connectTimer); clearTimeout(this.disconnectedTimer); clearInterval(this.heartbeat);
     const channel = this.channel;
     if (channel) channel.onclose = channel.onerror = channel.onmessage = channel.onopen = channel.onbufferedamountlow = null;
-    this.pc.onconnectionstatechange = null; this.pc.ondatachannel = null;
+    this.pc.onconnectionstatechange = null; this.pc.ondatachannel = null; this.pc.onicecandidate = null;
     channel?.close(); this.pc.close(); this.channel = undefined; this.wake();
     // Finish writes already received on the old connection before reporting the offset.
     await this.queue;
@@ -388,22 +406,24 @@ export class Transfer {
     }
     this.control({ type: 'done' });
   }
-  async offer(): Promise<RTCSessionDescriptionInit> {
+  async offer(trickle = false): Promise<RTCSessionDescriptionInit> {
     await this.pc.setLocalDescription(await this.pc.createOffer());
-    await this.gather(); this.startTimeout();
+    if (!trickle) await this.gather();
+    this.startTimeout();
     return this.pc.localDescription!.toJSON();
   }
-  async answer(offer: RTCSessionDescriptionInit): Promise<RTCSessionDescriptionInit> {
+  async answer(offer: RTCSessionDescriptionInit, trickle = false): Promise<RTCSessionDescriptionInit> {
     await this.pc.setRemoteDescription(offer);
     await this.pc.setLocalDescription(await this.pc.createAnswer());
-    await this.gather(); this.startTimeout();
+    if (!trickle) await this.gather();
+    this.startTimeout();
     return this.pc.localDescription!.toJSON();
   }
   async finish(answer: RTCSessionDescriptionInit) { await this.pc.setRemoteDescription(answer); }
   private startTimeout() {
     if (this.channel?.readyState === 'open') return;
     clearTimeout(this.connectTimer);
-    this.connectTimer = setTimeout(() => this.fail('连接等待超时。请确认对方页面仍然打开，或尝试同一 Wi-Fi。'), 90000);
+    this.connectTimer = setTimeout(() => this.fail('未能建立直连。请让手机保持在发送页面，并检查 VPN 是否允许本地网络和 WebRTC；可先关闭双方 VPN 再试。'), 90000);
   }
   private async gather() {
     if (this.pc.iceGatheringState === 'complete') return;
@@ -419,7 +439,7 @@ export class Transfer {
     this.emit({ type: 'error', data: message }); this.close(false);
   }
   close(notify = true) {
-    if (notify && this.channel?.readyState === 'open' && !this.completed) {
+    if (notify && this.channel?.readyState === 'open' && !this.completed && (this.role === 'sender' || this.accepted)) {
       try { this.control({ type: 'cancel' }); } catch {}
     }
     this.stopped = true; clearTimeout(this.connectTimer); clearTimeout(this.disconnectedTimer); clearTimeout(this.recoveryTimer); clearInterval(this.heartbeat);
@@ -438,6 +458,9 @@ export class Signaling {
   private sendQueue = Promise.resolve();
   private sequence = 0;
   private lastReceived = 0;
+  private peerSession?: string;
+  private allowNewPeer = false;
+  expectNewPeer() { this.allowNewPeer = true; }
   private endpoint?: string;
   private role = '';
   private closed = false;
@@ -460,42 +483,60 @@ export class Signaling {
     if (this.closed) return Promise.reject(Error('配对服务已断开'));
     if (this.socket?.readyState === WebSocket.OPEN) return Promise.resolve();
     if (this.connecting) return this.connecting;
-    const socket = this.socket = new WebSocket(this.endpoint!);
-    this.lastSeen = Date.now();
-    // Install message handlers before open; peer-ready may arrive immediately.
-    socket.onmessage = event => {
-      if (socket !== this.socket || this.closed) return;
+    const attempt = (async () => {
+      const url = new URL(this.endpoint!);
+      url.protocol = url.protocol === 'ws:' ? 'http:' : 'https:';
+      const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      if (!response.ok) {
+        if ([401, 409, 410].includes(response.status)) { this.closed = true; clearTimeout(this.retry); }
+        throw Error(response.status === 409 ? '分享链接已被另一接收页面占用，请关闭原页面或创建新链接。' :
+          response.status === 410 ? '分享链接已过期或发送方已结束，请创建新链接。' : '无法连接配对服务');
+      }
+      const state = await response.json();
+      if (this.closed) throw Error('配对服务已断开');
+      const socket = this.socket = new WebSocket(this.endpoint!);
       this.lastSeen = Date.now();
-      this.queue = this.queue.then(async () => {
-        const message = JSON.parse(event.data);
-        if (message.type === 'keepalive') return;
-        if (message.type === 'signal') {
-          const decoded = await unseal(this.key, message.payload);
-          if (!Number.isInteger(decoded.sequence) || decoded.sequence <= this.lastReceived) throw Error('重复或无效的配对消息');
-          this.lastReceived = decoded.sequence; await this.onMessage(decoded.message);
-        } else await this.onMessage(message);
-      }).catch(e => this.onError(e.message));
-    };
-    const attempt = new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => { socket.close(); reject(Error('配对服务连接超时')); }, 10000);
-      socket.onopen = () => {
-        clearTimeout(timeout); this.failures = 0;
-        clearInterval(this.heartbeat);
-        this.heartbeat = setInterval(() => {
-          if (Date.now() - this.lastSeen > 30000) { socket.close(); return; }
-          if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'keepalive' }));
-        }, 10000);
-        resolve();
-      };
-      socket.onerror = () => { clearTimeout(timeout); reject(Error('无法连接配对服务')); };
-      socket.onclose = () => {
-        clearTimeout(timeout); clearInterval(this.heartbeat);
-        reject(Error('配对服务已断开'));
+      // Install handlers before open; peer-ready may arrive immediately.
+      socket.onmessage = event => {
         if (socket !== this.socket || this.closed) return;
-        this.onError('配对服务已断开；已建立的文件直连可以继续');
-        this.scheduleRetry();
+        this.lastSeen = Date.now();
+        this.queue = this.queue.then(async () => {
+          const message = JSON.parse(event.data);
+          if (message.type === 'keepalive') return;
+          if (message.type === 'signal') {
+            const decoded = await unseal(this.key, message.payload);
+            if (typeof decoded.session !== 'string' || !/^[a-f0-9]{64}$/.test(decoded.session)) throw Error('配对信息无效');
+            if (this.peerSession !== decoded.session) {
+              if (this.peerSession && !this.allowNewPeer) throw Error('配对信息无效');
+              this.peerSession = decoded.session; this.lastReceived = 0; this.allowNewPeer = false;
+            }
+            if (!Number.isInteger(decoded.sequence) || decoded.sequence <= this.lastReceived) throw Error('重复或无效的配对消息');
+            this.lastReceived = decoded.sequence; await this.onMessage(decoded.message);
+          } else await this.onMessage(message);
+        }).catch(e => this.onError(e.message));
       };
-    });
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => { socket.close(); reject(Error('配对服务连接超时')); }, 10000);
+        socket.onopen = () => {
+          clearTimeout(timeout); this.failures = 0;
+          clearInterval(this.heartbeat);
+          this.heartbeat = setInterval(() => {
+            if (Date.now() - this.lastSeen > 30000) { socket.close(); return; }
+            if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'keepalive' }));
+          }, 10000);
+          this.queue = this.queue.then(() => this.onMessage({ type: 'signal-ready', peerPresent: state.peerPresent })).catch(e => this.onError(e.message));
+          resolve();
+        };
+        socket.onerror = () => { clearTimeout(timeout); reject(Error('无法连接配对服务')); };
+        socket.onclose = () => {
+          clearTimeout(timeout); clearInterval(this.heartbeat);
+          reject(Error('配对服务已断开'));
+          if (socket !== this.socket || this.closed) return;
+          this.onError('配对服务已断开；已建立的文件直连可以继续');
+          this.scheduleRetry();
+        };
+      });
+    })();
     this.connecting = attempt.finally(() => { this.connecting = undefined; });
     return this.connecting;
   }
@@ -516,7 +557,7 @@ export class Signaling {
   async send(message: unknown) {
     const task = this.sendQueue.then(async () => {
       await this.ready();
-      const payload = await seal(this.key, { sequence: ++this.sequence, message });
+      const payload = await seal(this.key, { session: this.client, sequence: ++this.sequence, message });
       if (this.socket?.readyState !== WebSocket.OPEN) throw Error('配对服务已断开');
       this.socket.send(JSON.stringify({ type: 'signal', payload }));
     });
@@ -526,7 +567,7 @@ export class Signaling {
   close() {
     this.closed = true; clearTimeout(this.retry); clearInterval(this.heartbeat);
     if (this.socket) {
-      if (this.socket.readyState === WebSocket.OPEN && this.role === 'sender') this.socket.send(JSON.stringify({ type: 'end' }));
+      if (this.socket.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify({ type: this.role === 'sender' ? 'end' : 'leave' }));
       this.socket.onclose = null; this.socket.onerror = null; this.socket.onmessage = null; this.socket.close();
     }
   }
@@ -537,6 +578,7 @@ export class Signaling {
 export class AutoPair {
   private signal: Signaling;
   private epoch = 0;
+  private revision = 0;
   private offered = false;
   private negotiating = false;
   private closed = false;
@@ -544,9 +586,21 @@ export class AutoPair {
   private finishedAt = 0;
   private lastOffer?: RTCSessionDescriptionInit;
   private lastAnswer?: RTCSessionDescriptionInit;
+  private descriptionSent = false;
+  private candidateHistory: (RTCIceCandidateInit | null)[] = [];
+  private localCandidates: (RTCIceCandidateInit | null)[] = [];
+  private remoteCandidates: (RTCIceCandidateInit | null)[] = [];
+  private seenCandidates = new Set<string>();
+  private candidateTimer?: ReturnType<typeof setTimeout>;
+  private waitingTimer?: ReturnType<typeof setTimeout>;
   private retry: ReturnType<typeof setInterval>;
-  constructor(private transfer: Transfer, key: CryptoKey, onError: (message: string) => void) {
+  constructor(private transfer: Transfer, key: CryptoKey, private onError: (message: string) => void) {
     this.signal = new Signaling(key, message => this.handle(message), onError);
+    transfer.enableCandidates(candidate => {
+      if (this.closed || this.candidateHistory.length >= 128) return;
+      this.candidateHistory.push(candidate); this.localCandidates.push(candidate);
+      this.scheduleCandidates();
+    });
     transfer.enableRecovery(() => { void this.recover(); });
     this.retry = setInterval(() => {
       if (transfer.completed) {
@@ -555,61 +609,124 @@ export class AutoPair {
       } else if (transfer.recovering) void this.recover();
     }, 6000);
   }
-  connect(endpoint: string, room: string, role: string, token: string) { return this.signal.connect(endpoint, room, role, token); }
+  async connect(endpoint: string, room: string, role: string, token: string) {
+    if (role === 'receiver') this.waitingTimer = setTimeout(() => {
+      if (!this.offered) this.transfer.fail('发送方尚未响应。请让发送方回到网页并保持手机解锁，或创建新链接。');
+    }, 90000);
+    await this.signal.connect(endpoint, room, role, token);
+  }
+  private resetCandidates() {
+    clearTimeout(this.candidateTimer); this.candidateTimer = undefined;
+    this.descriptionSent = false; this.candidateHistory = []; this.localCandidates = []; this.remoteCandidates = []; this.seenCandidates.clear();
+  }
+  private scheduleCandidates() {
+    if (!this.descriptionSent || this.candidateTimer || !this.localCandidates.length || this.closed) return;
+    this.candidateTimer = setTimeout(() => {
+      this.candidateTimer = undefined;
+      const epoch = this.epoch, candidates = this.localCandidates.splice(0, 16);
+      void this.signal.send({ type: 'candidates', epoch, candidates }).catch(() => {
+        if (!this.closed && epoch === this.epoch) { this.localCandidates.unshift(...candidates); this.onError('配对服务已断开'); }
+      }).finally(() => this.scheduleCandidates());
+    }, 100);
+  }
+  private async sendDescription(type: 'offer' | 'answer', description: RTCSessionDescriptionInit) {
+    await this.signal.send({ type, epoch: this.epoch, description });
+    this.descriptionSent = true; this.scheduleCandidates();
+  }
+  private async applyCandidates() {
+    const t = this.transfer;
+    if (!t.pc.remoteDescription) return;
+    for (const candidate of this.remoteCandidates.splice(0)) {
+      const id = JSON.stringify(candidate);
+      if (this.seenCandidates.has(id)) continue;
+      await t.pc.addIceCandidate(candidate ?? undefined);
+      this.seenCandidates.add(id);
+    }
+  }
   private async handle(message: any) {
     const t = this.transfer;
     if (this.closed || t.stopped) return;
-    if (message.type === 'peer-ready') {
+    if (message.type === 'signal-ready') {
+      if (!this.offered && t.role === 'receiver') t.pairingStage(message.peerPresent ? '找到发送方，正在交换连接信息' : '等待发送方回到页面');
+    } else if (message.type === 'peer-ready') {
       if (t.role === 'sender' && !this.offered) {
-        this.offered = true;
-        this.lastOffer = await t.offer();
-        await this.signal.send({ type: 'offer', epoch: this.epoch, description: this.lastOffer });
-      } else if (t.role === 'sender' && t.recovering && this.lastOffer && !this.negotiating) {
-        // An offer sent while the other socket was offline was not delivered.
-        // Re-send this epoch immediately instead of waiting for the retry interval.
-        await this.signal.send({ type: 'offer', epoch: this.epoch, description: this.lastOffer });
+        this.offered = true; this.negotiating = true;
+        t.pairingStage('找到接收方，正在交换连接信息');
+        try { this.lastOffer = await t.offer(true); await this.sendDescription('offer', this.lastOffer); }
+        finally { this.negotiating = false; }
+      } else if (t.role === 'sender' && this.lastOffer && !this.negotiating && !t.completed && t.channel?.readyState !== 'open') {
+        // A signaling reconnect must resend the existing offer, not replace a
+        // healthy connection that is still negotiating. Include late candidates.
+        this.localCandidates = [...this.candidateHistory];
+        await this.sendDescription('offer', t.pc.localDescription?.toJSON() ?? this.lastOffer);
+      } else if (t.role === 'receiver' && this.lastAnswer && t.channel?.readyState !== 'open') {
+        this.localCandidates = [...this.candidateHistory];
+        await this.sendDescription('answer', t.pc.localDescription?.toJSON() ?? this.lastAnswer);
       } else if (t.recovering) void this.recover();
-      else if (this.offered && !t.completed && t.channel?.readyState !== 'open' && !this.negotiating) t.requestRecovery();
     } else if (message.type === 'restart-request' && t.role === 'sender') {
       t.requestRecovery();
-      if (!this.negotiating && this.lastOffer) await this.signal.send({ type: 'offer', epoch: this.epoch, description: this.lastOffer });
+      if (!this.negotiating && this.lastOffer) await this.sendDescription('offer', t.pc.localDescription?.toJSON() ?? this.lastOffer);
     } else if (message.type === 'offer' && t.role === 'receiver') {
       if (!Number.isInteger(message.epoch) || message.epoch < 0 || message.epoch < this.epoch) return;
       if (this.offered && message.epoch === this.epoch) {
-        if (this.lastAnswer) await this.signal.send({ type: 'answer', epoch: this.epoch, description: this.lastAnswer });
+        if (this.lastAnswer) await this.sendDescription('answer', t.pc.localDescription?.toJSON() ?? this.lastAnswer);
         return;
       }
-      if (this.offered) { t.pauseRecovery(); await t.replaceTransport(); }
+      if (this.offered) { t.pauseRecovery(); this.resetCandidates(); await t.replaceTransport(); }
+      clearTimeout(this.waitingTimer);
       this.offered = true; this.epoch = message.epoch;
-      this.lastAnswer = await t.answer(message.description);
-      await this.signal.send({ type: 'answer', epoch: this.epoch, description: this.lastAnswer });
+      t.pairingStage('配对信息已交换，正在寻找直连路径');
+      this.lastAnswer = await t.answer(message.description, true);
+      await this.applyCandidates();
+      await this.sendDescription('answer', this.lastAnswer);
     } else if (message.type === 'answer' && t.role === 'sender') {
-      if (message.epoch === this.epoch && t.pc.signalingState === 'have-local-offer') await t.finish(message.description);
+      if (message.epoch === this.epoch && t.pc.signalingState === 'have-local-offer') {
+        await t.finish(message.description); await this.applyCandidates();
+        t.pairingStage('配对信息已交换，正在寻找直连路径');
+      }
+    } else if (message.type === 'candidates') {
+      if (message.epoch !== this.epoch || !Array.isArray(message.candidates) || message.candidates.length > 16) return;
+      if (this.seenCandidates.size + this.remoteCandidates.length + message.candidates.length > 128) throw Error('配对信息过大');
+      for (const candidate of message.candidates) {
+        if (candidate !== null && (typeof candidate !== 'object' || typeof candidate.candidate !== 'string' || candidate.candidate.length > 4096)) throw Error('配对信息无效');
+      }
+      this.remoteCandidates.push(...message.candidates); await this.applyCandidates();
+    } else if (message.type === 'receiver-left' && t.role === 'sender') {
+      this.revision++; this.signal.expectNewPeer();
+      if (t.hasAccepted) { t.fail('接收方已结束传输，请创建新链接。'); return; }
+      this.negotiating = true;
+      try {
+        this.epoch++; this.offered = false; this.lastOffer = undefined; this.resetCandidates();
+        await t.replaceTransport(); t.waitForReceiver();
+      } finally { this.negotiating = false; }
     } else if (message.type === 'ended') {
       if (t.completed) this.close();
       else t.fail('对方已结束传输，或页面已关闭。');
+    } else if (message.type === 'peer-left' && !t.completed) {
+      if (!this.offered) t.pairingStage(t.role === 'receiver' ? '等待发送方回到页面' : '等待接收方');
+      else t.requestRecovery();
     }
-    else if (message.type === 'peer-left' && !t.completed) t.requestRecovery();
   }
   private async recover() {
     const t = this.transfer;
     if (this.closed || t.stopped || t.completed || this.negotiating || Date.now() - this.lastAttempt < 10000) return;
     this.negotiating = true;
+    const revision = this.revision;
     try {
       await this.signal.ready();
-      if (this.closed || t.stopped) return;
+      if (this.closed || t.stopped || revision !== this.revision) return;
       this.lastAttempt = Date.now();
       if (t.role === 'receiver') await this.signal.send({ type: 'restart-request' });
       else {
-        this.epoch++; this.offered = true;
-        this.lastOffer = undefined;
+        this.epoch++; this.offered = true; this.lastOffer = undefined; this.resetCandidates();
         await t.replaceTransport();
-        this.lastOffer = await t.offer();
-        await this.signal.send({ type: 'offer', epoch: this.epoch, description: this.lastOffer });
+        if (revision !== this.revision || this.closed || t.stopped) return;
+        this.lastOffer = await t.offer(true);
+        if (revision !== this.revision || this.closed || t.stopped) return;
+        await this.sendDescription('offer', this.lastOffer);
       }
-    } catch { /* Keep the checkpoint and retry until the transfer's recovery deadline. */ }
+    } catch { /* Preserve the checkpoint and retry until the recovery deadline. */ }
     finally { this.negotiating = false; }
   }
-  close() { this.closed = true; clearInterval(this.retry); this.signal.close(); }
+  close() { this.closed = true; clearInterval(this.retry); clearTimeout(this.candidateTimer); clearTimeout(this.waitingTimer); this.signal.close(); }
 }
-

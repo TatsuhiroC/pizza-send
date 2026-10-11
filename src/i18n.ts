@@ -1,6 +1,18 @@
 export type Language = 'zh' | 'en';
 type Params = Record<string, string | number>;
 const messages: Record<string, string> = {
+  '找到发送方，正在交换连接信息': 'Sender found. Exchanging connection details',
+  '找到接收方，正在交换连接信息': 'Receiver found. Exchanging connection details',
+  '等待发送方回到页面': 'Waiting for the sender to return to the page',
+  '配对信息已交换，正在寻找直连路径': 'Paired. Looking for a direct connection',
+  '请保持手机在发送页面；VPN 需要允许本地网络和 WebRTC。': 'Keep the sending page visible on your phone. Your VPN must allow local networking and WebRTC.',
+  '请让发送方保持页面打开，手机不要锁屏。': 'Keep the sending page open and the phone unlocked.',
+  '未能建立直连。请让手机保持在发送页面，并检查 VPN 是否允许本地网络和 WebRTC；可先关闭双方 VPN 再试。': 'Unable to connect directly. Keep the sending page visible and check whether your VPN allows local networking and WebRTC. Try turning off both VPNs first.',
+  '分享链接已被另一接收页面占用，请关闭原页面或创建新链接。': 'Another receiving page is using this link. Close that page or create a new link.',
+  '分享链接已过期或发送方已结束，请创建新链接。': 'This link has expired or the sender ended the session. Create a new link.',
+  '接收方已结束传输，请创建新链接。': 'The receiver ended the transfer. Create a new link.',
+  '发送方尚未响应。请让发送方回到网页并保持手机解锁，或创建新链接。': 'The sender has not responded. Return to the sending page and keep the phone unlocked, or create a new link.',
+  '配对信息无效': 'Invalid pairing information',
   '文件快传': 'File transfer',
   '网络切换，正在恢复连接': 'Network changed. Reconnecting',
   '已接收的进度会保留，请保持双方页面打开。正在寻找可用的直连路径。': 'Received data is preserved. Keep both pages open while a new direct connection is found.',

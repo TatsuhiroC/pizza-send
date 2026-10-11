@@ -15,6 +15,7 @@ Choose files → Create a transfer → Share the link or QR code → The recipie
 - 32 KiB chunks, with flow control based on both the send buffer and receiver acknowledgments. Progress updates reflect what the receiver has acknowledged.
 - Incremental SHA-256 verification; a file is marked complete only after its integrity has been verified.
 - Stream files directly to disk after choosing a file or folder in desktop Chrome / Edge. Browsers without this API use an in-memory buffer, limited to 256 MiB in total.
+- Automatic pairing incrementally exchanges connection addresses (Trickle ICE), including late candidates, and distinguishes sender availability, direct-path discovery, occupied links, and expired sessions.
 - Automatic pairing reconnects after network changes and resumes from the receiver’s confirmed position, preserving verification and the save location. Both pages must stay open.
 - Manual pairing by copying connection codes, without a signaling service. Automatic reconnection is not supported in manual mode.
 - Instant Chinese / English switching with a saved language preference; desktop and mobile layouts, with no third-party fonts or analytics scripts.
@@ -28,6 +29,8 @@ Automatic pairing encrypts SDP information with an AES-256-GCM key generated in 
 Anyone with the share link can receive the files, so share it through a trusted channel. Manual pairing codes contain network connection information and should also be kept private. Users still need to trust the website's code and publisher; this product has not undergone an independent security audit.
 
 The initial release cannot guarantee a direct connection between every pair of networks. Symmetric NAT, UDP restrictions, corporate networks, VPN routing, and regional access restrictions can affect connectivity. Try the same Wi-Fi network first. Failed connections show an error; there is no relay fallback. With automatic pairing, network changes or temporary disconnections trigger address discovery and a new encrypted direct connection, then resume from the byte position already written by the receiver. Recovery waits up to two minutes. Completed files are skipped, and the current file’s disk stream or memory data and SHA-256 state are preserved. The whole file is still verified on completion. Recovery requires an accessible signaling service, an unexpired room, and a direct path through the new networks; recovery time and route speed are not guaranteed. Closing or refreshing a page, or having the browser discard it, loses the session. Locking a phone may cause this. Manual pairing does not reconnect automatically.
+
+For troubleshooting, refresh both pages and create a new link. Keep the sending page visible and the phone unlocked. Sharing Wi-Fi does not guarantee connectivity with a VPN; the VPN must permit local networking and WebRTC / UDP. First test with both VPNs off, then compare. Explicitly leaving before accepting files releases the recipient slot. Unexpected network loss retains it for the original session to recover. Once transfer has begun, changing recipients requires a new link.
 
 ## Local development
 

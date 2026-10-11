@@ -4,7 +4,7 @@ const TTL = 30 * 60 * 1000;
 const token = () => Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, '0')).join('');
 const digest = async value => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))), b => b.toString(16).padStart(2, '0')).join('');
 function response(body, status, origin) {
-  return new Response(status === 204 ? null : JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'access-control-allow-origin': origin, 'vary': 'Origin', 'cache-control': 'no-store', 'access-control-allow-methods': 'POST, OPTIONS', 'access-control-allow-headers': 'content-type' } });
+  return new Response(status === 204 ? null : JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'access-control-allow-origin': origin, 'vary': 'Origin', 'cache-control': 'no-store', 'access-control-allow-methods': 'GET, POST, OPTIONS', 'access-control-allow-headers': 'content-type' } });
 }
 export default {
   async fetch(request, env) {
@@ -23,8 +23,10 @@ export default {
       return response({ room, sender, receiver, expiresAt: Date.now() + TTL }, 201, origin);
     }
     const match = url.pathname.match(/^\/rooms\/([a-f0-9]{64})$/);
-    if (!match || request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') return response({ error: 'Not found' }, 404, origin);
-    return env.ROOMS.get(env.ROOMS.idFromName(match[1])).fetch(request);
+    if (!match || (request.method !== 'GET')) return response({ error: 'Not found' }, 404, origin);
+    const result = await env.ROOMS.get(env.ROOMS.idFromName(match[1])).fetch(request);
+    if (result.status === 101) return result;
+    return new Response(result.body, { status: result.status, headers: { ...Object.fromEntries(result.headers), 'access-control-allow-origin': origin, 'vary': 'Origin', 'cache-control': 'no-store' } });
   }
 };
 export class RateLimit extends DurableObject {
@@ -54,6 +56,10 @@ export class Room extends DurableObject {
     if (client && !/^[a-f0-9]{64}$/.test(client)) return new Response('Invalid client', { status: 400 });
     const existing = this.sockets(role);
     if (existing.length && (!client || state[role + 'Client'] !== client)) return new Response('Session already occupied', { status: 409 });
+    if (state[role + 'Client'] && state[role + 'Client'] !== client) return new Response('Session already occupied', { status: 409 });
+    if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
+      return Response.json({ peerPresent: this.sockets(role === 'sender' ? 'receiver' : 'sender').length > 0 });
+    }
     const bound = await this.ctx.storage.transaction(async storage => {
       const current = await storage.get('room');
       if (!current || current.ended || current.expiresAt <= Date.now()) return 410;
@@ -78,13 +84,26 @@ export class Room extends DurableObject {
     const state = await this.ctx.storage.get('room');
     if (!state || state.ended || state.expiresAt <= Date.now()) { socket.close(1008, 'Session expired'); return; }
     const meta = socket.deserializeAttachment();
+    if (!this.sockets(meta.role).includes(socket)) return;
     if (typeof data !== 'string' || data.length > 128000) { socket.close(1009, 'Message too large'); return; }
     if (Date.now() - meta.window > 60000) { meta.window = Date.now(); meta.count = 0; }
     meta.count++; socket.serializeAttachment(meta);
-    if (meta.count > 30) { socket.close(1008, 'Rate limit'); return; }
+    if (meta.count > 120) { socket.close(1008, 'Rate limit'); return; }
     try {
       const message = JSON.parse(data);
       if (message.type === 'keepalive') { socket.send(JSON.stringify({ type: 'keepalive' })); return; }
+      if (message.type === 'leave' && meta.role === 'receiver') {
+        // Explicitly leaving releases the recipient slot. An unexpected network
+        // disconnect keeps the binding so recovery cannot be hijacked.
+        await this.ctx.storage.transaction(async storage => {
+          const current = await storage.get('room');
+          if (current) { delete current.receiverClient; await storage.put('room', current); }
+        });
+        meta.left = true; socket.serializeAttachment(meta);
+        for (const other of this.sockets('sender')) other.send(JSON.stringify({ type: 'receiver-left' }));
+        socket.close(1000, 'Receiver left');
+        return;
+      }
       if (message.type === 'end' && meta.role === 'sender') {
         await this.ctx.storage.transaction(async storage => {
           const current = await storage.get('room');
@@ -103,7 +122,7 @@ export class Room extends DurableObject {
     try { socket.close(code, reason); } catch {}
     // A socket close can mean a network change. Keep room tokens valid until
     // explicit cancellation or expiry so both browsers can reconnect.
-    if (reason === 'Connection replaced') return;
+    if (reason === 'Connection replaced' || meta.left) return;
     const state = await this.ctx.storage.get('room');
     if (!state || state.ended) return;
     for (const other of this.sockets(meta.role === 'sender' ? 'receiver' : 'sender')) other.send(JSON.stringify({ type: 'peer-left' }));

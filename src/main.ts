@@ -95,7 +95,9 @@ function reset() {
   history.replaceState(null, '', location.pathname + location.search);
 }
 function events(event: TransferEvent) {
-  if (event.type === 'connected') {
+  if (event.type === 'pairing') {
+    status(event.data, event.data === '配对信息已交换，正在寻找直连路径' ? '请保持手机在发送页面；VPN 需要允许本地网络和 WebRTC。' : '请让发送方保持页面打开，手机不要锁屏。');
+  } else if (event.type === 'connected') {
     $<HTMLDialogElement>('pair-dialog').close();
     status(transfer?.role === 'sender' ? '已连接，等待对方确认' : '已连接，准备接收', '请保持双方页面打开。', 'connected');
   } else if (event.type === 'manifest') {
