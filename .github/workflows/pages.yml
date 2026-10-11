@@ -23,6 +23,11 @@ jobs:
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npm test
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-test-diagnostics
+          path: test-results
       - uses: actions/upload-pages-artifact@v3
         if: github.event_name != 'pull_request'
         with:
