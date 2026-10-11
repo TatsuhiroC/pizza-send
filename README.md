@@ -1,5 +1,7 @@
 # 🍕 PizzaSend · 文件快传
 
+**简体中文** · [English](README.en.md)
+
 打开网页，把文件直接送到另一台设备。受 [FilePizza](https://github.com/kern/filepizza) 启发，独立实现。
 
 **使用地址：[tatsuhiroc.github.io/pizza-send](https://tatsuhiroc.github.io/pizza-send/)**
