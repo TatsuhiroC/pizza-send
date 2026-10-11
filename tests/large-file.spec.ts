@@ -1,7 +1,22 @@
-import { test, expect } from '@playwright/test';
-import { open, mkdir, rm } from 'node:fs/promises';
+import { test as base, expect, chromium } from '@playwright/test';
+import { open, mkdir, rm, mkdtemp } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
+import { tmpdir } from 'node:os';
+
+// A temporary persistent profile gives OPFS disk-backed storage; private contexts
+// can instead use a smaller storage quota based on the runner's memory.
+const test = base.extend({
+  context: async ({}, use, info) => {
+    const profile = await mkdtemp(join(tmpdir(), 'pizza-send-browser-'));
+    const context = await chromium.launchPersistentContext(profile, {
+      ...info.project.use.launchOptions, headless: true,
+      baseURL: info.project.use.baseURL, acceptDownloads: true
+    });
+    try { await use(context); }
+    finally { await context.close(); await rm(profile, { recursive: true, force: true }); }
+  }
+});
 
 for (const megabytes of [200, 1024]) {
   test(`${megabytes} MiB file streams to browser disk with SHA-256`, async ({ page, context }) => {
