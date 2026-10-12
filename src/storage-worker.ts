@@ -1,4 +1,4 @@
-import { STORAGE_ROOT, validSession, storageLock, diskName, validateIndex, type StoredIndex, type StoredFile } from './storage-format';
+import { STORAGE_ROOT, RETENTION_MS, validSession, storageLock, diskName, validateIndex, type StoredIndex, type StoredFile, type StoredEntry } from './storage-format';
 import type { FileInfo } from './protocol';
 
 type Access = { write(data: Uint8Array, options: { at: number }): number; read(data: Uint8Array, options: { at: number }): number; getSize(): number; truncate(size: number): void; flush(): void; close(): void };
@@ -75,6 +75,28 @@ async function removeEmpty(id: string, s: Session) {
   if (s.index.files.length) return;
   await (await root()).removeEntry(id, { recursive: true }); sessions.delete(id); s.release();
 }
+async function deleteEntry(id: string, s: Session, entry: StoredEntry) {
+  const previous = s.index.files;
+  s.index.files = previous.filter(f => f !== entry);
+  try {
+    // Update both copies before removal so an older index cannot resurrect it.
+    await writeIndex(s); await writeIndex(s);
+    await removeEntry(s.dir, diskName(entry.info.id));
+    if (!s.live) await removeEmpty(id, s);
+  } catch (error) {
+    s.index.files = previous;
+    // Keep the record recoverable across reloads when physical deletion failed.
+    await writeIndex(s).then(() => writeIndex(s)).catch(() => {});
+    throw error;
+  }
+}
+async function endSession(s: Session) {
+  if (!s.live) return;
+  const expiresAt = Date.now() + RETENTION_MS;
+  for (const entry of s.index.files) if (entry.complete) entry.expiresAt = expiresAt;
+  if (s.index.files.length) { await writeIndex(s); await writeIndex(s); }
+  s.live = false;
+}
 async function handle(type: string, data: any): Promise<unknown> {
   if (type === 'probe') {
     if (!scope.navigator.locks) throw Error('Web Locks unavailable');
@@ -99,12 +121,20 @@ async function handle(type: string, data: any): Promise<unknown> {
     for await (const [id, entry] of dir.entries()) {
       if (!validSession(id) || entry.kind !== 'directory') continue;
       const s = await claim(id); if (!s) { busy++; continue; } // Never touch another tab's active files.
-      if (!s.live) { await discardIncomplete(s); await removeEmpty(id, s); }
+      if (!s.live) {
+        await discardIncomplete(s);
+        // Legacy files get a full hour on their first visit after upgrading.
+        let migrated = false;
+        for (const file of s.index.files) if (file.complete && file.expiresAt === undefined) { file.expiresAt = Date.now() + RETENTION_MS; migrated = true; }
+        if (migrated) { await writeIndex(s); await writeIndex(s); }
+        for (const file of [...s.index.files]) if (file.complete && file.expiresAt! <= Date.now()) await deleteEntry(id, s, file);
+        if (sessions.has(id)) await removeEmpty(id, s);
+      }
       for (const entry of s.index.files) if (entry.complete) {
         let unavailable = false;
         try { const file = await (await s.dir.getFileHandle(diskName(entry.info.id))).getFile(); unavailable = file.size !== entry.info.size; }
         catch { unavailable = true; }
-        files.push({ session: id, info: entry.info, hash: entry.hash!, createdAt: s.index.createdAt, unavailable });
+        files.push({ session: id, info: entry.info, hash: entry.hash!, createdAt: s.index.createdAt, expiresAt: s.live ? undefined : entry.expiresAt, unavailable });
       }
     }
     return { files: files.sort((a, b) => a.createdAt - b.createdAt || a.info.id - b.info.id), busy };
@@ -131,31 +161,28 @@ async function handle(type: string, data: any): Promise<unknown> {
     const entry = s.index.files.find(f => f.info.id === s.active);
     if (!entry || !s.access || s.written !== entry.info.size || !/^[a-f0-9]{64}$/.test(data.hash)) throw Error('Incomplete file');
     s.access.flush(); s.access.close(); s.access = undefined; s.active = undefined;
-    entry.complete = true; entry.hash = data.hash;
-    try { await writeIndex(s); } catch (error) { entry.complete = false; delete entry.hash; throw error; }
+    entry.complete = true; entry.hash = data.hash; entry.expiresAt = Date.now() + RETENTION_MS;
+    try { await writeIndex(s); } catch (error) { entry.complete = false; delete entry.hash; delete entry.expiresAt; throw error; }
     return;
   }
   if (type === 'discard') {
-    await discardIncomplete(s); s.live = false; await removeEmpty(data.session, s); return;
+    await discardIncomplete(s); await endSession(s); await removeEmpty(data.session, s); return;
   }
   if (type === 'complete') {
     if (s.access || s.index.files.some(f => !f.complete)) throw Error('Incomplete session');
-    s.live = false; await removeEmpty(data.session, s); return;
+    await endSession(s); await removeEmpty(data.session, s); return;
   }
   if (type === 'delete') {
     const entry = s.index.files.find(f => f.info.id === data.id && f.complete);
     if (!entry) throw Error('Temporary file unavailable');
-    // Update both metadata copies before deletion, preventing stale-index resurrection.
-    const previous = s.index.files;
-    s.index.files = previous.filter(f => f !== entry);
-    try {
-      await writeIndex(s); await writeIndex(s);
-      await removeEntry(s.dir, diskName(entry.info.id));
-      if (!s.live) await removeEmpty(data.session, s);
-    } catch (error) {
-      // Keep the entry available for retry if metadata or physical deletion fails.
-      s.index.files = previous; throw error;
-    }
+    await deleteEntry(data.session, s, entry);
+    return;
+  }
+  if (type === 'retain') {
+    const entry = s.index.files.find(f => f.info.id === data.id && f.complete);
+    if (!entry) throw Error('Temporary file unavailable');
+    entry.expiresAt = Date.now() + RETENTION_MS;
+    await writeIndex(s); await writeIndex(s);
     return;
   }
   throw Error('Unsupported storage operation');

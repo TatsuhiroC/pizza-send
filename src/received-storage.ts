@@ -65,8 +65,11 @@ export async function discardTemporaryPartial(session: string) { await request<v
 export async function listTemporaryFiles() {
   if (!await supportsTemporaryStorage()) return [];
   const result = await request<{ files: StoredFile[]; busy: number }>('list'); busySessions = result.busy;
+  const present = new Set(result.files.map(storedKey));
+  for (const [key, url] of urls) if (!present.has(key)) { URL.revokeObjectURL(url); urls.delete(key); }
   return result.files;
 }
+export async function retainTemporaryFile(file: StoredFile) { await request<void>('retain', { session: file.session, id: file.info.id }); changed(); }
 export async function temporaryURL(file: StoredFile) {
   const key = storedKey(file), existing = urls.get(key); if (existing) return existing;
   const opening = openingURLs.get(key); if (opening) return opening;
