@@ -49,6 +49,7 @@ let files: File[] = [];
 let transfer: Transfer | undefined;
 let signaling: AutoPair | undefined;
 let shareLink = '';
+let shareQRRevision = 0;
 let pairingKind: 'offer' | 'answer' = 'offer';
 let busy = false;
 let toastTimer: ReturnType<typeof setTimeout>;
@@ -198,12 +199,18 @@ function setBusy(value: boolean) {
   $<HTMLButtonElement>('connect-receive').disabled = value;
   $<HTMLButtonElement>('open-scanner').disabled = value;
 }
+function clearShareQR() {
+  shareQRRevision++;
+  const canvas = $<HTMLCanvasElement>('share-qr');
+  canvas.hidden = true; canvas.width = canvas.height = 0;
+  $('show-qr').setAttribute('aria-expanded', 'false');
+}
 function reset() {
   sessionRevision++;
   closeScanner();
   signaling?.close(); signaling = undefined;
   transfer?.close(); transfer = undefined;
-  shareLink = ''; setBusy(false);
+  shareLink = ''; $<HTMLInputElement>('share-link').value = ''; clearShareQR(); setBusy(false);
   $('share-box').hidden = true; $('progress-box').hidden = true; $('session-panel').hidden = true;
   $('notice').hidden = true; $('incoming-files').innerHTML = ''; $('downloads').innerHTML = '';
   $('accept-files').hidden = true; $('save-note').hidden = true;
@@ -294,6 +301,7 @@ async function automaticSender(t: Transfer) {
   await connection.connect(api, session.room, 'sender', session.sender);
   if (transfer !== t || t.stopped) { connection.close(); return; }
   const url = new URL(location.href); url.search = ''; url.hash = shareFragment(secret);
+  clearShareQR();
   shareLink = url.toString();
   $<HTMLInputElement>('share-link').value = shareLink; $('share-box').hidden = false;
   status('等待接收方', '把分享链接发给对方。传输期间请保持本页打开。');
@@ -408,7 +416,18 @@ $('accept-files').onclick = () => run(async () => {
 $('cancel').onclick = reset;
 $('close-dialog').onclick = () => $<HTMLDialogElement>('pair-dialog').close();
 $('copy-link').onclick = () => run(async () => { await navigator.clipboard.writeText(shareLink); toast('分享链接已复制'); });
-$('show-qr').onclick = () => run(async () => { $('share-qr').hidden = !$('share-qr').hidden; if (!$('share-qr').hidden) await QRCode.toCanvas($<HTMLCanvasElement>('share-qr'), shareLink, { width: 224, margin: 2, color: { dark: '#342c24', light: '#ffffff' } }); });
+$('show-qr').onclick = () => run(async () => {
+  const canvas = $<HTMLCanvasElement>('share-qr'), revision = ++shareQRRevision, link = shareLink;
+  canvas.hidden = !canvas.hidden;
+  $('show-qr').setAttribute('aria-expanded', String(!canvas.hidden));
+  if (canvas.hidden || !link) return;
+  // Render separately so a result from an ended session cannot repaint this QR.
+  const rendered = document.createElement('canvas');
+  await QRCode.toCanvas(rendered, link, { width: 224, margin: 2, color: { dark: '#342c24', light: '#ffffff' } });
+  if (revision !== shareQRRevision || link !== shareLink) return;
+  canvas.width = rendered.width; canvas.height = rendered.height;
+  canvas.getContext('2d')!.drawImage(rendered, 0, 0);
+});
 $('copy-code').onclick = () => run(async () => { await navigator.clipboard.writeText($<HTMLTextAreaElement>('outgoing-code').value); toast('配对码已复制'); });
 $('pair-qr-button').onclick = () => run(async () => {
   const canvas = $<HTMLCanvasElement>('pair-qr'); canvas.hidden = !canvas.hidden;

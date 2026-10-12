@@ -36,15 +36,63 @@ async function share(page: Page) {
   await expect(page.locator('#share-box')).toBeVisible();
   return page.locator('#share-link').inputValue();
 }
-async function verifyDownload(sender: Page, receiver: Page) {
+async function verifyDownload(sender: Page, receiver: Page, expected = fixture) {
   await expect(receiver.locator('#accept-files')).toBeVisible();
   await receiver.locator('#accept-files').click();
   await expect(sender.locator('#status')).toHaveText('传输完成，原样送达。');
   const download = receiver.waitForEvent('download');
-  await receiver.locator('.download-file').click();
+  await receiver.locator('.download-file').last().click();
   const file = await readFile((await (await download).path())!);
-  expect(createHash('sha256').update(file).digest('hex')).toBe(createHash('sha256').update(fixture).digest('hex'));
+  expect(createHash('sha256').update(file).digest('hex')).toBe(createHash('sha256').update(expected).digest('hex'));
 }
+
+test('a second transfer shows a fresh QR and the same receiver camera connects to the new link', async ({ page, context }) => {
+  await setup(context);
+  const firstLink = await share(page), receiver = await context.newPage();
+  await receiver.goto('./'); await receiver.locator('#receive-tab').click();
+  // Feed the sender's actual displayed QR through video frames, keeping the
+  // receiver page and scanner alive across both transfers.
+  await receiver.evaluate(() => {
+    const state = window as any;
+    navigator.mediaDevices.getUserMedia = async () => {
+      const canvas = document.createElement('canvas'); canvas.width = canvas.height = 480;
+      canvas.getContext('2d')!.drawImage(state.__cameraImage, 0, 0, 480, 480);
+      const stream = canvas.captureStream(5);
+      state.__cameraCalls++; state.__cameraTracks.push(...stream.getVideoTracks());
+      return stream;
+    };
+  });
+  const scanDisplayedQR = async (link: string) => {
+    const image = await page.locator('#share-qr').evaluate(canvas => (canvas as HTMLCanvasElement).toDataURL());
+    await receiver.evaluate(async url => {
+      const image = new Image(); image.src = url; await image.decode();
+      (window as any).__cameraImage = image;
+    }, image);
+    await receiver.locator('#open-scanner').click();
+    await expect(receiver.locator('#receive-code')).toHaveValue(link);
+    await expect(receiver.locator('#scan-dialog')).not.toBeVisible();
+    await expect(receiver.locator('#accept-files')).toBeVisible();
+  };
+  await page.locator('#show-qr').click();
+  await scanDisplayedQR(firstLink);
+  await verifyDownload(page, receiver);
+  await page.locator('#cancel').click(); await receiver.locator('#cancel').click();
+  await page.locator('.remove-file').click();
+  const secondFile = Buffer.from('This is the second file, sent through a new QR invitation.');
+  await page.locator('#file-input').setInputFiles({ name: 'second.txt', mimeType: 'text/plain', buffer: secondFile });
+  await page.locator('#start-send').click();
+  await expect(page.locator('#share-box')).toBeVisible();
+  const secondLink = await page.locator('#share-link').inputValue();
+  expect(secondLink).not.toBe(firstLink);
+  await expect(page.locator('#share-qr')).toBeHidden();
+  await page.locator('#show-qr').click();
+  await scanDisplayedQR(secondLink);
+  await expect(receiver.locator('#incoming-files')).toContainText('second.txt');
+  await verifyDownload(page, receiver, secondFile);
+  expect(await receiver.evaluate(() => (window as any).__cameraCalls)).toBe(2);
+  expect(await receiver.evaluate(() => (window as any).__cameraTracks.map((track: MediaStreamTrack) => track.readyState))).toEqual(['ended', 'ended']);
+  await expect(receiver.locator('#notice')).toBeHidden();
+});
 
 test('compact links retain a 256-bit secret, hide credentials from requests, and reject room overwrite', async ({ page, context }) => {
   await setup(context);
