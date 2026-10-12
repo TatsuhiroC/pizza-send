@@ -18,7 +18,7 @@ async function begin(sender: Page, receiver: Page, payload: any) {
   await expect(sender.locator('#share-box')).toBeVisible(); await receiver.goto(await sender.locator('#share-link').inputValue());
   await expect(receiver.locator('#accept-files')).toBeVisible(); await receiver.locator('#accept-files').click();
 }
-async function completed(receiver: Page) { await expect(receiver.locator('#status')).toHaveText('传输完成，原样送达。'); }
+async function completed(receiver: Page) { await expect(receiver.locator('#status')).toHaveText('文件已收到，请保存到设备'); }
 async function downloaded(receiver: Page, index = 0) {
   const pending = receiver.waitForEvent('download'); await receiver.locator('.download-file').nth(index).click();
   return await pending;
@@ -43,7 +43,7 @@ test('duplicate names, empty and Unicode files survive refresh; one cleanup butt
   await expect(receiver.locator('.download-file')).toHaveCount(3);
   await receiver.reload(); await expect(receiver.locator('.download-file')).toHaveCount(3);
   await receiver.goto('about:blank'); await receiver.goBack(); await expect(receiver.locator('.download-file')).toHaveCount(3);
-  await receiver.locator('#language-toggle').click(); await expect(receiver.locator('#clear-stored')).toHaveText('Saved · clear all temporary files');
+  await receiver.locator('#language-toggle').click(); await expect(receiver.locator('#clear-stored')).toHaveText('Clear all temporary files');
   await receiver.setViewportSize({ width: 320, height: 844 });
   expect(await receiver.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await receiver.screenshot({ path: info.outputPath('temporary-storage-english-mobile.png'), fullPage: true });
@@ -200,7 +200,7 @@ diskTest('512 MiB receives through the production worker without a picker or ful
   });
   try {
     await begin(page, receiver, path);
-    await expect(receiver.locator('#status')).toHaveText('传输完成，原样送达。', { timeout: 300000 });
+    await expect(receiver.locator('#status')).toHaveText('文件已收到，请保存到设备', { timeout: 300000 });
     const download = await downloaded(receiver), file = (await download.path())!, actual = createHash('sha256');
     for await (const chunk of createReadStream(file)) actual.update(chunk);
     expect(actual.digest('hex')).toBe(expected.digest('hex'));

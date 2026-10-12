@@ -38,10 +38,10 @@ for (const memory of [false, true]) test(`${memory ? 'memory' : 'disk'} long fil
   await receiver.goto(await page.locator('#share-link').inputValue());
   await expect(receiver.locator('#accept-files')).toBeVisible(); await fits(receiver);
   await preview(receiver, receiver.locator('#incoming-files .filename-button').first(), files[0].name);
-  await receiver.locator('#accept-files').click(); await expect(receiver.locator('#status')).toHaveText('传输完成，原样送达。');
+  await receiver.locator('#accept-files').click(); await expect(receiver.locator('#status')).toHaveText('文件已收到，请保存到设备');
   await fits(page); await fits(receiver);
   await preview(receiver, receiver.locator('#current-file'), files[1].name);
-  const names = receiver.locator(memory ? '#downloads .filename-button' : '#stored-files .filename-button');
+  const names = receiver.locator(memory ? '#downloads .filename-button' : '#save-files .filename-button');
   let downloads = 0; receiver.on('download', () => downloads++);
   const first = await names.first().textContent(); await preview(receiver, names.first(), first!); expect(downloads).toBe(0);
   expect(await names.first().evaluate(el => el.scrollWidth > el.clientWidth && getComputedStyle(el).whiteSpace === 'nowrap')).toBe(true);
@@ -51,7 +51,7 @@ for (const memory of [false, true]) test(`${memory ? 'memory' : 'disk'} long fil
     expect(download.suggestedFilename()).toBe(file.name); expect(digest(await readFile((await download.path())!))).toBe(digest(file.buffer));
   }
   await receiver.locator('#language-toggle').click(); await fits(receiver);
-  await expect(receiver.locator('.download-file').first()).toHaveText('Save');
+  await expect(receiver.locator('.download-file').first()).toHaveText('Save to device');
   await preview(receiver, names.first(), first!);
 });
 
@@ -96,7 +96,7 @@ test('temporary files show latest completion first across batches; saving preser
   }, data);
   await page.reload(); await expect(names).toHaveText(['second.txt', 'last-completed.txt', 'first.txt']);
   await page.locator('#language-toggle').click(); await fits(page);
-  await expect(clear).toHaveText('Saved · clear all temporary files');
+  await expect(clear).toHaveText('Clear all temporary files');
   await page.locator('#stored-panel').screenshot({ path: info.outputPath('top-cleanup-320.png') });
   await clear.click(); await expect(page.locator('#cleanup-name')).toContainText('3 files'); await page.locator('#keep-stored').click();
   await expect(names).toHaveCount(3);

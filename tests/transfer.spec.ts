@@ -45,7 +45,7 @@ test('20 MB + empty + Chinese filename: automatic pairing, end-to-end SHA-256 an
   await automatic(page, receiver, payload);
   const started = Date.now();
   await receiver.locator('#accept-files').click();
-  await expect(receiver.locator('#status')).toHaveText('传输完成，原样送达。');
+  await expect(receiver.locator('#status')).toHaveText('文件已收到，请保存到设备');
   await expect(page.locator('#status')).toHaveText('传输完成，原样送达。');
   const elapsed = Date.now() - started;
   for (const [i, file] of [...payload].reverse().entries()) {
@@ -73,7 +73,7 @@ test('manual pairing works without signaling', async ({ page, context }) => {
   const answer = await receiver.locator('#outgoing-code').inputValue();
   await page.locator('#answer-code').fill(answer); await page.locator('#apply-answer').click();
   await expect(receiver.locator('#accept-files')).toBeVisible(); await receiver.locator('#accept-files').click();
-  await expect(receiver.locator('#status')).toHaveText('传输完成，原样送达。');
+  await expect(receiver.locator('#status')).toHaveText('文件已收到，请保存到设备');
   const promise = receiver.waitForEvent('download'); await receiver.locator('.download-file').click();
   expect(sha(await readFile((await (await promise).path())!))).toBe(sha(buffer));
 });

@@ -1,6 +1,20 @@
 export type Language = 'zh' | 'en';
 type Params = Record<string, string | number>;
 const messages: Record<string, string> = {
+  '保存到设备': 'Save to device',
+  '清理全部暂存': 'Clear all temporary files',
+  '文件已收到，请保存到设备': 'Files received. Save to your device.',
+  '全部文件通过 SHA-256 校验，还需要点击下面的保存按钮。': 'All files passed SHA-256 verification. Click Save below to keep them on your device.',
+  '文件目前保存在浏览器暂存中，保存后才能在手机的“文件”App 或浏览器下载记录中找到。': 'Files are currently stored in this browser. Save them to find them in your phone’s Files app or browser downloads.',
+  '浏览器暂存保留 10 分钟。点击保存会为该文件重新预留 10 分钟；请确认下载完成后再清理。': 'Browser storage keeps files for 10 minutes. Saving gives that file another 10 minutes. Confirm the download finishes before clearing temporary files.',
+  '文件暂存在浏览器内存中，请保持页面打开并及时保存；刷新或关闭页面会丢失。': 'Files are held in browser memory. Keep this page open and save them now; refreshing or closing the page loses them.',
+  '已发起保存，请确认下载提示': 'Save requested. Confirm the download prompt.',
+  '请在浏览器中确认保存，并等待下载完成。': 'Confirm saving in your browser and wait for the download to finish.',
+  '已发起保存，请确认浏览器的下载提示。下载完成后，可在手机的“文件”App 或浏览器下载记录中查找。': 'Save requested. Confirm your browser’s download prompt. Once the download finishes, find the file in your phone’s Files app or browser downloads.',
+  '已保存到设备': 'Saved to your device',
+  '文件已写入你选择的位置，并通过 SHA-256 校验。': 'Files were written to your chosen location and passed SHA-256 verification.',
+  '暂存已清理或到期。如未保存，请让发送方重新分享。': 'Temporary files were cleared or expired. If you did not save them, ask the sender to share again.',
+
   '链接 30 分钟内可加入，最多 10 位同时接收。请只分享给预期接收者。': 'Join within 30 minutes. Up to 10 recipients at once. Share only with intended recipients.',
   '把同一个链接或二维码发给多位接收者，请保持本页打开。': 'Share the same link or QR code with multiple recipients. Keep this page open.',
   '邀请已过期，正在进行的传输可以继续。': 'The invitation has expired. Transfers in progress can continue.',

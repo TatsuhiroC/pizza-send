@@ -58,8 +58,8 @@ for (const megabytes of [200, 1024]) {
       test.skip(capacity.quota !== undefined && capacity.quota < megabytes * 1024 * 1024 * 1.2, 'Isolated browser OPFS quota is too small for this fixture; use a host with more storage.');
       const started = Date.now();
       await receiver.locator('#accept-files').click();
-      await receiver.waitForFunction(() => ['传输完成，原样送达。', '传输未完成'].includes(document.getElementById('status')?.textContent || ''), null, { timeout: 300000 });
-      expect(await receiver.locator('#status').textContent(), await receiver.locator('#notice').textContent() || 'transfer failed').toBe('传输完成，原样送达。');
+      await receiver.waitForFunction(() => ['已保存到设备', '传输未完成'].includes(document.getElementById('status')?.textContent || ''), null, { timeout: 300000 });
+      expect(await receiver.locator('#status').textContent(), await receiver.locator('#notice').textContent() || 'transfer failed').toBe('已保存到设备');
       await expect(page.locator('#status')).toHaveText('传输完成，原样送达。');
       const result = await receiver.evaluate(async () => {
         const { sha256 } = await import('/node_modules/@noble/hashes/sha2.js');

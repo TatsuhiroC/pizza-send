@@ -31,7 +31,7 @@ for (const memory of [false, true]) test(`${memory ? 'memory' : 'disk'} download
   await page.locator('#start-send').click(); await expect(page.locator('#share-box')).toBeVisible();
   await receiver.goto(await page.locator('#share-link').inputValue());
   await expect(receiver.locator('#accept-files')).toBeVisible(); await receiver.locator('#accept-files').click();
-  await expect(receiver.locator('#status')).toHaveText('传输完成，原样送达。');
+  await expect(receiver.locator('#status')).toHaveText('文件已收到，请保存到设备');
   if (!memory) await receiver.reload();
   await expect(receiver.locator('.download-file')).toHaveCount(files.length);
   for (const file of files) {

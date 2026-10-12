@@ -63,11 +63,11 @@ test('switching while paired preserves the session and translates completion and
   await expect(receiver.locator('html')).toHaveAttribute('lang', 'en');
   await expect(receiver.locator('#save-note')).toContainText('Files are written to this device’s disk');
   await receiver.locator('#accept-files').click();
-  await expect(receiver.locator('#status')).toHaveText('Transfer complete. Every byte intact.');
-  await expect(receiver.locator('.download-file')).toHaveText('Save');
+  await expect(receiver.locator('#status')).toHaveText('Files received. Save to your device.');
+  await expect(receiver.locator('.download-file')).toHaveText('Save to device');
   await receiver.locator('#language-toggle').click();
-  await expect(receiver.locator('#status')).toHaveText('传输完成，原样送达。');
-  await expect(receiver.locator('.download-file')).toHaveText('保存');
+  await expect(receiver.locator('#status')).toHaveText('文件已收到，请保存到设备');
+  await expect(receiver.locator('.download-file')).toHaveText('保存到设备');
   await expect(receiver.locator('#connection-path')).toContainText('DTLS 加密');
   await receiver.locator('#language-toggle').click();
   await expect(receiver.locator('#connection-path')).toContainText('DTLS encrypted');

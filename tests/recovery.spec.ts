@@ -67,7 +67,7 @@ test('repeated transport and signaling interruptions resume a multi-file downloa
   await interrupt(receiver);
   await expect.poll(() => page.evaluate(() => (window as any).__starts.filter((start: any) => start.offset > 0).length), { timeout: 40000 }).toBe(2);
   await expect(page.locator('#status')).toHaveText('传输完成，原样送达。', { timeout: 60000 });
-  await expect(receiver.locator('#status')).toHaveText('传输完成，原样送达。');
+  await expect(receiver.locator('#status')).toHaveText('文件已收到，请保存到设备');
   const state = await page.evaluate(() => ({ starts: (window as any).__starts, sent: (window as any).__sentBytes }));
   expect(state.starts.filter((start: any) => start.id === 0)).toHaveLength(1);
   expect(state.starts.filter((start: any) => start.offset > 0).every((start: any) => start.id === 1)).toBe(true);

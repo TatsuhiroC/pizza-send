@@ -103,6 +103,8 @@ export class Transfer {
   private recovery?: () => void;
   private candidate?: (candidate: RTCIceCandidateInit | null) => void;
   get hasAccepted() { return this.accepted; }
+  get saveMode(): 'device' | 'disk' | 'memory' { return this.handles.length ? 'device' : this.temporary ? 'disk' : 'memory'; }
+  get temporarySession() { return this.temporary; }
   pairingStage(data: string) { if (!this.opened && !this.stopped) this.emit({ type: 'pairing', data }); }
   waitForReceiver() {
     this.opened = false; this.recovering = false;

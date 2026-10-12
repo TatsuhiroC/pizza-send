@@ -31,7 +31,7 @@ async function share(sender: Page, buffer: Buffer) {
 }
 async function join(receiver: Page, url: string) { await receiver.goto(url); await expect(receiver.locator('#accept-files')).toBeVisible(); }
 async function downloaded(receiver: Page, buffer: Buffer) {
-  await expect(receiver.locator('#status')).toHaveText('传输完成，原样送达。', { timeout: 60000 });
+  await expect(receiver.locator('#status')).toHaveText('文件已收到，请保存到设备', { timeout: 60000 });
   const result = receiver.waitForEvent('download'); await receiver.locator('.download-file').click();
   const download = await result;
   expect(download.suggestedFilename()).toBe('多人-原样.mp4');

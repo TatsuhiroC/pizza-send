@@ -143,7 +143,7 @@ test('old three-part share URLs remain usable with the original room API', async
   await receiver.goto(oldLink);
   await expect(receiver.locator('#accept-files')).toBeVisible();
   await receiver.locator('#accept-files').click();
-  await expect(receiver.locator('#status')).toHaveText('传输完成，原样送达。');
+  await expect(receiver.locator('#status')).toHaveText('文件已收到，请保存到设备');
   const download = receiver.waitForEvent('download'); await receiver.locator('.download-file').click();
   expect((await readFile((await (await download).path())!)).toString()).toBe('Legacy sharing still works.');
   await page.evaluate(() => (window as any).__legacyPair.close());

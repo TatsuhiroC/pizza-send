@@ -30,10 +30,10 @@ app.innerHTML = [
   '<main><section class="intro"><div class="eyebrow"><span></span>好东西，直接分享。</div><h1>文件送到，<br/><span>热乎刚好。</span><img class="hero-pizza" src="./pizza.svg" alt="" width="104" height="104"/></h1><p>不用安装，不用注册。<br class="mobile-break"/>打开网页，把文件直接送到另一台设备。</p></section>',
   '<section class="transfer-card" aria-label="文件传输"><div class="card-top"><div class="tabs" role="tablist" aria-label="传输角色"><button id="send-tab" class="tab active" role="tab" aria-selected="true">'+icon('upload')+'发送文件</button><button id="receive-tab" class="tab" role="tab" aria-selected="false">'+icon('down')+'接收文件</button></div><span class="secure">'+icon('lock')+'加密直传</span></div>',
   '<div id="send-view"><button id="drop-zone" class="drop-zone" type="button"><span class="drop-icon">'+icon('upload')+'</span><strong>把文件放在这里</strong><span>拖放文件，或点击选择</span><small>支持多个文件 · 文件内容不上传到服务器</small></button><input id="file-input" type="file" multiple hidden/><div id="files" class="file-list" aria-live="polite"></div><div class="send-bottom"><span id="selection-summary">先选一个文件，就可以开始。</span><button id="start-send" class="primary" disabled>创建传输 '+icon('arrow')+'</button></div></div>',
-  '<div id="receive-view" hidden><div class="receive-intro"><span class="drop-icon">'+icon('down')+'</span><h2>接住这一份分享</h2><p>打开对方发来的分享链接即可连接。<br/>也可以在这里粘贴链接或配对码。</p></div><button id="open-scanner" class="secondary wide scan-button" type="button">'+icon('camera')+'打开相机扫描</button><p class="scan-alternative subtle">或粘贴分享链接／配对码</p><label class="sr-only" for="receive-code">分享链接或配对码</label><textarea id="receive-code" rows="3" placeholder="粘贴 PizzaSend 分享链接或 PS1. 配对码"></textarea><button id="connect-receive" class="primary wide">连接发送方 '+icon('arrow')+'</button><div id="incoming-files" class="file-list"></div><button id="accept-files" class="primary wide" hidden>选择保存位置并接收 '+icon('down')+'</button><p id="save-note" class="subtle" hidden></p><div id="downloads" class="downloads"></div></div>',
-  '<div id="session-panel" class="session-panel" hidden><div class="session-heading"><span id="status-dot" class="status-dot"></span><h2 id="status">等待接收方</h2><button id="cancel" class="text-button">结束传输</button></div><p id="status-detail" class="subtle">传输期间请保持双方页面打开。</p><div id="share-box" hidden><label for="share-link">把链接发给对方，或者让对方扫码</label><div class="link-row"><input id="share-link" readonly/><button id="copy-link" class="icon-button" aria-label="复制分享链接">'+icon('copy')+'</button></div><canvas id="share-qr" hidden></canvas><p id="share-note" class="subtle">链接 30 分钟内可加入，最多 10 位同时接收。请只分享给预期接收者。</p></div><div id="recipients" class="recipients" hidden></div><div id="progress-box" hidden><div class="progress-meta"><button id="current-file" class="filename-button" type="button" aria-haspopup="dialog"></button><span id="percent">0%</span></div><progress id="progress" max="100" value="0" aria-label="传输进度"></progress><div class="metrics"><div><span id="transferred">0 B</span><small>已接收</small></div><div><span id="speed">—</span><small>平均速度</small></div><div><span id="remaining">—</span><small>预计剩余</small></div></div><div class="path-label">'+icon('lock')+'<span id="connection-path">浏览器之间加密传输</span><span>SHA-256 校验</span></div></div></div>',
+  '<div id="receive-view" hidden><div class="receive-intro"><span class="drop-icon">'+icon('down')+'</span><h2>接住这一份分享</h2><p>打开对方发来的分享链接即可连接。<br/>也可以在这里粘贴链接或配对码。</p></div><button id="open-scanner" class="secondary wide scan-button" type="button">'+icon('camera')+'打开相机扫描</button><p class="scan-alternative subtle">或粘贴分享链接／配对码</p><label class="sr-only" for="receive-code">分享链接或配对码</label><textarea id="receive-code" rows="3" placeholder="粘贴 PizzaSend 分享链接或 PS1. 配对码"></textarea><button id="connect-receive" class="primary wide">连接发送方 '+icon('arrow')+'</button><div id="incoming-files" class="file-list"></div><button id="accept-files" class="primary wide" hidden>选择保存位置并接收 '+icon('down')+'</button><p id="save-note" class="subtle" hidden></p></div>',
+  '<div id="session-panel" class="session-panel" hidden><div class="session-heading"><span id="status-dot" class="status-dot"></span><h2 id="status">等待接收方</h2><button id="cancel" class="text-button">结束传输</button></div><p id="status-detail" class="subtle">传输期间请保持双方页面打开。</p><section id="save-panel" class="save-panel" aria-labelledby="save-heading" hidden><h3 id="save-heading" tabindex="-1">保存到设备</h3><p id="save-location-note" class="subtle">文件目前保存在浏览器暂存中，保存后才能在手机的“文件”App 或浏览器下载记录中找到。</p><div id="save-files"></div><div id="downloads" class="downloads"></div><p id="save-empty" class="subtle" hidden>暂存已清理或到期。如未保存，请让发送方重新分享。</p><p id="save-retention" class="subtle"></p><p id="save-feedback" class="save-feedback" role="status" hidden></p></section><div id="share-box" hidden><label for="share-link">把链接发给对方，或者让对方扫码</label><div class="link-row"><input id="share-link" readonly/><button id="copy-link" class="icon-button" aria-label="复制分享链接">'+icon('copy')+'</button></div><canvas id="share-qr" hidden></canvas><p id="share-note" class="subtle">链接 30 分钟内可加入，最多 10 位同时接收。请只分享给预期接收者。</p></div><div id="recipients" class="recipients" hidden></div><div id="progress-box" hidden><div class="progress-meta"><button id="current-file" class="filename-button" type="button" aria-haspopup="dialog"></button><span id="percent">0%</span></div><progress id="progress" max="100" value="0" aria-label="传输进度"></progress><div class="metrics"><div><span id="transferred">0 B</span><small>已接收</small></div><div><span id="speed">—</span><small>平均速度</small></div><div><span id="remaining">—</span><small>预计剩余</small></div></div><div class="path-label">'+icon('lock')+'<span id="connection-path">浏览器之间加密传输</span><span>SHA-256 校验</span></div></div></div>',
   '<div id="notice" class="notice" role="alert" hidden></div></section>',
-  '<section id="stored-panel" class="stored-panel" aria-labelledby="stored-heading" hidden><div class="stored-heading"><div><h2 id="stored-heading">本机暂存</h2><span id="stored-size"></span></div><button id="clear-stored" class="secondary cleanup-stored" type="button" hidden>'+icon('trash')+'<span>已保存，清理全部暂存</span></button></div><p class="subtle">文件暂存在这台设备的磁盘里，整批接收完成后保留 10 分钟。点击保存会为该文件重新预留 10 分钟；下载完成后，也可以立即清理全部暂存。</p><p id="stored-busy" class="subtle" hidden>部分暂存正在另一个页面使用。请关闭该页面后，再清理全部暂存。</p><div id="stored-files"></div><p class="subtle">到期自动清理。网页关闭或暂停时，下次打开或返回再清理；不会删除已经下载的副本。刷新不会延长保存时间，未完成的传输不能在刷新后续传。浏览器也可能提前回收暂存，请及时保存。</p></section>',
+  '<section id="stored-panel" class="stored-panel" aria-labelledby="stored-heading" hidden><div class="stored-heading"><div><h2 id="stored-heading">本机暂存</h2><span id="stored-size"></span></div><button id="clear-stored" class="secondary cleanup-stored" type="button" hidden>'+icon('trash')+'<span>清理全部暂存</span></button></div><p class="subtle">文件暂存在这台设备的磁盘里，整批接收完成后保留 10 分钟。点击保存会为该文件重新预留 10 分钟；下载完成后，也可以立即清理全部暂存。</p><p id="stored-busy" class="subtle" hidden>部分暂存正在另一个页面使用。请关闭该页面后，再清理全部暂存。</p><div id="stored-files"></div><p class="subtle">到期自动清理。网页关闭或暂停时，下次打开或返回再清理；不会删除已经下载的副本。刷新不会延长保存时间，未完成的传输不能在刷新后续传。浏览器也可能提前回收暂存，请及时保存。</p></section>',
   '<section class="benefits"><div>'+icon('bolt')+'<h3>直接送达</h3><p>两端连接后，即传即收。</p></div><div>'+icon('lock')+'<h3>加密传输</h3><p>文件在浏览器之间加密传递。</p></div><div>'+icon('file')+'<h3>原样分享</h3><p>保留内容，逐个校验文件。</p></div></section>',
   '<details class="faq"><summary>开始之前，你可能想知道</summary><div><p><strong>要一直打开页面吗？</strong> 是的。发送和接收期间请保持页面打开，手机尽量不要锁屏。关闭页面会中断传输。</p><p><strong>大文件能传吗？</strong> 桌面 Chrome / Edge 支持直接保存。支持写盘的 Safari 等浏览器先在本机磁盘暂存，再点击保存；大小取决于设备空间和浏览器额度，保存时可能同时占用两份空间。不支持写盘时仍限制为总计 256 MB。</p><p><strong>所有网络都能连上吗？</strong> 首版使用直连，不提供文件中继。部分移动、公司或受限网络可能无法连接，可以尝试同一 Wi-Fi。</p><p><strong>可以断点续传吗？</strong> 自动配对支持页面保持打开时断线重连、从已接收位置续传。刷新或关闭页面后不能续传；手动配对暂不支持自动重连。</p><p><strong>“加密”意味着什么？</strong> WebRTC 数据通道使用 DTLS 加密。自动配对信息也在浏览器里加密，配对密钥放在链接片段中。使用网页仍需要信任本站提供的程序代码。</p></div></details>',
   '<details class="settings"><summary>连接设置</summary><div class="settings-body"><label for="signal-url">配对服务地址</label><input id="signal-url" placeholder="https://pizza-send-signal.…workers.dev"/><label for="stun-url">STUN 服务地址</label><input id="stun-url" placeholder="stun:stun.cloudflare.com:3478"/><button id="save-settings" class="secondary">保存设置</button><p class="subtle">没有配对服务时，可用手动配对码连接。STUN 只帮助建立连接，不中转文件。</p></div></details>',
@@ -69,6 +69,8 @@ let clearingStored = false;
 let storedRevision = 0;
 let storedFingerprint = '';
 let storedRetry: ReturnType<typeof setTimeout> | undefined;
+const saveRequests = new Set<string>();
+let pendingSaveScroll: number | undefined;
 const storageReady = supportsTemporaryStorage().then(value => diskStorageAvailable = value);
 function saveNote(manifest: FileInfo[]) {
   const native = manifest.length === 1 ? typeof (window as any).showSaveFilePicker === 'function' : typeof (window as any).showDirectoryPicker === 'function';
@@ -94,26 +96,30 @@ async function refreshStored() {
     $('stored-busy').hidden = !temporaryBusyCount();
     $('stored-panel').hidden = !links.length && !temporaryBusyCount();
     setText($('stored-size'), '暂存占用 {size}', { size: bytes(records.reduce((sum, item) => sum + item.info.size, 0)) });
-    const fingerprint = JSON.stringify(links);
-    if (fingerprint === storedFingerprint) { updateStoredDeadlines(); return; }
+    const currentSession = currentTemporarySession();
+    const fingerprint = JSON.stringify({ links, currentSession });
+    if (fingerprint === storedFingerprint) { updateStoredDeadlines(); updateSaveAvailability(); return; }
     storedFingerprint = fingerprint;
-    $('stored-files').replaceChildren();
+    $('stored-files').replaceChildren(); $('save-files').replaceChildren();
     for (const { record, url } of links) {
       const row = document.createElement('div'); row.className = 'stored-file'; row.dataset.key = storedKey(record);
       const a = document.createElement('a'); a.download = record.info.name; a.className = 'download-file';
       if (url) {
         a.href = url;
         // Preserve Safari's direct download gesture; extending retention runs alongside it.
-        a.onclick = () => { void retainTemporaryFile(record).catch(error => notice(errorMessage(error))); };
+        a.onclick = () => { markSaveRequested(storedKey(record)); void retainTemporaryFile(record).catch(error => notice(errorMessage(error))); };
       } else { a.setAttribute('aria-disabled', 'true'); a.classList.add('unavailable-file'); }
-      const download = downloadRow(record.info.name, a);
+      const prominent = record.session === currentSession;
+      const download = downloadRow(record.info.name, a, prominent);
       const detail = document.createElement('div'); detail.className = 'stored-detail';
       const size = document.createElement('span');
       if (record.unavailable) setText(size, '暂存文件不可用，可以清理记录'); else size.textContent = bytes(record.info.size);
       const deadline = document.createElement('span'); deadline.className = 'stored-deadline';
-      detail.append(size, deadline); row.append(download, detail); $('stored-files').append(row);
+      detail.append(size, deadline); row.append(download, detail);
+      restoreSaveRequest(row, storedKey(record));
+      $(prominent ? 'save-files' : 'stored-files').append(row);
     }
-    updateStoredDeadlines();
+    updateStoredDeadlines(); updateSaveAvailability();
   } catch (error) {
     if (revision === storedRevision) {
       notice(errorMessage(error)); clearTimeout(storedRetry);
@@ -128,7 +134,8 @@ function updateStoredDeadlines() {
     if (label) setText(label, record.expiresAt === undefined ? '本次传输结束后保留 10 分钟' : '约 {minutes} 分钟后清理', { minutes: Math.max(1, Math.ceil(((record.expiresAt ?? 0) - Date.now()) / 60000)) });
   }
 }
-document.addEventListener('visibilitychange', () => { if (!document.hidden) void refreshStored(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { void refreshStored(); revealSaveActions(); } });
+document.addEventListener('close', () => revealSaveActions(), true);
 window.addEventListener('focus', () => { void refreshStored(); });
 window.addEventListener('pizzasend-storage-change', () => { void refreshStored(); });
 void storageReady.then(() => {
@@ -142,10 +149,10 @@ function filenameButton(name: string) {
   button.textContent = name; button.title = name; button.setAttribute('aria-haspopup', 'dialog');
   return button;
 }
-function downloadRow(name: string, link: HTMLAnchorElement) {
+function downloadRow(name: string, link: HTMLAnchorElement, prominent = false) {
   const row = document.createElement('div'); row.className = 'download-row';
   link.innerHTML = icon('down') + '<span></span>';
-  setText(link.querySelector('span')!, '保存');
+  setText(link.querySelector('span')!, prominent ? '保存到设备' : '保存');
   const button = filenameButton(name); link.setAttribute('aria-describedby', button.id);
   row.append(button, link); return row;
 }
@@ -282,7 +289,7 @@ function clearShareQR() {
 
 }
 function reset() {
-  sessionRevision++;
+  sessionRevision++; pendingSaveScroll = undefined; saveRequests.clear();
   closeScanner();
   senderGroup?.close(); senderGroup = undefined; leaveReceiverGroup();
   signaling?.close(); signaling = undefined;
@@ -291,6 +298,8 @@ function reset() {
   $('recipients').replaceChildren(); $('recipients').hidden = true;
   $('share-box').hidden = true; $('progress-box').hidden = true; $('session-panel').hidden = true;
   $('notice').hidden = true; $('incoming-files').innerHTML = ''; $('downloads').innerHTML = '';
+  $('save-panel').hidden = true; $('save-feedback').hidden = true; $('save-files').replaceChildren();
+  void refreshStored();
   $('accept-files').hidden = true; $('save-note').hidden = true;
   setText($('cancel'), '结束传输');
   $<HTMLButtonElement>('accept-files').disabled = false;
@@ -324,9 +333,13 @@ function events(event: TransferEvent) {
   } else if (event.type === 'download') {
     const a = document.createElement('a'); a.href = event.data.url; a.download = event.data.info.name;
     a.className = 'download-file';
-    $('downloads').append(downloadRow(event.data.info.name, a));
+    const key = 'memory:' + sessionRevision + ':' + event.data.info.id;
+    const row = document.createElement('div'); row.className = 'memory-file'; row.dataset.saveKey = key;
+    row.append(downloadRow(event.data.info.name, a, true));
+    a.onclick = () => markSaveRequested(key); $('downloads').append(row);
   } else if (event.type === 'done') {
-    status('传输完成，原样送达。', transfer?.role === 'sender' ? '接收方已收到并校验全部文件。' : '全部文件通过 SHA-256 校验；若下方有保存按钮，请点击保存。', 'done');
+    if (transfer?.role === 'receiver') completeReception(transfer);
+    else status('传输完成，原样送达。', '接收方已收到并校验全部文件。', 'done');
     $<HTMLProgressElement>('progress').value = 100; setText($('percent'), '100%'); setText($('remaining'), '完成');
     setText($('cancel'), '开始新的传输');
     // The receiver keeps pairing available until the sender confirms completion,
@@ -338,11 +351,64 @@ function events(event: TransferEvent) {
   } else if (event.type === 'resumed') {
     status('连接已恢复，继续传输', '从接收方确认的位置继续，完成后仍会校验整个文件。', 'connected');
   } else if (event.type === 'error') {
-    $('downloads').innerHTML = ''; $('accept-files').hidden = true;
+    $('downloads').innerHTML = ''; $('save-panel').hidden = true; pendingSaveScroll = undefined; $('accept-files').hidden = true;
     notice(event.data); status('传输未完成', '可以结束这次传输，重新配对后再试。', 'error');
     leaveReceiverGroup(); signaling?.close(); signaling = undefined; setText($('cancel'), '重新开始');
     $<HTMLDialogElement>('pair-dialog').close();
   }
+}
+function currentTemporarySession() {
+  return transfer?.role === 'receiver' && transfer.completed ? transfer.temporarySession : undefined;
+}
+function restoreSaveRequest(row: HTMLElement, key: string) {
+  row.dataset.saveKey = key;
+  if (!saveRequests.has(key)) return;
+  let state = row.querySelector<HTMLElement>('.save-request-state');
+  if (!state) { state = document.createElement('p'); state.className = 'save-request-state'; row.append(state); }
+  setText(state, '已发起保存，请确认下载提示');
+}
+function markSaveRequested(key: string) {
+  saveRequests.add(key);
+  for (const row of document.querySelectorAll<HTMLElement>('[data-save-key]')) if (row.dataset.saveKey === key) restoreSaveRequest(row, key);
+  setText($('save-feedback'), '已发起保存，请确认浏览器的下载提示。下载完成后，可在手机的“文件”App 或浏览器下载记录中查找。');
+  // A download click is not proof of a completed or accepted browser download.
+  $('save-feedback').hidden = $('save-panel').hidden;
+  const currentRows = Array.from($('save-panel').querySelectorAll<HTMLElement>('[data-save-key]'));
+  if (transfer?.role === 'receiver' && transfer.completed && currentRows.length === transfer.manifest.length && currentRows.every(row => saveRequests.has(row.dataset.saveKey!))) {
+    status('已发起保存，请确认下载提示', '请在浏览器中确认保存，并等待下载完成。');
+  }
+}
+function updateSaveAvailability() {
+  if (transfer?.role !== 'receiver' || !transfer.completed || transfer.saveMode === 'device') return;
+  const available = !!$('save-panel').querySelector('a.download-file[href]');
+  $('save-empty').hidden = available; $('save-retention').hidden = !available;
+}
+function revealSaveActions() {
+  const revision = pendingSaveScroll;
+  if (revision === undefined || document.hidden || document.querySelector('dialog[open]')) return;
+  requestAnimationFrame(() => {
+    if (pendingSaveScroll !== revision || sessionRevision !== revision || transfer?.role !== 'receiver' || !transfer.completed || document.hidden || document.querySelector('dialog[open]')) return;
+    pendingSaveScroll = undefined;
+    $('session-panel').scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
+    $('save-heading').focus({ preventScroll: true });
+  });
+}
+function completeReception(current: Transfer) {
+  $('save-note').hidden = true;
+  if (current.saveMode === 'device') {
+    status('已保存到设备', '文件已写入你选择的位置，并通过 SHA-256 校验。', 'done');
+    return;
+  }
+  status('文件已收到，请保存到设备', '全部文件通过 SHA-256 校验，还需要点击下面的保存按钮。');
+  $('save-panel').hidden = false; $('save-panel').classList.toggle('single-file', current.manifest.length === 1);
+  $('save-feedback').hidden = true;
+  setText($('save-retention'), current.saveMode === 'disk' ? '浏览器暂存保留 10 分钟。点击保存会为该文件重新预留 10 分钟；请确认下载完成后再清理。' : '文件暂存在浏览器内存中，请保持页面打开并及时保存；刷新或关闭页面会丢失。');
+  const revision = sessionRevision;
+  // Obtain disk-backed URLs first; scrolling must reveal a usable save action.
+  void refreshStored().then(() => {
+    if (transfer !== current || !current.completed || current.stopped || revision !== sessionRevision) return;
+    updateSaveAvailability(); pendingSaveScroll = revision; revealSaveActions();
+  });
 }
 function leaveReceiverGroup() {
   const url = receiverGroupURL; receiverGroupURL = '';
