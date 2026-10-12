@@ -2,6 +2,7 @@ import { registerStatic, setText, t, toggleLanguage } from './i18n';
 import QRCode from 'qrcode';
 import { deriveShare, receiverDigest, shareFragment, parseShare, isSharingURL } from './share';
 import { CameraScanner } from './scanner';
+import { supportsTemporaryStorage, listTemporaryFiles, temporaryURL, deleteTemporaryFile, storedKey, temporaryBusyCount, suspendTemporaryStorage, type StoredFile } from './received-storage';
 import { Transfer, AutoPair, bytes, randomToken, packDescription, unpackDescription, signalKey, type Config, type FileInfo, type TransferEvent } from './protocol';
 import './style.css';
 
@@ -23,19 +24,21 @@ const icon = (name: string) => {
 };
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = [
-  '<header class="header"><a class="brand" href="./"><img src="./pizza.svg" alt="" width="38" height="38"/><span>PizzaSend<small>文件快传</small></span></a><div class="header-right"><span class="version">第一片 · v0.1</span><button id="language-toggle" class="language-toggle" type="button"><span data-language="zh">中</span><span class="language-divider" aria-hidden="true">/</span><span data-language="en">EN</span></button><a class="github" href="https://github.com/TatsuhiroC/pizza-send" target="_blank" rel="noopener">GitHub ↗</a></div></header>',
+  '<header class="header"><a class="brand" href="./"><img src="./pizza.svg" alt="" width="38" height="38"/><span>PizzaSend<small>文件快传</small></span></a><div class="header-right"><span class="version">第二片 · v0.2</span><button id="language-toggle" class="language-toggle" type="button"><span data-language="zh">中</span><span class="language-divider" aria-hidden="true">/</span><span data-language="en">EN</span></button><a class="github" href="https://github.com/TatsuhiroC/pizza-send" target="_blank" rel="noopener">GitHub ↗</a></div></header>',
   '<main><section class="intro"><div class="eyebrow"><span></span>好东西，直接分享。</div><h1>文件送到，<br/><span>热乎刚好。</span><img class="hero-pizza" src="./pizza.svg" alt="" width="104" height="104"/></h1><p>不用安装，不用注册。<br class="mobile-break"/>打开网页，把文件直接送到另一台设备。</p></section>',
   '<section class="transfer-card" aria-label="文件传输"><div class="card-top"><div class="tabs" role="tablist" aria-label="传输角色"><button id="send-tab" class="tab active" role="tab" aria-selected="true">'+icon('upload')+'发送文件</button><button id="receive-tab" class="tab" role="tab" aria-selected="false">'+icon('down')+'接收文件</button></div><span class="secure">'+icon('lock')+'加密直传</span></div>',
   '<div id="send-view"><button id="drop-zone" class="drop-zone" type="button"><span class="drop-icon">'+icon('upload')+'</span><strong>把文件放在这里</strong><span>拖放文件，或点击选择</span><small>支持多个文件 · 文件内容不上传到服务器</small></button><input id="file-input" type="file" multiple hidden/><div id="files" class="file-list" aria-live="polite"></div><div class="send-bottom"><span id="selection-summary">先选一个文件，就可以开始。</span><button id="start-send" class="primary" disabled>创建传输 '+icon('arrow')+'</button></div></div>',
   '<div id="receive-view" hidden><div class="receive-intro"><span class="drop-icon">'+icon('down')+'</span><h2>接住这一份分享</h2><p>打开对方发来的分享链接即可连接。<br/>也可以在这里粘贴链接或配对码。</p></div><button id="open-scanner" class="secondary wide scan-button" type="button">'+icon('camera')+'打开相机扫描</button><p class="scan-alternative subtle">或粘贴分享链接／配对码</p><label class="sr-only" for="receive-code">分享链接或配对码</label><textarea id="receive-code" rows="3" placeholder="粘贴 PizzaSend 分享链接或 PS1. 配对码"></textarea><button id="connect-receive" class="primary wide">连接发送方 '+icon('arrow')+'</button><div id="incoming-files" class="file-list"></div><button id="accept-files" class="primary wide" hidden>选择保存位置并接收 '+icon('down')+'</button><p id="save-note" class="subtle" hidden></p><div id="downloads" class="downloads"></div></div>',
   '<div id="session-panel" class="session-panel" hidden><div class="session-heading"><span id="status-dot" class="status-dot"></span><h2 id="status">等待接收方</h2><button id="cancel" class="text-button">结束传输</button></div><p id="status-detail" class="subtle">传输期间请保持双方页面打开。</p><div id="share-box" hidden><label for="share-link">把链接发给对方，或者让对方扫码</label><div class="link-row"><input id="share-link" readonly/><button id="copy-link" class="icon-button" aria-label="复制分享链接">'+icon('copy')+'</button><button id="show-qr" class="icon-button" aria-label="显示分享二维码">'+icon('qr')+'</button></div><canvas id="share-qr" hidden></canvas><p class="subtle">链接 30 分钟内可配对，仅限一位接收方。请只分享给预期接收者。</p></div><div id="progress-box" hidden><div class="progress-meta"><span id="current-file"></span><span id="percent">0%</span></div><progress id="progress" max="100" value="0" aria-label="传输进度"></progress><div class="metrics"><div><span id="transferred">0 B</span><small>已接收</small></div><div><span id="speed">—</span><small>平均速度</small></div><div><span id="remaining">—</span><small>预计剩余</small></div></div><div class="path-label">'+icon('lock')+'<span id="connection-path">浏览器之间加密传输</span><span>SHA-256 校验</span></div></div></div>',
   '<div id="notice" class="notice" role="alert" hidden></div></section>',
+  '<section id="stored-panel" class="stored-panel" aria-labelledby="stored-heading" hidden><div class="stored-heading"><h2 id="stored-heading">本机暂存</h2><span id="stored-size"></span></div><p class="subtle">文件暂存在这台设备的磁盘里。请先保存，等下载完成后再清理暂存。关闭网页不会立即释放这些空间。</p><p id="stored-busy" class="subtle" hidden>部分暂存正在另一个页面使用。请回到原页面保存，或关闭原页面后刷新这里。</p><div id="stored-files"></div><p class="subtle">重新打开本站可以再次保存已校验的文件；未完成的传输不能在刷新后续传，其残留暂存在下次打开时清理。浏览器清理网站数据也可能移除文件。</p></section>',
   '<section class="benefits"><div>'+icon('bolt')+'<h3>直接送达</h3><p>两端连接后，即传即收。</p></div><div>'+icon('lock')+'<h3>加密传输</h3><p>文件在浏览器之间加密传递。</p></div><div>'+icon('file')+'<h3>原样分享</h3><p>保留内容，逐个校验文件。</p></div></section>',
-  '<details class="faq"><summary>开始之前，你可能想知道</summary><div><p><strong>要一直打开页面吗？</strong> 是的。发送和接收期间请保持页面打开，手机尽量不要锁屏。关闭页面会中断传输。</p><p><strong>大文件能传吗？</strong> 桌面 Chrome / Edge 支持直接写入磁盘。其他浏览器会先缓存在内存里，首版限制为总计 256 MB。</p><p><strong>所有网络都能连上吗？</strong> 首版使用直连，不提供文件中继。部分移动、公司或受限网络可能无法连接，可以尝试同一 Wi-Fi。</p><p><strong>可以断点续传吗？</strong> 自动配对支持页面保持打开时断线重连、从已接收位置续传。刷新或关闭页面后不能续传；手动配对暂不支持自动重连。</p><p><strong>“加密”意味着什么？</strong> WebRTC 数据通道使用 DTLS 加密。自动配对信息也在浏览器里加密，配对密钥放在链接片段中。使用网页仍需要信任本站提供的程序代码。</p></div></details>',
+  '<details class="faq"><summary>开始之前，你可能想知道</summary><div><p><strong>要一直打开页面吗？</strong> 是的。发送和接收期间请保持页面打开，手机尽量不要锁屏。关闭页面会中断传输。</p><p><strong>大文件能传吗？</strong> 桌面 Chrome / Edge 支持直接保存。支持写盘的 Safari 等浏览器先在本机磁盘暂存，再点击保存；大小取决于设备空间和浏览器额度，保存时可能同时占用两份空间。不支持写盘时仍限制为总计 256 MB。</p><p><strong>所有网络都能连上吗？</strong> 首版使用直连，不提供文件中继。部分移动、公司或受限网络可能无法连接，可以尝试同一 Wi-Fi。</p><p><strong>可以断点续传吗？</strong> 自动配对支持页面保持打开时断线重连、从已接收位置续传。刷新或关闭页面后不能续传；手动配对暂不支持自动重连。</p><p><strong>“加密”意味着什么？</strong> WebRTC 数据通道使用 DTLS 加密。自动配对信息也在浏览器里加密，配对密钥放在链接片段中。使用网页仍需要信任本站提供的程序代码。</p></div></details>',
   '<details class="settings"><summary>连接设置</summary><div class="settings-body"><label for="signal-url">配对服务地址</label><input id="signal-url" placeholder="https://pizza-send-signal.…workers.dev"/><label for="stun-url">STUN 服务地址</label><input id="stun-url" placeholder="stun:stun.cloudflare.com:3478"/><button id="save-settings" class="secondary">保存设置</button><p class="subtle">没有配对服务时，可用手动配对码连接。STUN 只帮助建立连接，不中转文件。</p></div></details>',
   '</main><footer><span>🍕 一点披萨精神，一份直接的分享。</span><span>受 <a href="https://github.com/kern/filepizza" target="_blank" rel="noopener">FilePizza</a> 启发 · 开源制作</span></footer>',
   '<dialog id="pair-dialog"><div class="dialog-heading"><h2>手动配对</h2><button id="close-dialog" class="icon-button" aria-label="关闭配对窗口">'+icon('close')+'</button></div><p id="pair-instructions"></p><label id="outgoing-label" for="outgoing-code">配对码</label><textarea id="outgoing-code" rows="4" readonly></textarea><div class="dialog-actions"><button id="copy-code" class="secondary">'+icon('copy')+'复制配对码</button><button id="pair-qr-button" class="secondary">'+icon('qr')+'二维码</button></div><canvas id="pair-qr" hidden></canvas><div id="answer-section"><label for="answer-code">对方返回的应答码</label><textarea id="answer-code" rows="3" placeholder="粘贴接收方返回的 PS1. 应答码"></textarea><button id="apply-answer" class="primary wide">完成配对 '+icon('arrow')+'</button></div><p class="subtle">仅交换连接信息，文件仍通过加密直连发送。请只向预期接收者提供配对码。</p></dialog>',
   '<dialog id="scan-dialog" class="scan-dialog"><div class="dialog-heading"><h2>扫描分享二维码</h2><button id="close-scanner" class="icon-button" aria-label="关闭相机">'+icon('close')+'</button></div><div class="scan-frame"><video id="scan-video" autoplay muted playsinline aria-label="相机画面"></video><div class="scan-guide" aria-hidden="true"></div></div><p id="scan-status" role="status">请允许相机权限，将对方的二维码放入画面。</p><p class="subtle">画面仅在本机识别，关闭后相机会停止。</p><div class="dialog-actions"><button id="scan-again" class="secondary" hidden>重试相机</button><button id="choose-qr-image" class="secondary">'+icon('file')+'从图片识别</button></div><input id="qr-image-input" type="file" accept="image/*" hidden/></dialog>',
+  '<dialog id="cleanup-dialog"><div class="dialog-heading"><h2>清理这份暂存？</h2></div><p id="cleanup-name"></p><p>请确认文件已保存，并且浏览器下载已经完成。清理后无法再从本站保存这份暂存；本地下载的副本会保留。</p><div class="dialog-actions"><button id="keep-stored" class="secondary">保留暂存</button><button id="confirm-cleanup" class="primary">确认清理</button></div><p id="cleanup-error" class="subtle" role="alert" hidden></p></dialog>',
   '<div id="toast" class="toast" role="status" hidden></div>'
 ].join('');
 registerStatic(app);
@@ -52,6 +55,66 @@ let toastTimer: ReturnType<typeof setTimeout>;
 const originalHash = location.hash;
 let sessionRevision = 0;
 let scannerSession = 0;
+let diskStorageAvailable = false;
+let cleanupTarget: StoredFile | undefined;
+let storedRevision = 0;
+let storedFingerprint = '';
+let storedRetry: ReturnType<typeof setTimeout> | undefined;
+const storageReady = supportsTemporaryStorage().then(value => diskStorageAvailable = value);
+function saveNote(manifest: FileInfo[]) {
+  const native = manifest.length === 1 ? typeof (window as any).showSaveFilePicker === 'function' : typeof (window as any).showDirectoryPicker === 'function';
+  setText($('save-note'), native ? '选择保存位置后开始传输。文件会写入磁盘，并在完成时校验。' : diskStorageAvailable ? '文件会分块写入本机磁盘，完成后请点击保存。保存时可能同时占用两份空间，下载完成后请清理暂存。' : '当前浏览器将文件暂存在内存中，总计最多 {size}。完成后请点击保存。', { size: bytes(config.memoryLimitBytes) });
+  setText($('accept-files'), native ? '选择保存位置并接收' : '接收文件');
+}
+async function refreshStored() {
+  const revision = ++storedRevision;
+  try {
+    const records = await listTemporaryFiles();
+    const links = await Promise.all(records.map(async record => ({ record, url: record.unavailable ? '' : await temporaryURL(record) })));
+    if (revision !== storedRevision) return;
+    clearTimeout(storedRetry);
+    if (temporaryBusyCount()) storedRetry = setTimeout(() => { void refreshStored(); }, 2000);
+    $('stored-busy').hidden = !temporaryBusyCount();
+    $('stored-panel').hidden = !links.length && !temporaryBusyCount();
+    setText($('stored-size'), '暂存占用 {size}', { size: bytes(records.reduce((sum, item) => sum + item.info.size, 0)) });
+    const fingerprint = JSON.stringify(links);
+    if (fingerprint === storedFingerprint) return;
+    storedFingerprint = fingerprint;
+    $('stored-files').replaceChildren();
+    for (const { record, url } of links) {
+      const row = document.createElement('div'); row.className = 'stored-file'; row.dataset.key = storedKey(record);
+      const a = document.createElement('a'); a.download = record.info.name; a.className = 'download-file';
+      if (url) a.href = url; else { a.setAttribute('aria-disabled', 'true'); a.classList.add('unavailable-file'); }
+      a.innerHTML = icon('down') + '<span></span>' + icon('check');
+      setText(a.querySelector('span')!, '保存 {name}', { name: record.info.name });
+      const detail = document.createElement('div'); detail.className = 'stored-detail';
+      const size = document.createElement('span');
+      if (record.unavailable) setText(size, '暂存文件不可用，可以清理记录'); else size.textContent = bytes(record.info.size);
+      const cleanup = document.createElement('button'); cleanup.className = 'text-button cleanup-stored'; cleanup.type = 'button';
+      setText(cleanup, '已保存，清理暂存');
+      cleanup.onclick = () => {
+        cleanupTarget = record; $('cleanup-name').textContent = record.info.name + ' · ' + bytes(record.info.size);
+        $('cleanup-error').hidden = true; $<HTMLDialogElement>('cleanup-dialog').showModal();
+      };
+      detail.append(size, cleanup); row.append(a, detail); $('stored-files').append(row);
+    }
+  } catch (error) { if (revision === storedRevision) notice(errorMessage(error)); }
+}
+window.addEventListener('pizzasend-storage-change', () => { void refreshStored(); });
+void storageReady.then(() => {
+  if (transfer?.role === 'receiver' && transfer.manifest.length) saveNote(transfer.manifest);
+  return refreshStored();
+});
+$('keep-stored').onclick = () => $<HTMLDialogElement>('cleanup-dialog').close();
+$('confirm-cleanup').onclick = () => {
+  const target = cleanupTarget; if (!target) return;
+  $<HTMLButtonElement>('confirm-cleanup').disabled = true; $<HTMLButtonElement>('keep-stored').disabled = true;
+  void deleteTemporaryFile(target).then(() => {
+    cleanupTarget = undefined; $<HTMLDialogElement>('cleanup-dialog').close(); toast('暂存已清理，本地下载的文件会保留。');
+  }).catch(error => { setText($('cleanup-error'), errorMessage(error)); $('cleanup-error').hidden = false; }).finally(() => {
+    $<HTMLButtonElement>('confirm-cleanup').disabled = false; $<HTMLButtonElement>('keep-stored').disabled = false;
+  });
+};
 const scanner = new CameraScanner($<HTMLVideoElement>('scan-video'), scannedCode, message => scanMessage(message, true));
 function scanMessage(message: string, retry = false) {
   setText($('scan-status'), message); $('scan-again').hidden = !retry;
@@ -159,8 +222,7 @@ function events(event: TransferEvent) {
     const manifest = event.data as FileInfo[];
     $('incoming-files').innerHTML = fileMarkup(manifest);
     $('accept-files').hidden = false; $('save-note').hidden = false;
-    const supportsDisk = manifest.length === 1 ? typeof (window as any).showSaveFilePicker === 'function' : typeof (window as any).showDirectoryPicker === 'function';
-    setText($('save-note'), supportsDisk ? '选择保存位置后开始传输。文件会写入磁盘，并在完成时校验。' : '当前浏览器将文件暂存在内存中，总计最多 {size}。完成后请点击保存。', { size: bytes(config.memoryLimitBytes) });
+    saveNote(manifest);
   } else if (event.type === 'started') {
     $('progress-box').hidden = false; $('share-box').hidden = true; $('accept-files').hidden = true;
     status('正在传输', '请保持页面打开，手机不要锁屏。', 'connected');
@@ -339,6 +401,7 @@ $<HTMLInputElement>('qr-image-input').onchange = () => {
   })();
 };
 $('accept-files').onclick = () => run(async () => {
+  $('notice').hidden = true;
   $<HTMLButtonElement>('accept-files').disabled = true;
   try { await transfer?.accept(); } finally { $<HTMLButtonElement>('accept-files').disabled = false; }
 });
@@ -381,7 +444,8 @@ $('save-settings').onclick = () => run(async () => {
 window.addEventListener('beforeunload', event => {
   if (transfer && !transfer.completed && !transfer.stopped) { event.preventDefault(); event.returnValue = ''; }
 });
-window.addEventListener('pagehide', () => { closeScanner(); signaling?.close(); transfer?.close(false); });
+window.addEventListener('pagehide', () => { clearTimeout(storedRetry); closeScanner(); signaling?.close(); transfer?.close(false); suspendTemporaryStorage(); });
+window.addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
 function readPreference(key: string) {
   try { return localStorage.getItem(key); } catch { return null; }
 }

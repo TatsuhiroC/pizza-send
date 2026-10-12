@@ -1,0 +1,34 @@
+{
+  "engine": "isolated Playwright WebKit, production storage module; no WebRTC in this capacity test",
+  "created": "2026-10-12T05:43:53.957Z",
+  "trials": [
+    {
+      "mib": 10240,
+      "size": 10737418240,
+      "writeHash": "c524a375b630d96417f3390c522690cd3b912d2ff49510b85a39ebbd1efa3d43",
+      "estimate": {
+        "quota": 20615843021,
+        "usage": 0
+      },
+      "writeSeconds": 103.936,
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+      "exportHash": "c524a375b630d96417f3390c522690cd3b912d2ff49510b85a39ebbd1efa3d43",
+      "exportSize": 10737418240,
+      "exportPassed": true
+    },
+    {
+      "mib": 20480,
+      "size": 21474836480,
+      "writeHash": "7ee599ae3d150df2291eea7869f6960b2f5b90b8b144932dda14eae4729e5b70",
+      "estimate": {
+        "quota": 41231686042,
+        "usage": 10742661120
+      },
+      "writeSeconds": 191.015,
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+      "exportHash": "7ee599ae3d150df2291eea7869f6960b2f5b90b8b144932dda14eae4729e5b70",
+      "exportSize": 21474836480,
+      "exportPassed": true
+    }
+  ]
+}

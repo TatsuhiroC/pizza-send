@@ -1,4 +1,4 @@
-import { test, expect, type BrowserContext } from '@playwright/test';
+import { test, expect, type BrowserContext } from './fixtures';
 import { readFile } from 'node:fs/promises';
 
 async function setup(context: BrowserContext) {

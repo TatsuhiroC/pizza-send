@@ -1,4 +1,4 @@
-import { test, expect, type BrowserContext, type Page } from '@playwright/test';
+import { test, expect, type BrowserContext, type Page } from './fixtures';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 

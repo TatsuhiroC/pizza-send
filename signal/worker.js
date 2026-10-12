@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 
 const TTL = 30 * 60 * 1000;
+const MAX_ACTIVE_TTL = 24 * 60 * 60 * 1000;
 const token = () => Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, '0')).join('');
 const digest = async value => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))), b => b.toString(16).padStart(2, '0')).join('');
 async function roomOptions(request) {
@@ -70,7 +71,8 @@ export class Room extends DurableObject {
   async initialize(sender, receiver) {
     const created = await this.ctx.storage.transaction(async storage => {
       if (await storage.get('room')) return false;
-      await storage.put('room', { sender, receiver, expiresAt: Date.now() + TTL, ended: false });
+      const now = Date.now();
+      await storage.put('room', { sender, receiver, inviteExpiresAt: now + TTL, expiresAt: now + TTL, maxExpiresAt: now + MAX_ACTIVE_TTL, ended: false });
       return true;
     });
     if (created) await this.ctx.storage.setAlarm(Date.now() + TTL);
@@ -82,6 +84,7 @@ export class Room extends DurableObject {
     const url = new URL(request.url), role = url.searchParams.get('role'), secret = url.searchParams.get('token') || '', client = url.searchParams.get('client') || '';
     if (!['sender', 'receiver'].includes(role) || !/^[a-f0-9]{64}$/.test(secret) || await digest(secret) !== state[role]) return new Response('Unauthorized', { status: 401 });
     if (client && !/^[a-f0-9]{64}$/.test(client)) return new Response('Invalid client', { status: 400 });
+    if (role === 'receiver' && !state.receiverClient && (state.inviteExpiresAt ?? state.expiresAt) <= Date.now()) return new Response('Invitation expired', { status: 410 });
     const existing = this.sockets(role);
     if (existing.length && (!client || state[role + 'Client'] !== client)) return new Response('Session already occupied', { status: 409 });
     if (state[role + 'Client'] && state[role + 'Client'] !== client) return new Response('Session already occupied', { status: 409 });
@@ -91,6 +94,7 @@ export class Room extends DurableObject {
     const bound = await this.ctx.storage.transaction(async storage => {
       const current = await storage.get('room');
       if (!current || current.ended || current.expiresAt <= Date.now()) return 410;
+      if (role === 'receiver' && !current.receiverClient && (current.inviteExpiresAt ?? current.expiresAt) <= Date.now()) return 410;
       if (current[role + 'Client'] && current[role + 'Client'] !== client) return 409;
       current[role + 'Client'] = client;
       await storage.put('room', current);
@@ -119,7 +123,10 @@ export class Room extends DurableObject {
     if (meta.count > 120) { socket.close(1008, 'Rate limit'); return; }
     try {
       const message = JSON.parse(data);
-      if (message.type === 'keepalive') { socket.send(JSON.stringify({ type: 'keepalive' })); return; }
+      if (message.type === 'keepalive') {
+        await this.renewActive();
+        socket.send(JSON.stringify({ type: 'keepalive' })); return;
+      }
       if (message.type === 'leave' && meta.role === 'receiver') {
         // Explicitly leaving releases the recipient slot. An unexpected network
         // disconnect keeps the binding so recovery cannot be hijacked.
@@ -156,7 +163,26 @@ export class Room extends DurableObject {
     for (const other of this.sockets(meta.role === 'sender' ? 'receiver' : 'sender')) other.send(JSON.stringify({ type: 'peer-left' }));
   }
   async webSocketError(socket) { await this.webSocketClose(socket, 1011, 'Socket error'); }
+  async renewActive() {
+    const now = Date.now();
+    const expiresAt = await this.ctx.storage.transaction(async storage => {
+      const state = await storage.get('room');
+      if (!state || state.ended || state.expiresAt <= now || !state.senderClient || !state.receiverClient) return;
+      // Limit metadata/alarm updates to roughly once a minute. Existing rooms
+      // retain their original invitation expiry when first renewed after upgrade.
+      if (state.expiresAt - now > TTL - 60000) return;
+      state.inviteExpiresAt ??= state.expiresAt;
+      state.maxExpiresAt ??= state.inviteExpiresAt - TTL + MAX_ACTIVE_TTL;
+      const extended = Math.min(now + TTL, state.maxExpiresAt);
+      if (extended <= state.expiresAt) return;
+      state.expiresAt = extended;
+      await storage.put('room', state); return state.expiresAt;
+    });
+    if (expiresAt) await this.ctx.storage.setAlarm(expiresAt);
+  }
   async alarm() {
+    const state = await this.ctx.storage.get('room');
+    if (state && !state.ended && state.expiresAt > Date.now()) { await this.ctx.storage.setAlarm(state.expiresAt); return; }
     for (const socket of this.ctx.getWebSockets()) socket.close(1000, 'Session expired');
     await this.ctx.storage.deleteAll();
   }

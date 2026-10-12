@@ -1,4 +1,4 @@
-import { test as base, expect, chromium } from '@playwright/test';
+import { test as base, expect, chromium } from './fixtures';
 import { open, mkdir, rm, mkdtemp } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve, join } from 'node:path';

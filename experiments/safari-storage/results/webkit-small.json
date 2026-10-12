@@ -1,0 +1,56 @@
+{
+  "engine": "isolated Playwright WebKit, not Safari or iPhone",
+  "created": "2026-10-11T17:04:59.396Z",
+  "trials": [
+    {
+      "mib": 512,
+      "size": 536870912,
+      "chunkBytes": 32768,
+      "writeSeconds": 4.769,
+      "totalSeconds": 8.143,
+      "writeHash": "d9c70032e088fba5bf4c24a6aaf8e55a04ff2513639efe1032e9b58e611cd25a",
+      "readHash": "d9c70032e088fba5bf4c24a6aaf8e55a04ff2513639efe1032e9b58e611cd25a",
+      "exportFileSize": 536870912,
+      "canShare": true,
+      "estimate": {
+        "quota": 20615843021,
+        "usage": 2097152
+      },
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+      "exportHash": "d9c70032e088fba5bf4c24a6aaf8e55a04ff2513639efe1032e9b58e611cd25a",
+      "exportSize": 536870912,
+      "exportPassed": true,
+      "peakDescendantRssMiB": 119,
+      "memoryMetric": "Sampled descendant-process RSS proxy; may omit macOS WebKit service processes. Not total browser memory, JS heap or a system-wide peak."
+    },
+    {
+      "mib": 2048,
+      "size": 2147483648,
+      "chunkBytes": 32768,
+      "writeSeconds": 19.07,
+      "totalSeconds": 32.704,
+      "writeHash": "d5a53858e3b0189c9df2d03c86946a7a44314170681550f87c36f6b2d546b221",
+      "readHash": "d5a53858e3b0189c9df2d03c86946a7a44314170681550f87c36f6b2d546b221",
+      "exportFileSize": 2147483648,
+      "canShare": true,
+      "estimate": {
+        "quota": 20615843021,
+        "usage": 538968064
+      },
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+      "exportHash": "d5a53858e3b0189c9df2d03c86946a7a44314170681550f87c36f6b2d546b221",
+      "exportSize": 2147483648,
+      "exportPassed": true,
+      "peakDescendantRssMiB": 85,
+      "memoryMetric": "Sampled descendant-process RSS proxy; may omit macOS WebKit service processes. Not total browser memory, JS heap or a system-wide peak."
+    }
+  ],
+  "errors": [],
+  "capabilities": {
+    "sync": true,
+    "estimate": {
+      "quota": 20615843021,
+      "usage": 2097152
+    }
+  }
+}

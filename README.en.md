@@ -6,9 +6,9 @@ Open a webpage and send files directly to another device. An independent impleme
 
 **Try it: [tatsuhiroc.github.io/pizza-send](https://tatsuhiroc.github.io/pizza-send/)**
 
-Choose files → Create a transfer → Share the link or QR code → The recipient confirms where to save. Keep both pages open.
+Choose files → Create a transfer → Share the link or QR code → The recipient confirms reception and saves the files. Keep both pages open.
 
-## Initial release features
+## Features
 
 - Multiple files, shareable links, and QR codes; up to 100 files per transfer.
 - Compact share links carry one 43-character secret instead of three random fields. The default URL shrinks from about 241 to 86 characters; older links remain supported.
@@ -16,7 +16,9 @@ Choose files → Create a transfer → Share the link or QR code → The recipie
 - Direct file transfer over an ordered, reliable WebRTC DataChannel with DTLS encryption.
 - 32 KiB chunks, with flow control based on both the send buffer and receiver acknowledgments. Progress updates reflect what the receiver has acknowledged.
 - Incremental SHA-256 verification; a file is marked complete only after its integrity has been verified.
-- Stream files directly to disk after choosing a file or folder in desktop Chrome / Edge. Browsers without this API use an in-memory buffer, limited to 256 MiB in total.
+- Stream files directly to disk after choosing a file or folder in desktop Chrome / Edge. Safari and other browsers with the required capabilities use a Worker to write chunks into local disk storage, then offer Save buttons. Capacity depends on device space and browser quota; there is no application-wide 20 GiB cap. Browsers without disk storage retain the 256 MiB total memory limit.
+- Verified temporary files can be saved again after reopening or refreshing the site. Each file has a “Saved · clear temporary copy” button and a confirmation dialog. Clearing keeps the download. Saving can require space for two copies. Complete temporary files remain until the user clears them or the browser removes website data; closing the page does not immediately free their space, and there is no fixed automatic deletion timer.
+- Cancellation and failures clear unfinished temporary files while keeping earlier verified files. Abandoned partial files are cleared on the next visit. Cross-page locks protect another page’s active files. Unfinished transfers still cannot resume after a refresh.
 - Folder reception avoids existing file and directory names. Retrying a failed save-location selection uses only the newly selected locations.
 - Automatic pairing incrementally exchanges connection addresses (Trickle ICE), including late candidates, and distinguishes sender availability, direct-path discovery, occupied links, and expired sessions.
 - Automatic pairing reconnects after network changes and resumes from the receiver’s confirmed position, preserving verification and the save location. Both pages must stay open.
@@ -27,7 +29,9 @@ Choose files → Create a transfer → Share the link or QR code → The recipie
 
 The frontend is a static Vite + TypeScript website hosted on GitHub Pages. A Cloudflare Worker with Durable Objects forwards pairing messages only, while STUN helps discover connection addresses. **File contents are never transferred through or stored by the signaling service. There is no TURN file relay.**
 
-Automatic pairing encrypts SDP information with an AES-256-GCM key generated in the browser. The key is stored in the share URL's `#` fragment and is not sent to the static website or signaling service in HTTP requests. The receiving page clears the fragment from the address bar after reading it. The signaling service can see the room, roles, connection times, network addresses, and encrypted message sizes. Room role tokens are stored as SHA-256 digests. Rooms expire after 30 minutes and accept only one receiver at a time. Explicitly ending a transfer closes the room. Unexpected signaling disconnections preserve the room so the same browser session can reconnect until it expires.
+Automatic pairing encrypts SDP information with an AES-256-GCM key generated in the browser. The key is stored in the share URL's `#` fragment and is not sent to the static website or signaling service in HTTP requests. The receiving page clears the fragment from the address bar after reading it. The signaling service can see the room, roles, connection times, network addresses, and encrypted message sizes. Room role tokens are stored as SHA-256 digests. Initial pairing invitations expire after 30 minutes and accept only one receiver at a time. Explicitly ending a transfer closes the room. Unexpected signaling disconnections preserve the room so the same browser session can reconnect until it expires.
+
+In v0.2, initial pairing invitations still expire after 30 minutes. Once both browser sessions are bound, authenticated heartbeats renew recovery access for roughly 30 minutes after the latest renewal, capped at 24 hours from room creation. Renewal never admits a new recipient through an expired invitation or reopens an ended room.
 
 Compact links use `#2.<43 characters>`. The fragment retains a full 256-bit random secret. Distinct HKDF-SHA-256 labels derive the room ID and receiver credential in the browser; room creation sends only the room ID and the SHA-256 digest of that credential. The secret is not submitted or stored on the server, and no URL-shortening redirect service is needed.
 
@@ -73,6 +77,10 @@ Tests use virtual media devices only in isolated browsers to expose local ICE in
 Recovery tests cover repeated connection interruptions, simultaneous signaling disconnections, retained disk streams, a lost completion receipt, invalid resume positions, corruption after recovery, and cancellation during recovery. These force real connections to close in isolated browsers; actual VPN switching and cross-network recovery have not yet been verified.
 
 See the [initial release validation record](docs/validation.md) (in Chinese) for detailed results.
+
+The v0.2 44-test suite also covers 512 MiB reception through the production OPFS Worker and actual export, reopening verified files, duplicate names, empty files, confirmation-based cleanup, preserved downloads, cross-page protection, abandoned partials, quota retry, write failures, and preservation of earlier verified files when a later file fails. Full-file ArrayBuffer conversion is forbidden in the 512 MiB receiving page; exported content is independently hashed.
+
+Actual macOS Safari 27.0.1 received 512 MiB through the production flow using the deployed Cloudflare signaling service. The file remained available after refreshing; its downloaded SHA-256 matched, and clearing temporary storage kept the download. The production storage module also passed 10 GiB / 20 GiB write and actual export checks in isolated WebKit; those capacity tests do not use WebRTC. Earlier standalone Mac Safari 2 GiB / 20 GiB results remain documented separately. **Large-file reception and export on an actual iPhone have not yet been verified; 20 GiB reception is not promised for every phone.** See the [v0.2 validation record](docs/safari-storage.md) (in Chinese).
 
 ## Future work
 

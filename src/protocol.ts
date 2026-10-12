@@ -1,4 +1,5 @@
 import { sha256 } from '@noble/hashes/sha2.js';
+import { createTemporarySession, beginTemporaryFile, writeTemporaryFile, finishTemporaryFile, completeTemporarySession, discardTemporaryPartial } from './received-storage';
 
 export type FileInfo = { id: number; name: string; size: number; type: string };
 export type Config = { signalUrl: string; iceServers: RTCIceServer[]; memoryLimitBytes: number };
@@ -117,6 +118,8 @@ export class Transfer {
   private hashes = new Map<string, ReturnType<typeof sha256.create>>();
   private networkChanged = () => { if (this.opened && !this.completed) this.requestRecovery(); };
   private accepted = false;
+  private accepting = false;
+  private temporary?: string;
   private incoming?: { info: FileInfo; received: number; hash: ReturnType<typeof sha256.create>; parts: Uint8Array<ArrayBuffer>[]; writer?: FileSystemWritableFileStream; ack: number };
   private handles: FileSystemFileHandle[] = [];
   private receivedFiles = 0;
@@ -290,11 +293,13 @@ export class Transfer {
       const incoming = this.incoming;
       if (this.role !== 'receiver' || !this.accepted || !incoming || !data.byteLength || incoming.received + data.byteLength > incoming.info.size) throw Error('接收到不符合文件信息的数据');
       const chunk = new Uint8Array(data);
+      const size = data.byteLength; // Worker transfer detaches this buffer after hashing.
       incoming.hash.update(chunk);
       if (incoming.writer) await incoming.writer.write(data);
+      else if (this.temporary) await writeTemporaryFile(this.temporary, incoming.received, data);
       else incoming.parts.push(chunk);
       if (this.stopped) return;
-      incoming.received += data.byteLength; this.received += data.byteLength; incoming.ack += data.byteLength;
+      incoming.received += size; this.received += size; incoming.ack += size;
       if (incoming.ack >= 256 * 1024 || incoming.received === incoming.info.size) {
         this.reply({ type: 'ack', bytes: this.received }, generation); incoming.ack = 0;
       }
@@ -337,6 +342,7 @@ export class Transfer {
       if (!this.accepted || !info || message.id !== info.id || offset !== (this.incoming?.received || 0)) throw Error('文件顺序无效');
       if (!this.incoming) {
         const writer = this.handles[info.id] ? await this.handles[info.id].createWritable() : undefined;
+        if (this.temporary) await beginTemporaryFile(this.temporary, info);
         if (this.stopped) { await writer?.abort().catch(() => {}); return; }
         this.incoming = { info, writer, received: 0, parts: [], hash: sha256.create(), ack: 0 };
       }
@@ -345,6 +351,7 @@ export class Transfer {
       const current = this.incoming;
       if (!current || message.id !== current.info.id || current.received !== current.info.size || hex(current.hash.digest()) !== message.hash) throw Error('文件完整性校验失败，请重新传输');
       if (current.writer) await current.writer.close();
+      else if (this.temporary) await finishTemporaryFile(this.temporary, message.hash);
       else {
         const url = URL.createObjectURL(new Blob(current.parts, { type: 'application/octet-stream' }));
         this.outputs.push({ info: current.info, url });
@@ -358,6 +365,8 @@ export class Transfer {
       this.fileConfirmed = message.id; this.wake();
     } else if (message.type === 'done' && this.role === 'receiver') {
       if (this.incoming || this.receivedFiles !== this.manifest.length) throw Error('文件传输未完整结束');
+      if (this.temporary) await completeTemporarySession(this.temporary);
+      if (this.stopped) return;
       this.completed = true; clearInterval(this.heartbeat); this.progress(true); this.reply({ type: 'complete' }, generation);
       this.emit({ type: 'done' });
     } else if (message.type === 'complete' && this.role === 'sender') {
@@ -367,31 +376,39 @@ export class Transfer {
     else throw Error('收到不支持的传输消息');
   }
   async accept() {
-    if (this.accepted || !this.manifest.length) return;
-    const picker = window as PickerWindow;
-    const total = this.manifest.reduce((n, f) => n + f.size, 0);
-    const handles: FileSystemFileHandle[] = [];
-    if (picker.showSaveFilePicker && this.manifest.length === 1) {
-      handles.push(await picker.showSaveFilePicker({ suggestedName: this.manifest[0].name }));
-    } else if (picker.showDirectoryPicker && this.manifest.length > 1) {
-      const directory = await picker.showDirectoryPicker({ mode: 'readwrite' });
-      const used = new Set<string>();
-      // Avoid overwriting existing files or colliding with directories, including
-      // on case-insensitive filesystems. Commit handles only after a full selection.
-      for await (const name of directory.keys()) used.add(name.toLowerCase());
-      for (const info of this.manifest) {
-        let name = info.name;
-        let suffix = 0;
-        while (used.has(name.toLowerCase())) name = ++suffix + '-' + info.name;
-        used.add(name.toLowerCase()); handles.push(await directory.getFileHandle(name, { create: true }));
+    if (this.accepted || this.accepting || this.stopped || !this.manifest.length) return;
+    this.accepting = true;
+    try {
+      const picker = window as PickerWindow;
+      const total = this.manifest.reduce((n, f) => n + f.size, 0);
+      const handles: FileSystemFileHandle[] = [];
+      if (picker.showSaveFilePicker && this.manifest.length === 1) {
+        handles.push(await picker.showSaveFilePicker({ suggestedName: this.manifest[0].name }));
+      } else if (picker.showDirectoryPicker && this.manifest.length > 1) {
+        const directory = await picker.showDirectoryPicker({ mode: 'readwrite' });
+        const used = new Set<string>();
+        // Avoid overwriting existing files or colliding with directories, including
+        // on case-insensitive filesystems. Commit handles only after a full selection.
+        for await (const name of directory.keys()) used.add(name.toLowerCase());
+        for (const info of this.manifest) {
+          let name = info.name;
+          let suffix = 0;
+          while (used.has(name.toLowerCase())) name = ++suffix + '-' + info.name;
+          used.add(name.toLowerCase()); handles.push(await directory.getFileHandle(name, { create: true }));
+        }
+      } else {
+        const session = await createTemporarySession(total);
+        if (this.stopped) { if (session) await discardTemporaryPartial(session); return; }
+        this.temporary = session;
+        if (!session && total > this.config.memoryLimitBytes) {
+          throw Error('这个浏览器暂不支持大文件流式保存。请使用桌面 Chrome 或 Edge；当前接收上限为 ' + bytes(this.config.memoryLimitBytes));
+        }
       }
-    } else if (total > this.config.memoryLimitBytes) {
-      throw Error('这个浏览器暂不支持大文件流式保存。请使用桌面 Chrome 或 Edge；当前接收上限为 ' + bytes(this.config.memoryLimitBytes));
-    }
-    if (this.stopped) return;
-    this.handles = handles;
-    this.accepted = true; this.started = performance.now();
-    this.emit({ type: 'started' }); this.control({ type: 'accept' });
+      if (this.stopped) return;
+      this.handles = handles;
+      this.accepted = true; this.started = performance.now();
+      this.emit({ type: 'started' }); this.control({ type: 'accept' });
+    } finally { this.accepting = false; }
   }
   private startSending(file: number, offset: number) {
     const generation = this.generation;
@@ -474,6 +491,10 @@ export class Transfer {
     window.removeEventListener('online', this.networkChanged); window.removeEventListener('offline', this.networkChanged);
     this.hashes.clear();
     void this.incoming?.writer?.abort().catch(() => {});
+    if (this.temporary) {
+      void discardTemporaryPartial(this.temporary).catch(() => {});
+      this.temporary = undefined;
+    }
     this.incoming = undefined; this.handles = []; this.files = [];
     this.channel?.close(); this.pc.close(); this.wake();
     for (const output of this.outputs) URL.revokeObjectURL(output.url);

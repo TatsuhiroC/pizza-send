@@ -1,0 +1,18 @@
+{
+  "engine": "Isolated Chrome sender to actual macOS Safari 27.0.1 receiver",
+  "size": 536870912,
+  "expectedHash": "d9c70032e088fba5bf4c24a6aaf8e55a04ff2513639efe1032e9b58e611cd25a",
+  "senderCompleted": true,
+  "secondsFromLinkCreation": 120.287,
+  "receiver": "Actual macOS Safari 27.0.1, operated through UI",
+  "signaling": "Deployed Cloudflare Worker",
+  "sameMachine": true,
+  "receivedAndVerified": true,
+  "exportAfterPageRefresh": true,
+  "exportSize": 536870912,
+  "exportHash": "d9c70032e088fba5bf4c24a6aaf8e55a04ff2513639efe1032e9b58e611cd25a",
+  "exportPassed": true,
+  "modified": "2026-10-12T06:03:34.785Z",
+  "cleanupThroughUI": true,
+  "downloadPreservedAfterTemporaryCleanup": true
+}

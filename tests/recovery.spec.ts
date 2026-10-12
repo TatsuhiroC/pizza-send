@@ -1,4 +1,4 @@
-import { test, expect, type BrowserContext, type Page } from '@playwright/test';
+import { test, expect, type BrowserContext, type Page } from './fixtures';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 const sha = (buffer: Buffer) => createHash('sha256').update(buffer).digest('hex');

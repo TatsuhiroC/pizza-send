@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 test('compact language switch translates the full page, preserves files and remembers the choice', async ({ page }, info) => {
   await page.goto('./');
@@ -61,7 +61,7 @@ test('switching while paired preserves the session and translates completion and
   await receiver.goto(link);
   await expect(receiver.locator('#accept-files')).toBeVisible();
   await expect(receiver.locator('html')).toHaveAttribute('lang', 'en');
-  await expect(receiver.locator('#save-note')).toContainText('This browser buffers files in memory');
+  await expect(receiver.locator('#save-note')).toContainText('Files are written to this device’s disk');
   await receiver.locator('#accept-files').click();
   await expect(receiver.locator('#status')).toHaveText('Transfer complete. Every byte intact.');
   await expect(receiver.locator('.download-file')).toContainText('Save 文件送到.txt');
