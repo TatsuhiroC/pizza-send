@@ -23,12 +23,12 @@ async function downloaded(receiver: Page, index = 0) {
   const pending = receiver.waitForEvent('download'); await receiver.locator('.download-file').nth(index).click();
   return await pending;
 }
-async function clear(receiver: Page, index = 0) {
-  await receiver.locator('.cleanup-stored').nth(index).click(); await expect(receiver.locator('#cleanup-dialog')).toBeVisible();
+async function clear(receiver: Page) {
+  await receiver.locator('#clear-stored').click(); await expect(receiver.locator('#cleanup-dialog')).toBeVisible();
   await receiver.locator('#confirm-cleanup').click(); await expect(receiver.locator('#cleanup-dialog')).toBeHidden();
 }
 
-test('duplicate names, empty and Unicode files survive refresh; confirmed cleanup keeps the downloaded copy', async ({ page, context }, info) => {
+test('duplicate names, empty and Unicode files survive refresh; one cleanup button clears all and keeps the downloaded copy', async ({ page, context }, info) => {
   await setup(context); const receiver = await context.newPage();
   const payload = [{ name: 'same.txt', mimeType: 'text/plain', buffer: Buffer.from('first copy') },
     { name: 'same.txt', mimeType: 'text/plain', buffer: Buffer.from('second copy') },
@@ -37,17 +37,20 @@ test('duplicate names, empty and Unicode files survive refresh; confirmed cleanu
   await expect(receiver.locator('.download-file')).toHaveCount(3);
   for (const [index, file] of payload.entries()) expect(sha(await readFile((await (await downloaded(receiver, index)).path())!))).toBe(sha(file.buffer));
   const download = await downloaded(receiver), saved = info.outputPath('saved-copy.txt'); await download.saveAs(saved);
-  await receiver.locator('.cleanup-stored').first().click(); await receiver.locator('#keep-stored').click();
+  await expect(receiver.locator('.cleanup-stored')).toHaveCount(1);
+  await receiver.locator('#clear-stored').click(); await expect(receiver.locator('#cleanup-name')).toContainText('3 个文件');
+  await receiver.locator('#keep-stored').click();
   await expect(receiver.locator('.download-file')).toHaveCount(3);
-  await clear(receiver); await expect(receiver.locator('.download-file')).toHaveCount(2);
-  expect((await readFile(saved)).toString()).toBe('first copy');
-  await receiver.reload(); await expect(receiver.locator('.download-file')).toHaveCount(2);
-  await receiver.goto('about:blank'); await receiver.goBack(); await expect(receiver.locator('.download-file')).toHaveCount(2);
-  await receiver.locator('#language-toggle').click(); await expect(receiver.locator('.cleanup-stored').first()).toHaveText('Saved · clear temporary copy');
+  await receiver.reload(); await expect(receiver.locator('.download-file')).toHaveCount(3);
+  await receiver.goto('about:blank'); await receiver.goBack(); await expect(receiver.locator('.download-file')).toHaveCount(3);
+  await receiver.locator('#language-toggle').click(); await expect(receiver.locator('#clear-stored')).toHaveText('Saved · clear all temporary files');
   await receiver.setViewportSize({ width: 320, height: 844 });
   expect(await receiver.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await receiver.screenshot({ path: info.outputPath('temporary-storage-english-mobile.png'), fullPage: true });
-  await clear(receiver); await clear(receiver); await expect(receiver.locator('#stored-panel')).toBeHidden();
+  await clear(receiver); await expect(receiver.locator('#stored-panel')).toBeHidden();
+  await expect(receiver.locator('.download-file')).toHaveCount(0);
+  expect((await readFile(saved)).toString()).toBe('first copy');
+  await receiver.reload(); await expect(receiver.locator('#stored-panel')).toBeHidden();
 });
 
 test('another tab cannot touch an active writer; reopening recovers completed files and removes interrupted leftovers', async ({ page, context }) => {
@@ -70,6 +73,62 @@ test('another tab cannot touch an active writer; reopening recovers completed fi
     try { await dir.getFileHandle('file-1.bin'); return true; } catch { return false; }
   }, session);
   expect(partial).toBe(false); await clear(observer);
+});
+
+test('bulk cleanup spans completed sessions and leaves an unfinished writer usable', async ({ page }) => {
+  await page.goto('./');
+  const active = await page.evaluate(async () => {
+    // Reuse the page's module, including Vite's development update query, so
+    // this fixture and the UI share the same worker and session locks.
+    const url = (performance.getEntriesByType('resource').find(entry => new URL(entry.name).pathname === '/src/received-storage.ts')!).name;
+    const s = await import(url);
+    const { sha256 } = await import('/node_modules/@noble/hashes/sha2.js');
+    const hash = (data: Uint8Array) => Array.from(sha256(data), b => b.toString(16).padStart(2, '0')).join('');
+    for (let index = 0; index < 2; index++) {
+      const id = (await s.createTemporarySession(4))!;
+      await s.beginTemporaryFile(id, { id: 0, name: 'batch-' + index + '.bin', size: 4, type: '' });
+      const data = new Uint8Array(4).fill(index);
+      await s.writeTemporaryFile(id, 0, data.slice().buffer); await s.finishTemporaryFile(id, hash(data));
+      await s.completeTemporarySession(id);
+    }
+    const id = (await s.createTemporarySession(32768))!;
+    await s.beginTemporaryFile(id, { id: 0, name: 'still-receiving.bin', size: 32768, type: '' });
+    await s.writeTemporaryFile(id, 0, new Uint8Array(16384).fill(7).buffer);
+    return { id, url };
+  });
+  await expect(page.locator('.download-file')).toHaveCount(2);
+  await expect(page.locator('.cleanup-stored')).toHaveCount(1);
+  await clear(page); await expect(page.locator('.download-file')).toHaveCount(0);
+  await page.evaluate(async ({ id, url }) => {
+    const s = await import(url);
+    const { sha256 } = await import('/node_modules/@noble/hashes/sha2.js');
+    await s.writeTemporaryFile(id, 16384, new Uint8Array(16384).fill(7).buffer);
+    const hash = Array.from(sha256(new Uint8Array(32768).fill(7)), b => b.toString(16).padStart(2, '0')).join('');
+    await s.finishTemporaryFile(id, hash); await s.completeTemporarySession(id);
+  }, active);
+  await expect(page.locator('.download-file')).toHaveCount(1);
+  expect(sha(await readFile((await (await downloaded(page)).path())!))).toBe(sha(Buffer.alloc(32768, 7)));
+  await clear(page); await expect(page.locator('#stored-panel')).toBeHidden();
+});
+
+test('partly failed bulk cleanup retries remaining files without touching the downloaded copy', async ({ page, context }, info) => {
+  await setup(context); const receiver = await context.newPage();
+  await receiver.route('**/src/storage-worker.ts*', async route => {
+    const response = await route.fetch();
+    const body = 'const remove = FileSystemDirectoryHandle.prototype.removeEntry; let failed = false; FileSystemDirectoryHandle.prototype.removeEntry = function(name, options) { if (name === "file-1.bin" && !failed) { failed = true; throw new DOMException("fixture deletion failed", "NoModificationAllowedError"); } return remove.call(this, name, options); };\n' + await response.text();
+    await route.fulfill({ response, body });
+  });
+  await begin(page, receiver, [0, 1, 2].map(index => ({ name: 'file-' + index + '.txt', mimeType: 'text/plain', buffer: Buffer.from('file ' + index) })));
+  await completed(receiver); await expect(receiver.locator('.download-file')).toHaveCount(3);
+  const download = await downloaded(receiver), saved = info.outputPath('saved-copy.txt'); await download.saveAs(saved);
+  await receiver.locator('#clear-stored').click(); await receiver.locator('#confirm-cleanup').click();
+  await expect(receiver.locator('#cleanup-error')).toBeVisible();
+  await expect(receiver.locator('#cleanup-name')).toContainText('2 个文件');
+  await expect(receiver.locator('.download-file')).toHaveCount(2);
+  await receiver.locator('#confirm-cleanup').click(); await expect(receiver.locator('#cleanup-dialog')).toBeHidden();
+  await expect(receiver.locator('#stored-panel')).toBeHidden();
+  expect((await readFile(saved)).toString()).toBe('file 0');
+  await receiver.reload(); await expect(receiver.locator('.download-file')).toHaveCount(0);
 });
 
 test('quota refusal can be retried without leaking a session or falsely starting reception', async ({ page, context }) => {

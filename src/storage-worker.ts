@@ -146,10 +146,16 @@ async function handle(type: string, data: any): Promise<unknown> {
     const entry = s.index.files.find(f => f.info.id === data.id && f.complete);
     if (!entry) throw Error('Temporary file unavailable');
     // Update both metadata copies before deletion, preventing stale-index resurrection.
-    s.index.files = s.index.files.filter(f => f !== entry);
-    await writeIndex(s); await writeIndex(s);
-    await removeEntry(s.dir, diskName(entry.info.id));
-    if (!s.live) await removeEmpty(data.session, s);
+    const previous = s.index.files;
+    s.index.files = previous.filter(f => f !== entry);
+    try {
+      await writeIndex(s); await writeIndex(s);
+      await removeEntry(s.dir, diskName(entry.info.id));
+      if (!s.live) await removeEmpty(data.session, s);
+    } catch (error) {
+      // Keep the entry available for retry if metadata or physical deletion fails.
+      s.index.files = previous; throw error;
+    }
     return;
   }
   throw Error('Unsupported storage operation');
