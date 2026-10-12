@@ -1,4 +1,5 @@
 import { sha256 } from '@noble/hashes/sha2.js';
+import { downloadType } from './download';
 import { createTemporarySession, beginTemporaryFile, writeTemporaryFile, finishTemporaryFile, completeTemporarySession, discardTemporaryPartial } from './received-storage';
 
 export type FileInfo = { id: number; name: string; size: number; type: string };
@@ -353,7 +354,7 @@ export class Transfer {
       if (current.writer) await current.writer.close();
       else if (this.temporary) await finishTemporaryFile(this.temporary, message.hash);
       else {
-        const url = URL.createObjectURL(new Blob(current.parts, { type: 'application/octet-stream' }));
+        const url = URL.createObjectURL(new Blob(current.parts, { type: downloadType(current.info) }));
         this.outputs.push({ info: current.info, url });
         this.emit({ type: 'download', data: { info: current.info, url } });
       }

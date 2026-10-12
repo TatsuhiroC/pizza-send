@@ -1,5 +1,6 @@
 import { STORAGE_ROOT, diskName, validSession, type StoredFile } from './storage-format';
 import type { FileInfo } from './protocol';
+import { downloadType } from './download';
 export type { StoredFile } from './storage-format';
 
 let worker: Worker | undefined, sequence = 0, available: Promise<boolean> | undefined;
@@ -75,7 +76,10 @@ export async function temporaryURL(file: StoredFile) {
   const dir = await (await root.getDirectoryHandle(STORAGE_ROOT)).getDirectoryHandle(file.session);
   const snapshot = await (await dir.getFileHandle(diskName(file.info.id))).getFile();
   if (snapshot.size !== file.info.size) throw Error('浏览器暂存文件大小不一致，请清理后重新接收。');
-  const url = URL.createObjectURL(snapshot); urls.set(key, url); return url;
+  // Keep the disk-backed bytes, but export the sender's type instead of the
+  // internal .bin file's type. Safari uses this to choose a download extension.
+  const url = URL.createObjectURL(snapshot.slice(0, snapshot.size, downloadType(file.info)));
+  urls.set(key, url); return url;
   })();
   openingURLs.set(key, task);
   try { return await task; } finally { openingURLs.delete(key); }
