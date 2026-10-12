@@ -39,3 +39,12 @@ export async function parseShare(fragment: string): Promise<Share> {
 export function isSharingURL(url: URL, base: URL): boolean {
   return url.origin === base.origin && url.pathname.replace(/\/$/, '') === base.pathname.replace(/\/$/, '');
 }
+
+// Each recipient gets independent credentials and an independent encryption key.
+// Only the sender can list recipient IDs through the authenticated group room.
+export async function deriveRecipientShare(secret: string, client: string): Promise<Share> {
+  if (!/^[a-f0-9]{64}$/.test(client)) throw Error('配对信息无效');
+  const key = await crypto.subtle.importKey('raw', rawSecret(secret), 'HKDF', false, ['deriveBits']);
+  const bytes = await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: new TextEncoder().encode('PizzaSend/group/v1'), info: new TextEncoder().encode(client) }, key, 256);
+  return deriveShare(hex(new Uint8Array(bytes)));
+}

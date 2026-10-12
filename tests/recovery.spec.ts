@@ -124,7 +124,7 @@ test('invalid resume offset is rejected instead of skipping file bytes', async (
   });
   await begin(page, receiver, Buffer.alloc(8 * 1048576, 4));
   await interrupt(page);
-  await expect(page.locator('#notice')).toContainText('续传位置无效', { timeout: 40000 });
+  await expect(page.locator('.recipient-row[data-phase="error"]')).toContainText('续传位置无效', { timeout: 40000 });
   await expect(receiver.locator('.download-file')).toHaveCount(0);
 });
 test('cancelling during recovery ends the room and does not restore the transfer', async ({ page, context }) => {

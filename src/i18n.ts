@@ -1,6 +1,21 @@
 export type Language = 'zh' | 'en';
 type Params = Record<string, string | number>;
 const messages: Record<string, string> = {
+  '链接 30 分钟内可加入，最多 10 位同时接收。请只分享给预期接收者。': 'Join within 30 minutes. Up to 10 recipients at once. Share only with intended recipients.',
+  '把同一个链接或二维码发给多位接收者，请保持本页打开。': 'Share the same link or QR code with multiple recipients. Keep this page open.',
+  '邀请已过期，正在进行的传输可以继续。': 'The invitation has expired. Transfers in progress can continue.',
+  '同时接收的人数已达 10 位，请稍后再试。': 'Ten recipients are already connected. Please try again later.',
+  '配对服务尚不支持多人分享，请刷新后重试。': 'The signaling service does not support multiple recipients yet. Refresh and retry.',
+  '结束分享': 'End sharing',
+  '正在连接接收者': 'Connecting to recipient', '等待接收者确认': 'Waiting for recipient to accept', '接收者已退出': 'Recipient left',
+  '接收者 {number}': 'Recipient {number}', '接收者 {number} 的进度': 'Progress for recipient {number}',
+  '已完成 {count} 位接收者，分享仍可继续。': '{count} recipients completed. You can keep sharing.',
+  '部分接收未完成': 'Some transfers did not finish',
+  '可以继续分享给其他接收者，未完成的设备可重新加入。': 'Keep sharing with other recipients. Devices that did not finish can rejoin.',
+  '同一分享可继续加入其他接收者，请保持本页打开。': 'More recipients can join this share. Keep this page open.',
+  '多人分享进行中': 'Sharing with multiple recipients',
+  '每位接收者独立传输；一人断线不会中断其他人。': 'Each recipient transfers independently. One disconnection does not interrupt the others.',
+
   '打开相机扫描': 'Open camera to scan',
   '或粘贴分享链接／配对码': 'Or paste a share link / pairing code',
   '扫描分享二维码': 'Scan a share QR code',

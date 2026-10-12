@@ -54,17 +54,17 @@ test('candidates arriving after the old eight-second cutoff still connect and de
   expect(errors).toEqual([]);
 });
 
-test('explicit receiver departure frees the link before acceptance but does not replace an active receiver', async ({ page, context }) => {
+test('multiple recipients can join; leaving before acceptance does not interrupt another recipient', async ({ page, context }) => {
   await setup(context);
   const first = await context.newPage(), second = await context.newPage();
   const link = await share(page);
   await first.goto(link);
   await expect(first.locator('#accept-files')).toBeVisible();
   await second.goto(link);
-  await expect(second.locator('#notice')).toContainText('另一接收页面占用');
+  await expect(second.locator('#accept-files')).toBeVisible();
+  await expect(first.locator('#accept-files')).toBeVisible();
   await first.locator('#cancel').click();
-  await expect(page.locator('#status')).toHaveText('等待接收方');
-  await second.reload();
+  await expect(page.locator('.recipient-row')).toHaveCount(2);
   await expect(second.locator('#accept-files')).toBeVisible();
   await second.locator('#accept-files').click();
   await expect(page.locator('#status')).toHaveText('传输完成，原样送达。');

@@ -6,7 +6,9 @@ Open a webpage and send files directly to another device. An independent impleme
 
 **Try it: [tatsuhiroc.github.io/pizza-send](https://tatsuhiroc.github.io/pizza-send/)**
 
-Choose files → Create a transfer → Share the link or QR code → The recipient confirms reception and saves the files. Keep both pages open.
+Choose files → Create a transfer (the QR code appears automatically) → Share the same link or QR code with several recipients → Each recipient confirms and saves. Keep the sending page and all receiving pages open.
+
+Up to ten recipients can receive concurrently, with independent progress, verification, and recovery. Later recipients can join the same invitation after others finish. They share the sender’s upload bandwidth, so each connection may become slower as more people join. “End share” closes every connection. Manual pairing remains one-to-one.
 
 ## Features
 
@@ -30,7 +32,7 @@ Choose files → Create a transfer → Share the link or QR code → The recipie
 
 The frontend is a static Vite + TypeScript website hosted on GitHub Pages. A Cloudflare Worker with Durable Objects forwards pairing messages only, while STUN helps discover connection addresses. **File contents are never transferred through or stored by the signaling service. There is no TURN file relay.**
 
-Automatic pairing encrypts SDP information with an AES-256-GCM key generated in the browser. The key is stored in the share URL's `#` fragment and is not sent to the static website or signaling service in HTTP requests. The receiving page clears the fragment from the address bar after reading it. The signaling service can see the room, roles, connection times, network addresses, and encrypted message sizes. Room role tokens are stored as SHA-256 digests. Initial pairing invitations expire after 30 minutes and accept only one receiver at a time. Explicitly ending a transfer closes the room. Unexpected signaling disconnections preserve the room so the same browser session can reconnect until it expires.
+Automatic pairing encrypts SDP information with an AES-256-GCM key generated in the browser. The key is stored in the share URL's `#` fragment and is not sent to the static website or signaling service in HTTP requests. The receiving page clears the fragment from the address bar after reading it. The signaling service can see the room, roles, connection times, network addresses, and encrypted message sizes. Room role tokens are stored as SHA-256 digests. Initial pairing invitations expire after 30 minutes and allow up to ten concurrent recipients. Each recipient has an independent connection room, credentials, and encryption key. Only the authenticated sender can list members and obtain connection sender credentials. Explicitly ending the share closes the invitation and all its connections. Unexpected signaling disconnections preserve the room so the same browser session can reconnect until it expires.
 
 In v0.2, initial pairing invitations still expire after 30 minutes. Once both browser sessions are bound, authenticated heartbeats renew recovery access for roughly 30 minutes after the latest renewal, capped at 24 hours from room creation. Renewal never admits a new recipient through an expired invitation or reopens an ended room.
 
@@ -40,7 +42,7 @@ Anyone with the share link can receive the files, so share it through a trusted 
 
 The initial release cannot guarantee a direct connection between every pair of networks. Symmetric NAT, UDP restrictions, corporate networks, VPN routing, and regional access restrictions can affect connectivity. Try the same Wi-Fi network first. Failed connections show an error; there is no relay fallback. With automatic pairing, network changes or temporary disconnections trigger address discovery and a new encrypted direct connection, then resume from the byte position already written by the receiver. Recovery waits up to two minutes. Completed files are skipped, and the current file’s disk stream or memory data and SHA-256 state are preserved. The whole file is still verified on completion. Recovery requires an accessible signaling service, an unexpired room, and a direct path through the new networks; recovery time and route speed are not guaranteed. Closing or refreshing a page, or having the browser discard it, loses the session. Locking a phone may cause this. Manual pairing does not reconnect automatically.
 
-For troubleshooting, refresh both pages and create a new link. Keep the sending page visible and the phone unlocked. Sharing Wi-Fi does not guarantee connectivity with a VPN; the VPN must permit local networking and WebRTC / UDP. First test with both VPNs off, then compare. Explicitly leaving before accepting files releases the recipient slot. Unexpected network loss retains it for the original session to recover. Once transfer has begun, changing recipients requires a new link.
+For troubleshooting, refresh both pages and create a new link. Keep the sending page visible and the phone unlocked. Sharing Wi-Fi does not guarantee connectivity with a VPN; the VPN must permit local networking and WebRTC / UDP. First test with both VPNs off, then compare. Leaving or completing reception releases only that recipient’s slot. Unexpected network loss retains the slot for the original session to recover. Other recipients can join through the same link until the invitation expires; one person leaving does not interrupt the others.
 
 ## Local development
 
@@ -88,3 +90,5 @@ Actual macOS Safari 27.0.1 received 512 MiB through the production flow using th
 Speed tests across real devices and different networks, actual VPN switching, connection-failure diagnostics, persistent resumption after page refreshes, a PWA offline shell, and performance optimizations guided by measurements. Keep file transfers direct; never silently upload files when a connection fails.
 
 MIT License.
+
+Multi-recipient tests cover three concurrent real DataChannel transfers, one recipient recovering while the others finish, later joins, original filenames and independent SHA-256 download checks, recipient cancellation, the ten-slot limit, credential isolation, invitation expiry, and cancellation races during room creation. These run in isolated Chrome pages on one machine; ten-device concurrency has not been tested.

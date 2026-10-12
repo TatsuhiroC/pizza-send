@@ -1,9 +1,10 @@
 import { registerStatic, setText, t, toggleLanguage } from './i18n';
 import QRCode from 'qrcode';
-import { deriveShare, receiverDigest, shareFragment, parseShare, isSharingURL } from './share';
+import { deriveShare, deriveRecipientShare, receiverDigest, shareFragment, parseShare, isSharingURL } from './share';
 import { CameraScanner } from './scanner';
 import { supportsTemporaryStorage, listTemporaryFiles, temporaryURL, retainTemporaryFile, deleteTemporaryFile, storedKey, temporaryBusyCount, suspendTemporaryStorage, type StoredFile } from './received-storage';
 import { Transfer, AutoPair, bytes, randomToken, packDescription, unpackDescription, signalKey, type Config, type FileInfo, type TransferEvent } from './protocol';
+import { GroupSender, groupURL, groupRequest, type Recipient } from './group';
 import './style.css';
 
 const icon = (name: string) => {
@@ -30,7 +31,7 @@ app.innerHTML = [
   '<section class="transfer-card" aria-label="文件传输"><div class="card-top"><div class="tabs" role="tablist" aria-label="传输角色"><button id="send-tab" class="tab active" role="tab" aria-selected="true">'+icon('upload')+'发送文件</button><button id="receive-tab" class="tab" role="tab" aria-selected="false">'+icon('down')+'接收文件</button></div><span class="secure">'+icon('lock')+'加密直传</span></div>',
   '<div id="send-view"><button id="drop-zone" class="drop-zone" type="button"><span class="drop-icon">'+icon('upload')+'</span><strong>把文件放在这里</strong><span>拖放文件，或点击选择</span><small>支持多个文件 · 文件内容不上传到服务器</small></button><input id="file-input" type="file" multiple hidden/><div id="files" class="file-list" aria-live="polite"></div><div class="send-bottom"><span id="selection-summary">先选一个文件，就可以开始。</span><button id="start-send" class="primary" disabled>创建传输 '+icon('arrow')+'</button></div></div>',
   '<div id="receive-view" hidden><div class="receive-intro"><span class="drop-icon">'+icon('down')+'</span><h2>接住这一份分享</h2><p>打开对方发来的分享链接即可连接。<br/>也可以在这里粘贴链接或配对码。</p></div><button id="open-scanner" class="secondary wide scan-button" type="button">'+icon('camera')+'打开相机扫描</button><p class="scan-alternative subtle">或粘贴分享链接／配对码</p><label class="sr-only" for="receive-code">分享链接或配对码</label><textarea id="receive-code" rows="3" placeholder="粘贴 PizzaSend 分享链接或 PS1. 配对码"></textarea><button id="connect-receive" class="primary wide">连接发送方 '+icon('arrow')+'</button><div id="incoming-files" class="file-list"></div><button id="accept-files" class="primary wide" hidden>选择保存位置并接收 '+icon('down')+'</button><p id="save-note" class="subtle" hidden></p><div id="downloads" class="downloads"></div></div>',
-  '<div id="session-panel" class="session-panel" hidden><div class="session-heading"><span id="status-dot" class="status-dot"></span><h2 id="status">等待接收方</h2><button id="cancel" class="text-button">结束传输</button></div><p id="status-detail" class="subtle">传输期间请保持双方页面打开。</p><div id="share-box" hidden><label for="share-link">把链接发给对方，或者让对方扫码</label><div class="link-row"><input id="share-link" readonly/><button id="copy-link" class="icon-button" aria-label="复制分享链接">'+icon('copy')+'</button><button id="show-qr" class="icon-button" aria-label="显示分享二维码">'+icon('qr')+'</button></div><canvas id="share-qr" hidden></canvas><p class="subtle">链接 30 分钟内可配对，仅限一位接收方。请只分享给预期接收者。</p></div><div id="progress-box" hidden><div class="progress-meta"><button id="current-file" class="filename-button" type="button" aria-haspopup="dialog"></button><span id="percent">0%</span></div><progress id="progress" max="100" value="0" aria-label="传输进度"></progress><div class="metrics"><div><span id="transferred">0 B</span><small>已接收</small></div><div><span id="speed">—</span><small>平均速度</small></div><div><span id="remaining">—</span><small>预计剩余</small></div></div><div class="path-label">'+icon('lock')+'<span id="connection-path">浏览器之间加密传输</span><span>SHA-256 校验</span></div></div></div>',
+  '<div id="session-panel" class="session-panel" hidden><div class="session-heading"><span id="status-dot" class="status-dot"></span><h2 id="status">等待接收方</h2><button id="cancel" class="text-button">结束传输</button></div><p id="status-detail" class="subtle">传输期间请保持双方页面打开。</p><div id="share-box" hidden><label for="share-link">把链接发给对方，或者让对方扫码</label><div class="link-row"><input id="share-link" readonly/><button id="copy-link" class="icon-button" aria-label="复制分享链接">'+icon('copy')+'</button></div><canvas id="share-qr" hidden></canvas><p id="share-note" class="subtle">链接 30 分钟内可加入，最多 10 位同时接收。请只分享给预期接收者。</p></div><div id="recipients" class="recipients" hidden></div><div id="progress-box" hidden><div class="progress-meta"><button id="current-file" class="filename-button" type="button" aria-haspopup="dialog"></button><span id="percent">0%</span></div><progress id="progress" max="100" value="0" aria-label="传输进度"></progress><div class="metrics"><div><span id="transferred">0 B</span><small>已接收</small></div><div><span id="speed">—</span><small>平均速度</small></div><div><span id="remaining">—</span><small>预计剩余</small></div></div><div class="path-label">'+icon('lock')+'<span id="connection-path">浏览器之间加密传输</span><span>SHA-256 校验</span></div></div></div>',
   '<div id="notice" class="notice" role="alert" hidden></div></section>',
   '<section id="stored-panel" class="stored-panel" aria-labelledby="stored-heading" hidden><div class="stored-heading"><div><h2 id="stored-heading">本机暂存</h2><span id="stored-size"></span></div><button id="clear-stored" class="secondary cleanup-stored" type="button" hidden>'+icon('trash')+'<span>已保存，清理全部暂存</span></button></div><p class="subtle">文件暂存在这台设备的磁盘里，整批接收完成后保留 10 分钟。点击保存会为该文件重新预留 10 分钟；下载完成后，也可以立即清理全部暂存。</p><p id="stored-busy" class="subtle" hidden>部分暂存正在另一个页面使用。请关闭该页面后，再清理全部暂存。</p><div id="stored-files"></div><p class="subtle">到期自动清理。网页关闭或暂停时，下次打开或返回再清理；不会删除已经下载的副本。刷新不会延长保存时间，未完成的传输不能在刷新后续传。浏览器也可能提前回收暂存，请及时保存。</p></section>',
   '<section class="benefits"><div>'+icon('bolt')+'<h3>直接送达</h3><p>两端连接后，即传即收。</p></div><div>'+icon('lock')+'<h3>加密传输</h3><p>文件在浏览器之间加密传递。</p></div><div>'+icon('file')+'<h3>原样分享</h3><p>保留内容，逐个校验文件。</p></div></section>',
@@ -50,6 +51,8 @@ let config: Config = { signalUrl: '', iceServers: [{ urls: 'stun:stun.cloudflare
 let files: File[] = [];
 let transfer: Transfer | undefined;
 let signaling: AutoPair | undefined;
+let senderGroup: GroupSender | undefined;
+let receiverGroupURL = "";
 let shareLink = '';
 let shareQRRevision = 0;
 let pairingKind: 'offer' | 'answer' = 'offer';
@@ -211,7 +214,7 @@ async function connectValue(input: string) {
   try { await receiveInput(input, revision); }
   catch (e) {
     if (revision !== sessionRevision) return;
-    transfer?.close(false); signaling?.close(); signaling = undefined; transfer = undefined; setBusy(false); throw e;
+    leaveReceiverGroup(); transfer?.close(false); signaling?.close(); signaling = undefined; transfer = undefined; setBusy(false); throw e;
   }
 }
 async function scannedCode(text: string): Promise<boolean> {
@@ -276,14 +279,16 @@ function clearShareQR() {
   shareQRRevision++;
   const canvas = $<HTMLCanvasElement>('share-qr');
   canvas.hidden = true; canvas.width = canvas.height = 0;
-  $('show-qr').setAttribute('aria-expanded', 'false');
+
 }
 function reset() {
   sessionRevision++;
   closeScanner();
+  senderGroup?.close(); senderGroup = undefined; leaveReceiverGroup();
   signaling?.close(); signaling = undefined;
   transfer?.close(); transfer = undefined;
   shareLink = ''; $<HTMLInputElement>('share-link').value = ''; clearShareQR(); setBusy(false);
+  $('recipients').replaceChildren(); $('recipients').hidden = true;
   $('share-box').hidden = true; $('progress-box').hidden = true; $('session-panel').hidden = true;
   $('notice').hidden = true; $('incoming-files').innerHTML = ''; $('downloads').innerHTML = '';
   $('accept-files').hidden = true; $('save-note').hidden = true;
@@ -335,12 +340,60 @@ function events(event: TransferEvent) {
   } else if (event.type === 'error') {
     $('downloads').innerHTML = ''; $('accept-files').hidden = true;
     notice(event.data); status('传输未完成', '可以结束这次传输，重新配对后再试。', 'error');
-    signaling?.close(); signaling = undefined; setText($('cancel'), '重新开始');
+    leaveReceiverGroup(); signaling?.close(); signaling = undefined; setText($('cancel'), '重新开始');
     $<HTMLDialogElement>('pair-dialog').close();
   }
 }
+function leaveReceiverGroup() {
+  const url = receiverGroupURL; receiverGroupURL = '';
+  if (url) void groupRequest(url, { type: 'leave' }, true).catch(() => {});
+}
+function renderRecipients(peers: Recipient[], expired: boolean) {
+  $('share-box').hidden = !shareLink;
+  setText($('share-note'), expired ? '邀请已过期，正在进行的传输可以继续。' : '链接 30 分钟内可加入，最多 10 位同时接收。请只分享给预期接收者。');
+  $('recipients').hidden = !peers.length;
+  const active = peers.filter(peer => !['done', 'error', 'left'].includes(peer.phase));
+  const done = peers.filter(peer => peer.phase === 'done').length;
+  const failed = peers.filter(peer => peer.phase === 'error').length;
+  if (!peers.length || (!active.length && !done && !failed)) status('等待接收方', '把同一个链接或二维码发给多位接收者，请保持本页打开。');
+  else if (!active.length && done && !failed) status('传输完成，原样送达。', '已完成 {count} 位接收者，分享仍可继续。', 'done');
+  else if (!active.length && failed) status('部分接收未完成', '可以继续分享给其他接收者，未完成的设备可重新加入。', 'error');
+  else if (active.length === 1 && peers.length === 1) {
+    const peer = active[0];
+    status(peer.phase === 'sending' ? '正在传输' : peer.message, '同一分享可继续加入其他接收者，请保持本页打开。', peer.phase === 'sending' ? 'connected' : 'waiting');
+  } else status('多人分享进行中', '每位接收者独立传输；一人断线不会中断其他人。', 'connected');
+  if (done && !active.length) setText($('status-detail'), '已完成 {count} 位接收者，分享仍可继续。', { count: done });
+  setText($('cancel'), '结束分享');
+  // Keep the familiar single-transfer summary; concurrent transfers have their own rows.
+  $('progress-box').hidden = peers.length !== 1 || !peers[0]?.started;
+  if (peers.length === 1) {
+    const peer = peers[0], percentage = peer.total ? peer.transferred / peer.total * 100 : peer.phase === 'done' ? 100 : 0;
+    $('current-file').textContent = peer.file; $<HTMLProgressElement>('progress').value = percentage;
+    setText($('percent'), Math.floor(percentage) + '%'); setText($('transferred'), bytes(peer.transferred) + ' / ' + bytes(peer.total));
+    setText($('speed'), bytes(peer.speed) + '/s'); setText($('remaining'), peer.phase === 'done' ? '完成' : peer.phase === 'recovering' ? '等待网络恢复' : '即将完成');
+    if (peer.path) setText($('connection-path'), '{path} · DTLS 加密', { path: peer.path });
+  }
+  const rows = new Map(Array.from($('recipients').querySelectorAll<HTMLElement>('.recipient-row'), row => [row.dataset.client, row]));
+  const clients = new Set(peers.map(peer => peer.client));
+  for (const [client, row] of rows) if (!clients.has(client!)) row.remove();
+  for (const peer of peers) {
+    let row = rows.get(peer.client);
+    if (!row) {
+      row = document.createElement('div'); row.className = 'recipient-row'; row.dataset.client = peer.client;
+      row.innerHTML = '<div class="recipient-heading"><strong></strong><span></span></div><button class="filename-button" type="button" aria-haspopup="dialog"></button><progress max="100" value="0"></progress><div class="recipient-detail"><span></span><span></span></div>';
+      $('recipients').append(row);
+    }
+    row.dataset.phase = peer.phase;
+    setText(row.querySelector('strong')!, '接收者 {number}', { number: peer.number }); setText(row.querySelector('.recipient-heading span')!, peer.message);
+    const name = row.querySelector<HTMLButtonElement>('.filename-button')!; name.textContent = peer.file; name.hidden = !peer.file;
+    const percent = peer.total ? Math.min(100, peer.transferred / peer.total * 100) : peer.phase === 'done' ? 100 : 0;
+    const bar = row.querySelector('progress')!; bar.value = percent; bar.setAttribute('aria-label', t('接收者 {number} 的进度', { number: peer.number }));
+    const detail = row.querySelectorAll<HTMLElement>('.recipient-detail span');
+    setText(detail[0], bytes(peer.transferred) + ' / ' + bytes(peer.total)); setText(detail[1], Math.floor(percent) + '% · ' + bytes(peer.speed) + '/s');
+  }
+}
 function createTransfer(role: 'sender' | 'receiver') {
-  const next = new Transfer(config, role, event => { if (transfer === next) events(event); });
+  const next = new Transfer(config, role, event => { if (transfer === next) { if (role === 'sender' && senderGroup) senderGroup.firstEvent(event); else events(event); } });
   transfer = next; setBusy(true); $('notice').hidden = true;
   return transfer;
 }
@@ -360,23 +413,29 @@ function signalFailure(message: string) {
 }
 async function automaticSender(t: Transfer) {
   const api = endpoint();
-  const secret = randomToken(), credentials = await deriveShare(secret), key = await signalKey(secret);
+  const secret = randomToken(), credentials = await deriveShare(secret);
   if (transfer !== t || t.stopped) return;
   const response = await fetch(api + '/rooms', { method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ v: 2, room: credentials.room, receiverHash: await receiverDigest(credentials.receiver) }), signal: AbortSignal.timeout(15000) });
+    body: JSON.stringify({ v: 2, room: credentials.room, receiverHash: await receiverDigest(credentials.receiver), multi: true }), signal: AbortSignal.timeout(15000) });
   if (!response.ok) throw Error('配对服务暂不可用（' + response.status + '），请使用手动配对');
   const session = await response.json();
-  if (transfer !== t || t.stopped) return;
   if (session.v !== 2 || session.room !== credentials.room || !/^[a-f0-9]{64}$/.test(session.sender)) throw Error('配对服务返回信息无效');
-  const connection = new AutoPair(t, key, message => { if (transfer === t && !t.stopped) signalFailure(message); });
-  signaling = connection;
-  await connection.connect(api, session.room, 'sender', session.sender);
-  if (transfer !== t || t.stopped) { connection.close(); return; }
+  if (transfer !== t || t.stopped) {
+    void groupRequest(groupURL(api, session.room, 'sender', session.sender, randomToken()), { type: 'end' }, true).catch(() => {});
+    return;
+  }
+  const group = new GroupSender(t, config, [...files], secret, api, session.room, session.sender,
+    (peers, expired) => { if (senderGroup === group) renderRecipients(peers, expired); },
+    message => { if (senderGroup === group) notice(message); });
+  senderGroup = group;
+  await group.connect();
+  if (transfer !== t || t.stopped) { group.close(); return; }
   const url = new URL(location.href); url.search = ''; url.hash = shareFragment(secret);
   clearShareQR();
   shareLink = url.toString();
   $<HTMLInputElement>('share-link').value = shareLink; $('share-box').hidden = false;
-  status('等待接收方', '把分享链接发给对方。传输期间请保持本页打开。');
+  status('等待接收方', '把同一个链接或二维码发给多位接收者，请保持本页打开。');
+  await renderShareQR();
 }
 async function automaticReceiver(fragment: string, revision: number) {
   const api = endpoint();
@@ -385,11 +444,23 @@ async function automaticReceiver(fragment: string, revision: number) {
   if (revision !== sessionRevision) return;
   const t = createTransfer('receiver');
   status('正在连接发送方', '确认连接后，会显示对方分享的文件。');
-  const key = await signalKey(secret);
+  const client = randomToken(), parent = groupURL(api, room, 'receiver', token, client);
+  const state = await groupRequest(parent);
+  if (transfer !== t || t.stopped) return;
+  let pairedRoom = room, pairedToken = token, pairedSecret = secret;
+  if (state.multi === true) {
+    receiverGroupURL = parent;
+    const share = await deriveRecipientShare(secret, client);
+    if (transfer !== t || t.stopped) { void groupRequest(parent, { type: 'leave' }, true).catch(() => {}); return; }
+    await groupRequest(parent, { type: 'join', room: share.room, receiverHash: await receiverDigest(share.receiver) });
+    if (transfer !== t || t.stopped) { void groupRequest(parent, { type: 'leave' }, true).catch(() => {}); return; }
+    pairedRoom = share.room; pairedToken = share.receiver; pairedSecret = share.secret;
+  }
+  const key = await signalKey(pairedSecret);
   if (transfer !== t || t.stopped) return;
   const connection = new AutoPair(t, key, message => { if (transfer === t && !t.stopped) signalFailure(message); });
   signaling = connection;
-  await connection.connect(api, room, 'receiver', token);
+  await connection.connect(api, pairedRoom, 'receiver', pairedToken);
   if (transfer !== t || t.stopped) { connection.close(); return; }
   history.replaceState(null, '', location.pathname + location.search);
 }
@@ -403,6 +474,7 @@ async function manualSender(t: Transfer) {
   $('pair-qr').hidden = true; $<HTMLTextAreaElement>('answer-code').value = '';
   $<HTMLDialogElement>('pair-dialog').showModal();
   status('等待手动配对', '没有自动配对服务时，双方交换配对码即可直连。');
+  await renderPairQR();
 }
 async function manualReceiver(code: string, revision: number) {
   const description = await unpackDescription(code.trim(), 'offer');
@@ -448,7 +520,7 @@ $('start-send').onclick = () => run(async () => {
   const t = createTransfer('sender'); t.prepare(files);
   status('正在创建传输', '正在准备连接，请稍候。');
   try { if (endpoint()) await automaticSender(t); else await manualSender(t); }
-  catch (e) { if (transfer !== t || t.stopped) return; t.close(false); signaling?.close(); transfer = undefined; setBusy(false); throw e; }
+  catch (e) { if (transfer !== t || t.stopped) return; senderGroup?.close(); senderGroup = undefined; t.close(false); signaling?.close(); transfer = undefined; setBusy(false); throw e; }
 });
 $('connect-receive').onclick = () => run(async () => {
   await connectValue($<HTMLTextAreaElement>('receive-code').value);
@@ -488,27 +560,29 @@ $('accept-files').onclick = () => run(async () => {
 $('cancel').onclick = reset;
 $('close-dialog').onclick = () => $<HTMLDialogElement>('pair-dialog').close();
 $('copy-link').onclick = () => run(async () => { await navigator.clipboard.writeText(shareLink); toast('分享链接已复制'); });
-$('show-qr').onclick = () => run(async () => {
+async function renderShareQR() {
   const canvas = $<HTMLCanvasElement>('share-qr'), revision = ++shareQRRevision, link = shareLink;
-  canvas.hidden = !canvas.hidden;
-  $('show-qr').setAttribute('aria-expanded', String(!canvas.hidden));
-  if (canvas.hidden || !link) return;
-  // Render separately so a result from an ended session cannot repaint this QR.
+  if (!link) return;
   const rendered = document.createElement('canvas');
   await QRCode.toCanvas(rendered, link, { width: 224, margin: 2, color: { dark: '#342c24', light: '#ffffff' } });
   if (revision !== shareQRRevision || link !== shareLink) return;
   canvas.width = rendered.width; canvas.height = rendered.height;
-  canvas.getContext('2d')!.drawImage(rendered, 0, 0);
-});
+  canvas.getContext('2d')!.drawImage(rendered, 0, 0); canvas.hidden = false;
+}
 $('copy-code').onclick = () => run(async () => { await navigator.clipboard.writeText($<HTMLTextAreaElement>('outgoing-code').value); toast('配对码已复制'); });
 $('pair-qr-button').onclick = () => run(async () => {
-  const canvas = $<HTMLCanvasElement>('pair-qr'); canvas.hidden = !canvas.hidden;
-  if (!canvas.hidden) {
-    const code = $<HTMLTextAreaElement>('outgoing-code').value;
-    const url = new URL(location.href); url.hash = new URLSearchParams({ [pairingKind]: code }).toString();
-    await QRCode.toCanvas(canvas, pairingKind === 'offer' ? url.toString() : code, { width: 288, margin: 2 });
-  }
+  if (!$('pair-qr').hidden) $('pair-qr').hidden = true;
+  else await renderPairQR();
 });
+async function renderPairQR() {
+  const canvas = $<HTMLCanvasElement>('pair-qr'), code = $<HTMLTextAreaElement>('outgoing-code').value, kind = pairingKind, revision = sessionRevision;
+  const url = new URL(location.href); url.hash = new URLSearchParams({ [kind]: code }).toString();
+  const rendered = document.createElement('canvas');
+  try { await QRCode.toCanvas(rendered, kind === 'offer' ? url.toString() : code, { width: 288, margin: 2 }); }
+  catch { return; } // Long manual descriptions remain available as copyable codes.
+  if (revision !== sessionRevision || code !== $<HTMLTextAreaElement>('outgoing-code').value || kind !== pairingKind) return;
+  canvas.width = rendered.width; canvas.height = rendered.height; canvas.getContext('2d')!.drawImage(rendered, 0, 0); canvas.hidden = false;
+}
 $('apply-answer').onclick = () => run(async () => {
   const t = transfer;
   if (!t || t.role !== 'sender') throw Error('请先创建一次发送');
@@ -533,9 +607,9 @@ $('save-settings').onclick = () => run(async () => {
   toast('连接设置已保存');
 });
 window.addEventListener('beforeunload', event => {
-  if (transfer && !transfer.completed && !transfer.stopped) { event.preventDefault(); event.returnValue = ''; }
+  if (senderGroup?.active || (transfer && !transfer.completed && !transfer.stopped)) { event.preventDefault(); event.returnValue = ''; }
 });
-window.addEventListener('pagehide', () => { clearTimeout(storedRetry); closeScanner(); signaling?.close(); transfer?.close(false); suspendTemporaryStorage(); });
+window.addEventListener('pagehide', () => { clearTimeout(storedRetry); closeScanner(); senderGroup?.close(); leaveReceiverGroup(); signaling?.close(); transfer?.close(false); suspendTemporaryStorage(); });
 window.addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
 function readPreference(key: string) {
   try { return localStorage.getItem(key); } catch { return null; }

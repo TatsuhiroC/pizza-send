@@ -73,7 +73,7 @@ test('a second transfer shows a fresh QR and the same receiver camera connects t
     await expect(receiver.locator('#scan-dialog')).not.toBeVisible();
     await expect(receiver.locator('#accept-files')).toBeVisible();
   };
-  await page.locator('#show-qr').click();
+  await expect(page.locator('#share-qr')).toBeVisible();
   await scanDisplayedQR(firstLink);
   await verifyDownload(page, receiver);
   await page.locator('#cancel').click(); await receiver.locator('#cancel').click();
@@ -84,8 +84,8 @@ test('a second transfer shows a fresh QR and the same receiver camera connects t
   await expect(page.locator('#share-box')).toBeVisible();
   const secondLink = await page.locator('#share-link').inputValue();
   expect(secondLink).not.toBe(firstLink);
-  await expect(page.locator('#share-qr')).toBeHidden();
-  await page.locator('#show-qr').click();
+  await expect(page.locator('#share-qr')).toBeVisible();
+  await expect(page.locator('#share-qr')).toBeVisible();
   await scanDisplayedQR(secondLink);
   await expect(receiver.locator('#incoming-files')).toContainText('second.txt');
   await verifyDownload(page, receiver, secondFile);
@@ -112,7 +112,7 @@ test('compact links retain a 256-bit secret, hide credentials from requests, and
   expect(result.secret).toHaveLength(64);
   expect(result.canonical).toBe(url.hash);
   expect(result.malformedRejected).toBe(true); expect(result.legacyMatches).toBe(true);
-  expect(creation).toEqual({ v: 2, room: result.room, receiverHash: result.digest });
+  expect(creation).toEqual({ v: 2, room: result.room, receiverHash: result.digest, multi: true });
   expect(JSON.stringify(creation)).not.toContain(result.secret);
   expect(JSON.stringify(creation)).not.toContain(result.receiver);
   const oldLength = url.origin.length + url.pathname.length + 201;

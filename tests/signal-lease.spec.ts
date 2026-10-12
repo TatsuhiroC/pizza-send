@@ -4,23 +4,24 @@ import { createHash, webcrypto } from 'node:crypto';
 import vm from 'node:vm';
 
 const TTL = 30 * 60 * 1000;
-async function roomFixture() {
+async function roomFixture(multi = false, child?: any) {
   const clock = { now: 1000000 }, data = new Map<string, any>(), alarms: number[] = [], sockets: any[] = [];
   class Clock extends Date { static now() { return clock.now; } }
+  let lock = Promise.resolve();
   const storage = {
     get: async (key: string) => structuredClone(data.get(key)),
     put: async (key: string, value: any) => { data.set(key, structuredClone(value)); },
-    transaction: async (fn: any) => fn(storage), setAlarm: async (at: number) => { alarms.push(at); },
+    transaction: (fn: any) => { const next = lock.then(() => fn(storage)); lock = next.then(() => {}, () => {}); return next; }, setAlarm: async (at: number) => { alarms.push(at); },
     deleteAll: async () => { data.clear(); }
   };
-  const scope: any = { Date: Clock, crypto: webcrypto, TextEncoder, Response, URL, WebSocket: { OPEN: 1 },
+  const scope: any = { Date: Clock, crypto: webcrypto, TextEncoder, TextDecoder, Response, URL, WebSocket: { OPEN: 1 },
     DurableObject: class { ctx: any; constructor(ctx: any) { this.ctx = ctx; } } };
   const source = (await readFile('signal/worker.js', 'utf8')).replace("import { DurableObject } from 'cloudflare:workers';", '').replace('export default', 'const handler =').replaceAll('export class', 'class');
   vm.runInNewContext(source + '\nglobalThis.Room = Room;', scope);
   const ctx = { storage, getWebSockets: (role?: string) => sockets.filter(s => !role || s.role === role) };
-  const room = new scope.Room(ctx);
+  const room = new scope.Room(ctx, { ROOMS: { idFromName: (id: string) => id, get: () => child } });
   const sender = 'a'.repeat(64), receiver = 'b'.repeat(64), hash = (s: string) => createHash('sha256').update(s).digest('hex');
-  await room.initialize(hash(sender), hash(receiver));
+  await room.initialize(hash(sender), hash(receiver), multi);
   const socket = (role: string) => {
     const meta = { role, count: 0, window: clock.now };
     const s = { role, readyState: 1, sent: [] as string[], close() { this.readyState = 3; },
@@ -28,7 +29,7 @@ async function roomFixture() {
     sockets.push(s); return s;
   };
   const pair = () => { const s = data.get('room'); s.senderClient = 'c'.repeat(64); s.receiverClient = 'd'.repeat(64); };
-  return { room, clock, data, alarms, socket, pair, receiver };
+  return { room, clock, data, alarms, socket, pair, receiver, sender };
 }
 
 test('unpaired invitations expire after thirty minutes even with sender heartbeats', async () => {
@@ -60,4 +61,59 @@ test('renewal does not allow a new recipient to join an expired invitation', asy
   delete f.data.get('room').receiverClient; f.clock.now += 11 * 60000;
   const url = 'https://signal.test/rooms/' + 'e'.repeat(64) + '?' + new URLSearchParams({ role: 'receiver', token: f.receiver, client: 'f'.repeat(64) });
   expect((await f.room.fetch(new Request(url))).status).toBe(410);
+});
+
+const groupRequest = (f: any, role: string, client: string, body?: any) => f.room.fetch(new Request('https://signal.test/rooms/' + 'e'.repeat(64) + '?' + new URLSearchParams({ role, token: f[role], client }), body ? { method: 'POST', body: JSON.stringify(body) } : {}));
+test('active group renewal preserves invitation expiry and ending closes owned child rooms only', async () => {
+  const child = { initialize: async () => true, belongsTo: async () => true, ended: 0, async setEnded() { this.ended++; } };
+  const f = await roomFixture(true, child), host = 'c'.repeat(64), guest = 'd'.repeat(64);
+  await groupRequest(f, 'sender', host);
+  expect((await groupRequest(f, 'receiver', guest, { type: 'join', room: 'f'.repeat(64), receiverHash: '1'.repeat(64) })).status).toBe(200);
+  const original = f.data.get('room').inviteExpiresAt;
+  f.clock.now += 20 * 60000; await f.room.renewActive();
+  expect(f.data.get('room').expiresAt).toBe(f.clock.now + TTL);
+  expect(f.data.get('room').inviteExpiresAt).toBe(original);
+  f.clock.now += 11 * 60000;
+  expect((await groupRequest(f, 'receiver', '2'.repeat(64))).status).toBe(410);
+  expect((await groupRequest(f, 'receiver', guest)).status).toBe(200);
+  await f.room.setEnded(); expect(child.ended).toBe(1);
+  expect((await groupRequest(f, 'receiver', guest)).status).toBe(410);
+});
+test('cancelled colliding reservations cannot close unrelated rooms', async () => {
+  for (const action of ['leave', 'end']) {
+    let release!: () => void, entered!: () => void;
+    const gate = new Promise<void>(r => release = r), started = new Promise<void>(r => entered = r);
+    const child = { initialize: async () => { entered(); await gate; return false; }, belongsTo: async () => false, ended: 0, async setEnded() { this.ended++; } };
+    const f = await roomFixture(true, child), host = 'c'.repeat(64), guest = 'd'.repeat(64);
+    await groupRequest(f, 'sender', host);
+    const joining = groupRequest(f, 'receiver', guest, { type: 'join', room: 'f'.repeat(64), receiverHash: '1'.repeat(64) });
+    await started;
+    await groupRequest(f, action === 'leave' ? 'receiver' : 'sender', action === 'leave' ? guest : host, { type: action });
+    release(); expect((await joining).status).toBe(409); expect(child.ended).toBe(0);
+  }
+});
+test('cancelling during child creation closes that child once creation returns', async () => {
+  let release!: () => void, entered!: () => void, initialized = false;
+  const gate = new Promise<void>(r => release = r), started = new Promise<void>(r => entered = r);
+  const child = { initialize: async () => { entered(); await gate; initialized = true; return true; }, belongsTo: async () => initialized, ended: 0, async setEnded() { this.ended++; } };
+  const f = await roomFixture(true, child), host = 'c'.repeat(64), guest = 'd'.repeat(64);
+  await groupRequest(f, 'sender', host);
+  const joining = groupRequest(f, 'receiver', guest, { type: 'join', room: 'f'.repeat(64), receiverHash: '1'.repeat(64) });
+  await started; await groupRequest(f, 'receiver', guest, { type: 'leave' });
+  release(); expect((await joining).status).toBe(410); expect(child.ended).toBe(1);
+  expect((await groupRequest(f, 'receiver', guest)).status).toBe(410);
+});
+test('joining just before expiry immediately retains the active group; credential-checked cleanup rejects foreign ownership', async () => {
+  const child = { initialize: async () => true, belongsTo: async () => true, setEnded: async () => {} };
+  const f = await roomFixture(true, child), host = 'c'.repeat(64), guest = 'd'.repeat(64);
+  await groupRequest(f, 'sender', host);
+  const deadline = f.data.get('room').inviteExpiresAt; f.clock.now = deadline - 1;
+  expect((await groupRequest(f, 'receiver', guest, { type: 'join', room: 'f'.repeat(64), receiverHash: '1'.repeat(64) })).status).toBe(200);
+  expect(f.data.get('room').expiresAt).toBe(f.clock.now + TTL);
+  f.clock.now += 2; await f.room.alarm();
+  expect((await groupRequest(f, 'receiver', guest)).status).toBe(200);
+  expect((await groupRequest(f, 'receiver', '2'.repeat(64))).status).toBe(410);
+  await f.room.setEnded('wrong-owner', 'wrong-receiver'); expect(f.data.get('room').ended).toBe(false);
+  const hash = (s: string) => createHash('sha256').update(s).digest('hex');
+  await f.room.setEnded(hash(f.sender), hash(f.receiver)); expect(f.data.get('room').ended).toBe(true);
 });

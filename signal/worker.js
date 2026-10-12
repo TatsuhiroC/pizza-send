@@ -4,7 +4,7 @@ const TTL = 30 * 60 * 1000;
 const MAX_ACTIVE_TTL = 24 * 60 * 60 * 1000;
 const token = () => Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, '0')).join('');
 const digest = async value => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))), b => b.toString(16).padStart(2, '0')).join('');
-async function roomOptions(request) {
+async function readBody(request, limit = 1024) {
   if (!request.body) return null;
   const reader = request.body.getReader(), parts = [];
   let size = 0;
@@ -13,7 +13,7 @@ async function roomOptions(request) {
       const { value, done } = await reader.read();
       if (done) break;
       size += value.byteLength;
-      if (size > 1024) throw Error('Room configuration too large');
+      if (size > limit) throw Error('Room configuration too large');
       parts.push(value);
     }
   } finally { await reader.cancel(); }
@@ -21,7 +21,12 @@ async function roomOptions(request) {
   const bytes = new Uint8Array(size);
   let offset = 0;
   for (const part of parts) { bytes.set(part, offset); offset += part.byteLength; }
-  const value = JSON.parse(new TextDecoder().decode(bytes));
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+async function roomOptions(request) {
+  const value = await readBody(request);
+  if (!value) return null;
+  if (value.multi !== undefined && typeof value.multi !== 'boolean') throw Error('Invalid room configuration');
   if (value?.v !== 2 || !/^[a-f0-9]{64}$/.test(value.room) || !/^[a-f0-9]{64}$/.test(value.receiverHash)) throw Error('Invalid room configuration');
   return value;
 }
@@ -44,12 +49,19 @@ export default {
       catch { return response({ error: 'Invalid room configuration' }, 400, origin); }
       const room = options?.room || token(), sender = token(), receiver = options ? null : token();
       const stub = env.ROOMS.get(env.ROOMS.idFromName(room));
-      if (!await stub.initialize(await digest(sender), options?.receiverHash || await digest(receiver))) return response({ error: 'Room already exists' }, 409, origin);
-      return response({ v: options ? 2 : 1, room, sender, ...(receiver ? { receiver } : {}), expiresAt: Date.now() + TTL }, 201, origin);
+      if (!await stub.initialize(await digest(sender), options?.receiverHash || await digest(receiver), !!options?.multi)) return response({ error: 'Room already exists' }, 409, origin);
+      return response({ v: options ? 2 : 1, ...(options?.multi ? { multi: true } : {}), room, sender, ...(receiver ? { receiver } : {}), expiresAt: Date.now() + TTL }, 201, origin);
     }
     const match = url.pathname.match(/^\/rooms\/([a-f0-9]{64})$/);
-    if (!match || (request.method !== 'GET')) return response({ error: 'Not found' }, 404, origin);
-    const result = await env.ROOMS.get(env.ROOMS.idFromName(match[1])).fetch(request);
+    if (!match || !['GET', 'POST'].includes(request.method)) return response({ error: 'Not found' }, 404, origin);
+    let forwarded = request;
+    if (request.method === 'POST') {
+      let body;
+      try { body = await readBody(request, 2048); } catch { return response({ error: 'Invalid request' }, 400, origin); }
+      const headers = new Headers(request.headers); headers.delete('content-length');
+      forwarded = new Request(request, { headers, body: JSON.stringify(body ?? {}) });
+    }
+    const result = await env.ROOMS.get(env.ROOMS.idFromName(match[1])).fetch(forwarded);
     if (result.status === 101) return result;
     return new Response(result.body, { status: result.status, headers: { ...Object.fromEntries(result.headers), 'access-control-allow-origin': origin, 'vary': 'Origin', 'cache-control': 'no-store' } });
   }
@@ -67,12 +79,13 @@ export class RateLimit extends DurableObject {
   async alarm() { await this.ctx.storage.deleteAll(); }
 }
 export class Room extends DurableObject {
+  constructor(ctx, env) { super(ctx, env); this.runtime = env; }
   sockets(role) { return this.ctx.getWebSockets(role).filter(socket => socket.readyState === WebSocket.OPEN); }
-  async initialize(sender, receiver) {
+  async initialize(sender, receiver, multi = false) {
     const created = await this.ctx.storage.transaction(async storage => {
       if (await storage.get('room')) return false;
       const now = Date.now();
-      await storage.put('room', { sender, receiver, inviteExpiresAt: now + TTL, expiresAt: now + TTL, maxExpiresAt: now + MAX_ACTIVE_TTL, ended: false });
+      await storage.put('room', { sender, receiver, inviteExpiresAt: now + TTL, expiresAt: now + TTL, maxExpiresAt: now + MAX_ACTIVE_TTL, ended: false, ...(multi ? { multi: true, members: {}, closedClients: [] } : {}) });
       return true;
     });
     if (created) await this.ctx.storage.setAlarm(Date.now() + TTL);
@@ -84,6 +97,8 @@ export class Room extends DurableObject {
     const url = new URL(request.url), role = url.searchParams.get('role'), secret = url.searchParams.get('token') || '', client = url.searchParams.get('client') || '';
     if (!['sender', 'receiver'].includes(role) || !/^[a-f0-9]{64}$/.test(secret) || await digest(secret) !== state[role]) return new Response('Unauthorized', { status: 401 });
     if (client && !/^[a-f0-9]{64}$/.test(client)) return new Response('Invalid client', { status: 400 });
+    if (state.multi) return this.groupFetch(request, role, client);
+    if (request.method !== 'GET') return new Response('Method not allowed', { status: 405 });
     if (role === 'receiver' && !state.receiverClient && (state.inviteExpiresAt ?? state.expiresAt) <= Date.now()) return new Response('Invitation expired', { status: 410 });
     const existing = this.sockets(role);
     if (existing.length && (!client || state[role + 'Client'] !== client)) return new Response('Session already occupied', { status: 409 });
@@ -112,6 +127,118 @@ export class Room extends DurableObject {
     if (this.sockets(opposite).length) pair[1].send(JSON.stringify({ type: 'peer-ready' }));
     return new Response(null, { status: 101, webSocket: pair[0] });
   }
+  async belongsTo(sender, receiver) {
+    const state = await this.ctx.storage.get('room');
+    return !!state && state.sender === sender && state.receiver === receiver;
+  }
+  child(room) { return this.runtime.ROOMS.get(this.runtime.ROOMS.idFromName(room)); }
+  async endMember(member) {
+    const child = this.child(member.room);
+    // Reservations are untrusted until child ownership has been checked. A
+    // cancelled colliding join must never close somebody else's room.
+    const senderHash = await digest(member.sender);
+    if (await child.belongsTo(senderHash, member.receiverHash)) await child.setEnded(senderHash, member.receiverHash);
+  }
+  async setEnded(sender, receiver) {
+    const state = await this.ctx.storage.transaction(async storage => {
+      const current = await storage.get('room');
+      if (!current) return;
+      if (sender !== undefined && (current.sender !== sender || current.receiver !== receiver)) return;
+      current.ended = true; await storage.put('room', current); return current;
+    });
+    if (!state) return;
+    for (const socket of this.sockets()) { socket.send(JSON.stringify({ type: 'ended' })); socket.close(1000, 'Sender ended session'); }
+    if (state.multi) await Promise.allSettled(Object.values(state.members).map(member => this.endMember(member)));
+    await this.ctx.storage.setAlarm(Date.now());
+  }
+  async groupFetch(request, role, client) {
+    if (!client || (request.headers.get('Upgrade') && role !== 'sender')) return new Response('Invalid group request', { status: 400 });
+    if (role === 'sender') {
+      const bound = await this.ctx.storage.transaction(async storage => {
+        const state = await storage.get('room');
+        if (!state || state.ended || state.expiresAt <= Date.now()) return 410;
+        if (state.senderClient && state.senderClient !== client) return 409;
+        state.senderClient = client; await storage.put('room', state); return 200;
+      });
+      if (bound !== 200) return new Response('Session unavailable', { status: bound });
+    }
+    let state = await this.ctx.storage.get('room');
+    if (!state || state.ended || state.expiresAt <= Date.now()) return new Response('Session expired', { status: 410 });
+    if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
+      for (const old of this.sockets('sender')) old.close(1000, 'Connection replaced');
+      const pair = new WebSocketPair(); this.ctx.acceptWebSocket(pair[1], ['sender']);
+      pair[1].serializeAttachment({ role: 'sender', count: 0, window: Date.now() });
+      await this.notifyGroup(); return new Response(null, { status: 101, webSocket: pair[0] });
+    }
+    if (request.method === 'GET') {
+      if (role === 'sender') {
+        await this.renewActive(); state = await this.ctx.storage.get('room');
+        if (!state || state.ended) return new Response('Session expired', { status: 410 });
+        return Response.json({ multi: true, inviteExpiresAt: state.inviteExpiresAt, members: Object.entries(state.members).filter(([, m]) => m.ready).map(([id, m]) => ({ client: id, room: m.room, receiverHash: m.receiverHash, sender: m.sender })) });
+      }
+      if (state.closedClients?.includes(client)) return new Response('Recipient left', { status: 410 });
+      if (!state.members[client] && state.inviteExpiresAt <= Date.now()) return new Response('Invitation expired', { status: 410 });
+      return Response.json({ multi: true, peerPresent: this.sockets('sender').length > 0, inviteExpiresAt: state.inviteExpiresAt });
+    }
+    let body;
+    try { body = await readBody(request, 2048); } catch { return new Response('Invalid request', { status: 400 }); }
+    if (role === 'sender' && body?.type === 'end') { await this.setEnded(); return Response.json({ ended: true }); }
+    if ((role === 'receiver' && body?.type === 'leave') || (role === 'sender' && body?.type === 'finished')) {
+      const id = role === 'receiver' ? client : body.client;
+      if (!/^[a-f0-9]{64}$/.test(id || '')) return new Response('Invalid client', { status: 400 });
+      const member = await this.ctx.storage.transaction(async storage => {
+        const current = await storage.get('room');
+        if (!current || current.ended) return;
+        const member = current.members[id]; delete current.members[id];
+        current.closedClients = [...(current.closedClients || []).filter(value => value !== id), id].slice(-128); await storage.put('room', current); return member;
+      });
+      if (member) await this.endMember(member);
+      await this.notifyGroup();
+      return Response.json({ left: true });
+    }
+    if (role !== 'receiver' || body?.type !== 'join' || !/^[a-f0-9]{64}$/.test(body.room || '') || !/^[a-f0-9]{64}$/.test(body.receiverHash || '')) return new Response('Invalid request', { status: 400 });
+    const reserved = await this.ctx.storage.transaction(async storage => {
+      const current = await storage.get('room');
+      if (!current || current.ended || current.expiresAt <= Date.now()) return { status: 410 };
+      if (current.closedClients?.includes(client)) return { status: 410 };
+      const existing = current.members[client];
+      if (existing) return existing.room === body.room && existing.receiverHash === body.receiverHash ? { member: existing } : { status: 409 };
+      if (current.inviteExpiresAt <= Date.now()) return { status: 410 };
+      if (Object.keys(current.members).length >= 10) return { status: 429 };
+      const member = { room: body.room, receiverHash: body.receiverHash, sender: token(), ready: false };
+      current.members[client] = member; await storage.put('room', current); return { member };
+    });
+    if (reserved.status) return new Response('Invitation unavailable', { status: reserved.status });
+    // A recipient joining just before invitation expiry must get a recovery
+    // lease immediately, without waiting for the next sender heartbeat.
+    await this.renewActive();
+    const member = reserved.member, child = this.child(member.room), senderHash = await digest(member.sender);
+    const created = await child.initialize(senderHash, member.receiverHash);
+    if (!created && !await child.belongsTo(senderHash, member.receiverHash)) {
+      await this.removeReservation(client, member.sender); return new Response('Room already exists', { status: 409 });
+    }
+    const accepted = await this.ctx.storage.transaction(async storage => {
+      const current = await storage.get('room');
+      if (!current || current.ended || current.expiresAt <= Date.now() || current.members[client]?.sender !== member.sender) return false;
+      current.members[client].ready = true; await storage.put('room', current); return true;
+    });
+    if (!accepted) { await child.setEnded(senderHash, member.receiverHash); return new Response('Session expired', { status: 410 }); }
+    await this.notifyGroup();
+    return Response.json({ multi: true, room: member.room });
+  }
+  async notifyGroup() {
+    const state = await this.ctx.storage.get('room');
+    if (!state || state.ended) return;
+    const message = JSON.stringify({ type: 'members', multi: true, inviteExpiresAt: state.inviteExpiresAt,
+      members: Object.entries(state.members).filter(([, member]) => member.ready).map(([client, member]) => ({ client, room: member.room, receiverHash: member.receiverHash, sender: member.sender })) });
+    for (const socket of this.sockets('sender')) socket.send(message);
+  }
+  async removeReservation(client, sender) {
+    await this.ctx.storage.transaction(async storage => {
+      const current = await storage.get('room');
+      if (current?.members[client]?.sender === sender) { delete current.members[client]; await storage.put('room', current); }
+    });
+  }
   async webSocketMessage(socket, data) {
     const state = await this.ctx.storage.get('room');
     if (!state || state.ended || state.expiresAt <= Date.now()) { socket.close(1008, 'Session expired'); return; }
@@ -139,6 +266,8 @@ export class Room extends DurableObject {
         socket.close(1000, 'Receiver left');
         return;
       }
+      if (message.type === 'end' && meta.role === 'sender' && state.multi) { await this.setEnded(); return; }
+      if (state.multi) throw Error('Invalid group message');
       if (message.type === 'end' && meta.role === 'sender') {
         await this.ctx.storage.transaction(async storage => {
           const current = await storage.get('room');
@@ -167,7 +296,7 @@ export class Room extends DurableObject {
     const now = Date.now();
     const expiresAt = await this.ctx.storage.transaction(async storage => {
       const state = await storage.get('room');
-      if (!state || state.ended || state.expiresAt <= now || !state.senderClient || !state.receiverClient) return;
+      if (!state || state.ended || state.expiresAt <= now || !state.senderClient || !(state.multi ? Object.keys(state.members).length : state.receiverClient)) return;
       // Limit metadata/alarm updates to roughly once a minute. Existing rooms
       // retain their original invitation expiry when first renewed after upgrade.
       if (state.expiresAt - now > TTL - 60000) return;
@@ -183,6 +312,7 @@ export class Room extends DurableObject {
   async alarm() {
     const state = await this.ctx.storage.get('room');
     if (state && !state.ended && state.expiresAt > Date.now()) { await this.ctx.storage.setAlarm(state.expiresAt); return; }
+    if (state?.multi) await Promise.allSettled(Object.values(state.members).map(member => this.endMember(member)));
     for (const socket of this.ctx.getWebSockets()) socket.close(1000, 'Session expired');
     await this.ctx.storage.deleteAll();
   }
