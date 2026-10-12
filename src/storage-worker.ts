@@ -123,10 +123,13 @@ async function handle(type: string, data: any): Promise<unknown> {
       const s = await claim(id); if (!s) { busy++; continue; } // Never touch another tab's active files.
       if (!s.live) {
         await discardIncomplete(s);
-        // Legacy files get a full hour on their first visit after upgrading.
-        let migrated = false;
-        for (const file of s.index.files) if (file.complete && file.expiresAt === undefined) { file.expiresAt = Date.now() + RETENTION_MS; migrated = true; }
-        if (migrated) { await writeIndex(s); await writeIndex(s); }
+        // Shorten older deadlines once; listing never extends an existing deadline.
+        const latestDeadline = Date.now() + RETENTION_MS;
+        let updated = false;
+        for (const file of s.index.files) if (file.complete && (file.expiresAt === undefined || file.expiresAt > latestDeadline)) {
+          file.expiresAt = latestDeadline; updated = true;
+        }
+        if (updated) { await writeIndex(s); await writeIndex(s); }
         for (const file of [...s.index.files]) if (file.complete && file.expiresAt! <= Date.now()) await deleteEntry(id, s, file);
         if (sessions.has(id)) await removeEmpty(id, s);
       }

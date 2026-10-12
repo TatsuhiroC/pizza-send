@@ -1,7 +1,7 @@
 import { test, expect, type Page } from './fixtures';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-const HOUR = 3600000;
+const RETENTION = 10 * 60000;
 const START = Date.UTC(2026, 9, 12, 8);
 const hash = (data: Buffer) => createHash('sha256').update(data).digest('hex');
 const moduleURLs = new WeakMap<Page, string>();
@@ -54,32 +54,32 @@ async function directories(page: Page) {
   });
 }
 
-test('long active batches are protected, then receive a full hour and expire automatically', async ({ page }, info) => {
+test('long active batches are protected, then receive a full ten minutes and expire automatically', async ({ page }, info) => {
   const clock = await clocked(page), active = await seed(page, ['first.txt'], false);
   await page.evaluate(async ({ id, url }) => {
     const s = await import(url);
     await s.beginTemporaryFile(id, { id: 1, name: 'second.txt', size: 4, type: 'text/plain' });
     await s.writeTemporaryFile(id, 0, new Uint8Array([2, 2]).buffer);
   }, active);
-  await moveClock(page, clock, START + 2 * HOUR); await visit(page);
+  await moveClock(page, clock, START + 2 * 3600000); await visit(page);
   expect((await records(page))[0].expiresAt).toBeUndefined();
-  await expect(page.locator('.stored-deadline')).toHaveText('本次传输结束后保留 1 小时');
+  await expect(page.locator('.stored-deadline')).toHaveText('本次传输结束后保留 10 分钟');
   await page.evaluate(async ({ id, url, hash }) => {
     const s = await import(url);
     await s.writeTemporaryFile(id, 2, new Uint8Array([2, 2]).buffer);
     await s.finishTemporaryFile(id, hash); await s.completeTemporarySession(id);
   }, { ...active, hash: hash(Buffer.alloc(4, 2)) });
   await expect(page.locator('.download-file')).toHaveCount(2);
-  expect((await records(page)).map(file => file.expiresAt)).toEqual([START + 3 * HOUR, START + 3 * HOUR]);
-  await expect(page.locator('.stored-deadline').first()).toHaveText('约 60 分钟后清理');
+  expect((await records(page)).map(file => file.expiresAt)).toEqual([START + 2 * 3600000 + RETENTION, START + 2 * 3600000 + RETENTION]);
+  await expect(page.locator('.stored-deadline').first()).toHaveText('约 10 分钟后清理');
   await page.setViewportSize({ width: 320, height: 844 }); await page.locator('#language-toggle').click();
-  await expect(page.locator('.stored-deadline').first()).toHaveText('Cleared in about 60 min');
+  await expect(page.locator('.stored-deadline').first()).toHaveText('Cleared in about 10 min');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: info.outputPath('expiry-english-mobile.png'), fullPage: true });
-  await moveClock(page, clock, START + 3 * HOUR - 1);
+  await moveClock(page, clock, START + 2 * 3600000 + RETENTION - 1);
   expect(await records(page)).toHaveLength(2);
   const blob = await page.locator('.download-file').first().getAttribute('href');
-  await moveClock(page, clock, START + 3 * HOUR);
+  await moveClock(page, clock, START + 2 * 3600000 + RETENTION);
   await page.clock.runFor(60000); // Run the real page's scheduled cleanup; no extra storage call.
   await expect(page.locator('#stored-panel')).toBeHidden(); await expect.poll(() => directories(page)).toEqual([]);
   expect(await page.evaluate(async url => { try { await fetch(url!); return true; } catch { return false; } }, blob)).toBe(false);
@@ -87,16 +87,16 @@ test('long active batches are protected, then receive a full hour and expire aut
 
 test('refresh preserves deadlines; saving renews only that file and expiry keeps its downloaded copy', async ({ page }, info) => {
   const clock = await clocked(page); await seed(page, ['saved.txt', 'other.txt']);
-  await moveClock(page, clock, START + 59 * 60000); await page.reload();
+  await moveClock(page, clock, START + 9 * 60000); await page.reload();
   await expect(page.locator('.download-file')).toHaveCount(2);
-  expect((await records(page)).map(file => file.expiresAt)).toEqual([START + HOUR, START + HOUR]);
+  expect((await records(page)).map(file => file.expiresAt)).toEqual([START + RETENTION, START + RETENTION]);
   await expect(page.locator('.stored-deadline').first()).toHaveText('约 1 分钟后清理');
   const pending = page.waitForEvent('download'); await page.locator('.download-file[download="saved.txt"]').click();
   const download = await pending, saved = info.outputPath('downloaded.txt'); await download.saveAs(saved);
   expect(hash(await readFile(saved))).toBe(hash(Buffer.alloc(4, 1)));
-  const extended = START + 59 * 60000 + HOUR;
+  const extended = START + 9 * 60000 + RETENTION;
   await expect.poll(async () => (await records(page))[0].expiresAt).toBe(extended);
-  await moveClock(page, clock, START + HOUR); await visit(page);
+  await moveClock(page, clock, START + RETENTION); await visit(page);
   await expect(page.locator('.download-file')).toHaveCount(1);
   expect((await records(page))[0].expiresAt).toBe(extended);
   await page.reload(); await expect(page.locator('.download-file')).toHaveCount(1);
@@ -109,15 +109,15 @@ test('refresh preserves deadlines; saving renews only that file and expiry keeps
 
 test('the next visit removes expired files but keeps newer files', async ({ page }) => {
   const clock = await clocked(page); await seed(page, ['older.txt']);
-  await moveClock(page, clock, START + 30 * 60000); await seed(page, ['newer.txt']);
-  await page.goto('about:blank'); clock.now = START + HOUR; await page.clock.setSystemTime(clock.now); await page.goto('./');
+  await moveClock(page, clock, START + 5 * 60000); await seed(page, ['newer.txt']);
+  await page.goto('about:blank'); clock.now = START + RETENTION; await page.clock.setSystemTime(clock.now); await page.goto('./');
   await expect(page.locator('.download-file')).toHaveCount(1);
   await expect(page.locator('.stored-file .filename-button')).toHaveText('newer.txt');
-  expect((await records(page))[0].expiresAt).toBe(START + 90 * 60000);
+  expect((await records(page))[0].expiresAt).toBe(START + 15 * 60000);
   expect(await directories(page)).toHaveLength(1);
 });
 
-test('legacy metadata gets one hour of grace without renewed deadlines on later visits', async ({ page }) => {
+test('legacy metadata gets ten minutes of grace without renewed deadlines on later visits', async ({ page }) => {
   const clock = await clocked(page), { id } = await seed(page, ['legacy.txt']);
   await page.evaluate(async id => {
     const dir = await (await (await navigator.storage.getDirectory()).getDirectoryHandle('pizzasend-received-v1')).getDirectoryHandle(id);
@@ -129,10 +129,10 @@ test('legacy metadata gets one hour of grace without renewed deadlines on later 
     }
   }, id);
   await page.reload(); await expect(page.locator('.download-file')).toHaveCount(1);
-  expect((await records(page))[0].expiresAt).toBe(START + HOUR);
-  await moveClock(page, clock, START + 30 * 60000); await page.reload();
-  await expect(page.locator('.download-file')).toHaveCount(1); expect((await records(page))[0].expiresAt).toBe(START + HOUR);
-  await moveClock(page, clock, START + HOUR); await page.reload(); await expect(page.locator('#stored-panel')).toBeHidden();
+  expect((await records(page))[0].expiresAt).toBe(START + RETENTION);
+  await moveClock(page, clock, START + 5 * 60000); await page.reload();
+  await expect(page.locator('.download-file')).toHaveCount(1); expect((await records(page))[0].expiresAt).toBe(START + RETENTION);
+  await moveClock(page, clock, START + RETENTION); await page.reload(); await expect(page.locator('#stored-panel')).toBeHidden();
 });
 
 test('automatic deletion failure is retried and does not lose the unremoved file across reloads', async ({ page }) => {
@@ -144,7 +144,7 @@ test('automatic deletion failure is retried and does not lose the unremoved file
       return remove.call(this, name, options);
     };
   });
-  await moveClock(page, clock, START + HOUR); await visit(page);
+  await moveClock(page, clock, START + RETENTION); await visit(page);
   await expect(page.locator('#notice')).toBeVisible();
   expect(await directories(page)).toHaveLength(1);
   const preserved = await page.evaluate(async () => {
@@ -162,8 +162,28 @@ test('automatic deletion failure is retried and does not lose the unremoved file
 test('a cleanup confirmation remains usable when its files expire before confirmation', async ({ page }) => {
   const clock = await clocked(page); await seed(page, ['expired-before-confirm.txt']);
   await page.locator('#clear-stored').click(); await expect(page.locator('#cleanup-dialog')).toBeVisible();
-  await moveClock(page, clock, START + HOUR); await visit(page);
+  await moveClock(page, clock, START + RETENTION); await visit(page);
   await expect(page.locator('.download-file')).toHaveCount(0);
   await page.locator('#confirm-cleanup').click(); await expect(page.locator('#cleanup-dialog')).toBeHidden();
   await expect(page.locator('#cleanup-error')).toBeHidden(); expect(await directories(page)).toEqual([]);
+});
+
+test('existing one-hour deadlines shorten once to ten minutes without extending earlier deadlines', async ({ page }) => {
+  const clock = await clocked(page), { id } = await seed(page, ['old-hour.txt', 'ending-sooner.txt']);
+  await page.evaluate(async ({ id, start }) => {
+    const dir = await (await (await navigator.storage.getDirectory()).getDirectoryHandle('pizzasend-received-v1')).getDirectoryHandle(id);
+    for (const name of ['index-a.json', 'index-b.json']) {
+      const handle = await dir.getFileHandle(name), index = JSON.parse(await (await handle.getFile()).text());
+      index.files[0].expiresAt = start + 3600000;
+      index.files[1].expiresAt = start + 3 * 60000;
+      const stream = await handle.createWritable(); await stream.write(JSON.stringify(index)); await stream.close();
+    }
+  }, { id, start: START });
+  await page.reload(); await expect(page.locator('.download-file')).toHaveCount(2);
+  expect((await records(page)).map(file => file.expiresAt)).toEqual([START + RETENTION, START + 3 * 60000]);
+  await moveClock(page, clock, START + 5 * 60000); await page.reload();
+  await expect(page.locator('.stored-file .filename-button')).toHaveText('old-hour.txt');
+  expect((await records(page))[0].expiresAt).toBe(START + RETENTION);
+  await moveClock(page, clock, START + RETENTION); await visit(page);
+  await expect(page.locator('#stored-panel')).toBeHidden(); await expect.poll(() => directories(page)).toEqual([]);
 });
