@@ -48,7 +48,7 @@ test('20 MB + empty + Chinese filename: automatic pairing, end-to-end SHA-256 an
   await expect(receiver.locator('#status')).toHaveText('传输完成，原样送达。');
   await expect(page.locator('#status')).toHaveText('传输完成，原样送达。');
   const elapsed = Date.now() - started;
-  for (const [i, file] of payload.entries()) {
+  for (const [i, file] of [...payload].reverse().entries()) {
     const downloaded = receiver.waitForEvent('download');
     await receiver.locator('.download-file').nth(i).click();
     const download = await downloaded;

@@ -134,7 +134,7 @@ async function handle(type: string, data: any): Promise<unknown> {
         let unavailable = false;
         try { const file = await (await s.dir.getFileHandle(diskName(entry.info.id))).getFile(); unavailable = file.size !== entry.info.size; }
         catch { unavailable = true; }
-        files.push({ session: id, info: entry.info, hash: entry.hash!, createdAt: s.index.createdAt, expiresAt: s.live ? undefined : entry.expiresAt, unavailable });
+        files.push({ session: id, info: entry.info, hash: entry.hash!, createdAt: s.index.createdAt, receivedAt: entry.receivedAt, expiresAt: s.live ? undefined : entry.expiresAt, unavailable });
       }
     }
     return { files: files.sort((a, b) => a.createdAt - b.createdAt || a.info.id - b.info.id), busy };
@@ -161,8 +161,8 @@ async function handle(type: string, data: any): Promise<unknown> {
     const entry = s.index.files.find(f => f.info.id === s.active);
     if (!entry || !s.access || s.written !== entry.info.size || !/^[a-f0-9]{64}$/.test(data.hash)) throw Error('Incomplete file');
     s.access.flush(); s.access.close(); s.access = undefined; s.active = undefined;
-    entry.complete = true; entry.hash = data.hash; entry.expiresAt = Date.now() + RETENTION_MS;
-    try { await writeIndex(s); } catch (error) { entry.complete = false; delete entry.hash; delete entry.expiresAt; throw error; }
+    entry.complete = true; entry.hash = data.hash; entry.receivedAt = Date.now(); entry.expiresAt = entry.receivedAt + RETENTION_MS;
+    try { await writeIndex(s); } catch (error) { entry.complete = false; delete entry.hash; delete entry.receivedAt; delete entry.expiresAt; throw error; }
     return;
   }
   if (type === 'discard') {

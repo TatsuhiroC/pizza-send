@@ -15,6 +15,7 @@ const icon = (name: string) => {
     lock: '<rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 4v3"/>',
     copy: '<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/>',
     check: '<path d="m5 12 4 4L19 6"/>',
+    trash: '<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/>',
     close: '<path d="m6 6 12 12M18 6 6 18"/>',
     camera: '<path d="M4 6h4l2-3h4l2 3h4v15H4z"/><circle cx="12" cy="13" r="4"/>',
     qr: '<path d="M3 3h6v6H3zM15 3h6v6h-6zM3 15h6v6H3zM15 15h3v3h-3zM21 15v6h-6"/>',
@@ -29,9 +30,9 @@ app.innerHTML = [
   '<section class="transfer-card" aria-label="文件传输"><div class="card-top"><div class="tabs" role="tablist" aria-label="传输角色"><button id="send-tab" class="tab active" role="tab" aria-selected="true">'+icon('upload')+'发送文件</button><button id="receive-tab" class="tab" role="tab" aria-selected="false">'+icon('down')+'接收文件</button></div><span class="secure">'+icon('lock')+'加密直传</span></div>',
   '<div id="send-view"><button id="drop-zone" class="drop-zone" type="button"><span class="drop-icon">'+icon('upload')+'</span><strong>把文件放在这里</strong><span>拖放文件，或点击选择</span><small>支持多个文件 · 文件内容不上传到服务器</small></button><input id="file-input" type="file" multiple hidden/><div id="files" class="file-list" aria-live="polite"></div><div class="send-bottom"><span id="selection-summary">先选一个文件，就可以开始。</span><button id="start-send" class="primary" disabled>创建传输 '+icon('arrow')+'</button></div></div>',
   '<div id="receive-view" hidden><div class="receive-intro"><span class="drop-icon">'+icon('down')+'</span><h2>接住这一份分享</h2><p>打开对方发来的分享链接即可连接。<br/>也可以在这里粘贴链接或配对码。</p></div><button id="open-scanner" class="secondary wide scan-button" type="button">'+icon('camera')+'打开相机扫描</button><p class="scan-alternative subtle">或粘贴分享链接／配对码</p><label class="sr-only" for="receive-code">分享链接或配对码</label><textarea id="receive-code" rows="3" placeholder="粘贴 PizzaSend 分享链接或 PS1. 配对码"></textarea><button id="connect-receive" class="primary wide">连接发送方 '+icon('arrow')+'</button><div id="incoming-files" class="file-list"></div><button id="accept-files" class="primary wide" hidden>选择保存位置并接收 '+icon('down')+'</button><p id="save-note" class="subtle" hidden></p><div id="downloads" class="downloads"></div></div>',
-  '<div id="session-panel" class="session-panel" hidden><div class="session-heading"><span id="status-dot" class="status-dot"></span><h2 id="status">等待接收方</h2><button id="cancel" class="text-button">结束传输</button></div><p id="status-detail" class="subtle">传输期间请保持双方页面打开。</p><div id="share-box" hidden><label for="share-link">把链接发给对方，或者让对方扫码</label><div class="link-row"><input id="share-link" readonly/><button id="copy-link" class="icon-button" aria-label="复制分享链接">'+icon('copy')+'</button><button id="show-qr" class="icon-button" aria-label="显示分享二维码">'+icon('qr')+'</button></div><canvas id="share-qr" hidden></canvas><p class="subtle">链接 30 分钟内可配对，仅限一位接收方。请只分享给预期接收者。</p></div><div id="progress-box" hidden><div class="progress-meta"><span id="current-file"></span><span id="percent">0%</span></div><progress id="progress" max="100" value="0" aria-label="传输进度"></progress><div class="metrics"><div><span id="transferred">0 B</span><small>已接收</small></div><div><span id="speed">—</span><small>平均速度</small></div><div><span id="remaining">—</span><small>预计剩余</small></div></div><div class="path-label">'+icon('lock')+'<span id="connection-path">浏览器之间加密传输</span><span>SHA-256 校验</span></div></div></div>',
+  '<div id="session-panel" class="session-panel" hidden><div class="session-heading"><span id="status-dot" class="status-dot"></span><h2 id="status">等待接收方</h2><button id="cancel" class="text-button">结束传输</button></div><p id="status-detail" class="subtle">传输期间请保持双方页面打开。</p><div id="share-box" hidden><label for="share-link">把链接发给对方，或者让对方扫码</label><div class="link-row"><input id="share-link" readonly/><button id="copy-link" class="icon-button" aria-label="复制分享链接">'+icon('copy')+'</button><button id="show-qr" class="icon-button" aria-label="显示分享二维码">'+icon('qr')+'</button></div><canvas id="share-qr" hidden></canvas><p class="subtle">链接 30 分钟内可配对，仅限一位接收方。请只分享给预期接收者。</p></div><div id="progress-box" hidden><div class="progress-meta"><button id="current-file" class="filename-button" type="button" aria-haspopup="dialog"></button><span id="percent">0%</span></div><progress id="progress" max="100" value="0" aria-label="传输进度"></progress><div class="metrics"><div><span id="transferred">0 B</span><small>已接收</small></div><div><span id="speed">—</span><small>平均速度</small></div><div><span id="remaining">—</span><small>预计剩余</small></div></div><div class="path-label">'+icon('lock')+'<span id="connection-path">浏览器之间加密传输</span><span>SHA-256 校验</span></div></div></div>',
   '<div id="notice" class="notice" role="alert" hidden></div></section>',
-  '<section id="stored-panel" class="stored-panel" aria-labelledby="stored-heading" hidden><div class="stored-heading"><h2 id="stored-heading">本机暂存</h2><span id="stored-size"></span></div><p class="subtle">文件暂存在这台设备的磁盘里，整批接收完成后保留 1 小时。点击保存会为该文件重新预留 1 小时；下载完成后，也可以立即清理全部暂存。</p><p id="stored-busy" class="subtle" hidden>部分暂存正在另一个页面使用。请关闭该页面后，再清理全部暂存。</p><div id="stored-files"></div><div class="stored-actions"><button id="clear-stored" class="text-button cleanup-stored" type="button" hidden>已保存，清理全部暂存</button></div><p class="subtle">到期自动清理。网页关闭或暂停时，下次打开或返回再清理；不会删除已经下载的副本。刷新不会延长保存时间，未完成的传输不能在刷新后续传。浏览器也可能提前回收暂存，请及时保存。</p></section>',
+  '<section id="stored-panel" class="stored-panel" aria-labelledby="stored-heading" hidden><div class="stored-heading"><div><h2 id="stored-heading">本机暂存</h2><span id="stored-size"></span></div><button id="clear-stored" class="secondary cleanup-stored" type="button" hidden>'+icon('trash')+'<span>已保存，清理全部暂存</span></button></div><p class="subtle">文件暂存在这台设备的磁盘里，整批接收完成后保留 1 小时。点击保存会为该文件重新预留 1 小时；下载完成后，也可以立即清理全部暂存。</p><p id="stored-busy" class="subtle" hidden>部分暂存正在另一个页面使用。请关闭该页面后，再清理全部暂存。</p><div id="stored-files"></div><p class="subtle">到期自动清理。网页关闭或暂停时，下次打开或返回再清理；不会删除已经下载的副本。刷新不会延长保存时间，未完成的传输不能在刷新后续传。浏览器也可能提前回收暂存，请及时保存。</p></section>',
   '<section class="benefits"><div>'+icon('bolt')+'<h3>直接送达</h3><p>两端连接后，即传即收。</p></div><div>'+icon('lock')+'<h3>加密传输</h3><p>文件在浏览器之间加密传递。</p></div><div>'+icon('file')+'<h3>原样分享</h3><p>保留内容，逐个校验文件。</p></div></section>',
   '<details class="faq"><summary>开始之前，你可能想知道</summary><div><p><strong>要一直打开页面吗？</strong> 是的。发送和接收期间请保持页面打开，手机尽量不要锁屏。关闭页面会中断传输。</p><p><strong>大文件能传吗？</strong> 桌面 Chrome / Edge 支持直接保存。支持写盘的 Safari 等浏览器先在本机磁盘暂存，再点击保存；大小取决于设备空间和浏览器额度，保存时可能同时占用两份空间。不支持写盘时仍限制为总计 256 MB。</p><p><strong>所有网络都能连上吗？</strong> 首版使用直连，不提供文件中继。部分移动、公司或受限网络可能无法连接，可以尝试同一 Wi-Fi。</p><p><strong>可以断点续传吗？</strong> 自动配对支持页面保持打开时断线重连、从已接收位置续传。刷新或关闭页面后不能续传；手动配对暂不支持自动重连。</p><p><strong>“加密”意味着什么？</strong> WebRTC 数据通道使用 DTLS 加密。自动配对信息也在浏览器里加密，配对密钥放在链接片段中。使用网页仍需要信任本站提供的程序代码。</p></div></details>',
   '<details class="settings"><summary>连接设置</summary><div class="settings-body"><label for="signal-url">配对服务地址</label><input id="signal-url" placeholder="https://pizza-send-signal.…workers.dev"/><label for="stun-url">STUN 服务地址</label><input id="stun-url" placeholder="stun:stun.cloudflare.com:3478"/><button id="save-settings" class="secondary">保存设置</button><p class="subtle">没有配对服务时，可用手动配对码连接。STUN 只帮助建立连接，不中转文件。</p></div></details>',
@@ -39,6 +40,7 @@ app.innerHTML = [
   '<dialog id="pair-dialog"><div class="dialog-heading"><h2>手动配对</h2><button id="close-dialog" class="icon-button" aria-label="关闭配对窗口">'+icon('close')+'</button></div><p id="pair-instructions"></p><label id="outgoing-label" for="outgoing-code">配对码</label><textarea id="outgoing-code" rows="4" readonly></textarea><div class="dialog-actions"><button id="copy-code" class="secondary">'+icon('copy')+'复制配对码</button><button id="pair-qr-button" class="secondary">'+icon('qr')+'二维码</button></div><canvas id="pair-qr" hidden></canvas><div id="answer-section"><label for="answer-code">对方返回的应答码</label><textarea id="answer-code" rows="3" placeholder="粘贴接收方返回的 PS1. 应答码"></textarea><button id="apply-answer" class="primary wide">完成配对 '+icon('arrow')+'</button></div><p class="subtle">仅交换连接信息，文件仍通过加密直连发送。请只向预期接收者提供配对码。</p></dialog>',
   '<dialog id="scan-dialog" class="scan-dialog"><div class="dialog-heading"><h2>扫描分享二维码</h2><button id="close-scanner" class="icon-button" aria-label="关闭相机">'+icon('close')+'</button></div><div class="scan-frame"><video id="scan-video" autoplay muted playsinline aria-label="相机画面"></video><div class="scan-guide" aria-hidden="true"></div></div><p id="scan-status" role="status">请允许相机权限，将对方的二维码放入画面。</p><p class="subtle">画面仅在本机识别，关闭后相机会停止。</p><div class="dialog-actions"><button id="scan-again" class="secondary" hidden>重试相机</button><button id="choose-qr-image" class="secondary">'+icon('file')+'从图片识别</button></div><input id="qr-image-input" type="file" accept="image/*" hidden/></dialog>',
   '<dialog id="cleanup-dialog"><div class="dialog-heading"><h2>清理全部暂存？</h2></div><p id="cleanup-name"></p><p>请确认所有文件已保存，并且浏览器下载已经完成。清理后无法再从本站保存这些暂存；本地下载的副本会保留。</p><div class="dialog-actions"><button id="keep-stored" class="secondary">保留暂存</button><button id="confirm-cleanup" class="primary">确认清理</button></div><p id="cleanup-error" class="subtle" role="alert" hidden></p></dialog>',
+  '<dialog id="filename-dialog" aria-labelledby="filename-heading"><div class="dialog-heading"><h2 id="filename-heading">完整文件名</h2><button id="close-filename" class="icon-button" type="button" aria-label="关闭文件名窗口">'+icon('close')+'</button></div><p id="full-filename"></p></dialog>',
   '<div id="toast" class="toast" role="status" hidden></div>'
 ].join('');
 registerStatic(app);
@@ -58,6 +60,7 @@ let sessionRevision = 0;
 let scannerSession = 0;
 let diskStorageAvailable = false;
 let storedFiles: StoredFile[] = [];
+let filenameSequence = 0;
 let cleanupTargets: StoredFile[] = [];
 let clearingStored = false;
 let storedRevision = 0;
@@ -72,7 +75,8 @@ function saveNote(manifest: FileInfo[]) {
 async function refreshStored() {
   const revision = ++storedRevision;
   try {
-    const records = await listTemporaryFiles();
+    const records = (await listTemporaryFiles()).sort((a, b) =>
+      (b.receivedAt ?? b.createdAt) - (a.receivedAt ?? a.createdAt) || b.createdAt - a.createdAt || b.info.id - a.info.id || a.session.localeCompare(b.session));
     const links = await Promise.all(records.map(async record => ({ record, url: record.unavailable ? '' : await temporaryURL(record) })));
     if (revision !== storedRevision) return;
     storedFiles = records;
@@ -99,13 +103,12 @@ async function refreshStored() {
         // Preserve Safari's direct download gesture; extending retention runs alongside it.
         a.onclick = () => { void retainTemporaryFile(record).catch(error => notice(errorMessage(error))); };
       } else { a.setAttribute('aria-disabled', 'true'); a.classList.add('unavailable-file'); }
-      a.innerHTML = icon('down') + '<span></span>' + icon('check');
-      setText(a.querySelector('span')!, '保存 {name}', { name: record.info.name });
+      const download = downloadRow(record.info.name, a);
       const detail = document.createElement('div'); detail.className = 'stored-detail';
       const size = document.createElement('span');
       if (record.unavailable) setText(size, '暂存文件不可用，可以清理记录'); else size.textContent = bytes(record.info.size);
       const deadline = document.createElement('span'); deadline.className = 'stored-deadline';
-      detail.append(size, deadline); row.append(a, detail); $('stored-files').append(row);
+      detail.append(size, deadline); row.append(download, detail); $('stored-files').append(row);
     }
     updateStoredDeadlines();
   } catch (error) {
@@ -130,6 +133,26 @@ void storageReady.then(() => {
   return refreshStored();
 });
 $('keep-stored').onclick = () => $<HTMLDialogElement>('cleanup-dialog').close();
+function filenameButton(name: string) {
+  const button = document.createElement('button'); button.type = 'button'; button.className = 'filename-button';
+  button.id = 'filename-' + ++filenameSequence;
+  button.textContent = name; button.title = name; button.setAttribute('aria-haspopup', 'dialog');
+  return button;
+}
+function downloadRow(name: string, link: HTMLAnchorElement) {
+  const row = document.createElement('div'); row.className = 'download-row';
+  link.innerHTML = icon('down') + '<span></span>';
+  setText(link.querySelector('span')!, '保存');
+  const button = filenameButton(name); link.setAttribute('aria-describedby', button.id);
+  row.append(button, link); return row;
+}
+app.addEventListener('click', event => {
+  const button = (event.target as Element).closest<HTMLButtonElement>('.filename-button');
+  if (!button || !button.textContent) return;
+  $('full-filename').textContent = button.textContent;
+  $<HTMLDialogElement>('filename-dialog').showModal();
+});
+$('close-filename').onclick = () => $<HTMLDialogElement>('filename-dialog').close();
 function cleanupSummary() {
   setText($('cleanup-name'), '{count} 个文件 · {size}', { count: cleanupTargets.length, size: bytes(cleanupTargets.reduce((sum, file) => sum + file.info.size, 0)) });
 }
@@ -228,7 +251,7 @@ function status(title: string, detail?: string, mode = 'waiting') {
   if (detail) setText($('status-detail'), detail);
 }
 function fileMarkup(list: { name: string; size: number }[], removable = false) {
-  return list.map((f, i) => '<div class="file-row"><span class="file-symbol">'+icon('file')+'</span><div><strong>'+escapeHtml(f.name)+'</strong><small>'+bytes(f.size)+'</small></div>'+(removable ? '<button class="icon-button remove-file" data-index="'+i+'" aria-label="'+escapeHtml(t('移除 {name}', { name: f.name }))+'">'+icon('close')+'</button>' : '<span class="file-ready">'+t('待接收')+'</span>')+'</div>').join('');
+  return list.map((f, i) => '<div class="file-row"><span class="file-symbol">'+icon('file')+'</span><div><button class="filename-button" type="button" aria-haspopup="dialog" title="'+escapeHtml(f.name)+'"><strong>'+escapeHtml(f.name)+'</strong></button><small>'+bytes(f.size)+'</small></div>'+(removable ? '<button class="icon-button remove-file" data-index="'+i+'" aria-label="'+escapeHtml(t('移除 {name}', { name: f.name }))+'">'+icon('close')+'</button>' : '<span class="file-ready">'+t('待接收')+'</span>')+'</div>').join('');
 }
 function select(next: File[]) {
   if (busy) return;
@@ -295,9 +318,8 @@ function events(event: TransferEvent) {
     setText($('remaining'), seconds > 60 ? Math.ceil(seconds / 60) + ' 分钟' : seconds ? seconds + ' 秒' : '即将完成');
   } else if (event.type === 'download') {
     const a = document.createElement('a'); a.href = event.data.url; a.download = event.data.info.name;
-    a.className = 'download-file'; a.innerHTML = icon('down') + '<span></span>'+icon('check');
-    setText(a.querySelector('span')!, '保存 {name}', { name: event.data.info.name });
-    $('downloads').append(a);
+    a.className = 'download-file';
+    $('downloads').append(downloadRow(event.data.info.name, a));
   } else if (event.type === 'done') {
     status('传输完成，原样送达。', transfer?.role === 'sender' ? '接收方已收到并校验全部文件。' : '全部文件通过 SHA-256 校验；若下方有保存按钮，请点击保存。', 'done');
     $<HTMLProgressElement>('progress').value = 100; setText($('percent'), '100%'); setText($('remaining'), '完成');

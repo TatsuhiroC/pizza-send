@@ -103,6 +103,7 @@ const messages: Record<string, string> = {
   '请保持双方页面打开。': 'Keep both pages open.',
   '选择保存位置后开始传输。文件会写入磁盘，并在完成时校验。': 'Choose a save location to begin. Files are written to disk and verified on completion.',
   '文件会分块写入本机磁盘，完成后请点击保存。保存时可能同时占用两份空间，下载完成后请清理暂存。': 'Files are written to this device’s disk in chunks. Click Save when finished. Saving may require space for two copies; clear temporary files after the download finishes.',
+  '完整文件名': 'Full filename', '关闭文件名窗口': 'Close filename window', '保存': 'Save',
   '本机暂存': 'Temporary files on this device',
   '部分暂存正在另一个页面使用。请关闭该页面后，再清理全部暂存。': 'Some temporary files are in use by another page. Close that page before clearing all temporary files.',
   '暂存文件不可用，可以清理记录': 'Temporary file unavailable; you can clear its record',

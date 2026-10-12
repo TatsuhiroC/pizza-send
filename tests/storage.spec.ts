@@ -35,8 +35,8 @@ test('duplicate names, empty and Unicode files survive refresh; one cleanup butt
     { name: '空文件🍕.txt', mimeType: 'text/plain', buffer: Buffer.alloc(0) }];
   await begin(page, receiver, payload); await completed(receiver); await receiver.reload();
   await expect(receiver.locator('.download-file')).toHaveCount(3);
-  for (const [index, file] of payload.entries()) expect(sha(await readFile((await (await downloaded(receiver, index)).path())!))).toBe(sha(file.buffer));
-  const download = await downloaded(receiver), saved = info.outputPath('saved-copy.txt'); await download.saveAs(saved);
+  for (const [index, file] of [...payload].reverse().entries()) expect(sha(await readFile((await (await downloaded(receiver, index)).path())!))).toBe(sha(file.buffer));
+  const download = await downloaded(receiver, 2), saved = info.outputPath('saved-copy.txt'); await download.saveAs(saved);
   await expect(receiver.locator('.cleanup-stored')).toHaveCount(1);
   await receiver.locator('#clear-stored').click(); await expect(receiver.locator('#cleanup-name')).toContainText('3 个文件');
   await receiver.locator('#keep-stored').click();
@@ -120,7 +120,7 @@ test('partly failed bulk cleanup retries remaining files without touching the do
   });
   await begin(page, receiver, [0, 1, 2].map(index => ({ name: 'file-' + index + '.txt', mimeType: 'text/plain', buffer: Buffer.from('file ' + index) })));
   await completed(receiver); await expect(receiver.locator('.download-file')).toHaveCount(3);
-  const download = await downloaded(receiver), saved = info.outputPath('saved-copy.txt'); await download.saveAs(saved);
+  const download = await downloaded(receiver, 2), saved = info.outputPath('saved-copy.txt'); await download.saveAs(saved);
   await receiver.locator('#clear-stored').click(); await receiver.locator('#confirm-cleanup').click();
   await expect(receiver.locator('#cleanup-error')).toBeVisible();
   await expect(receiver.locator('#cleanup-name')).toContainText('2 个文件');

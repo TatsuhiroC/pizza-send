@@ -91,7 +91,7 @@ test('refresh preserves deadlines; saving renews only that file and expiry keeps
   await expect(page.locator('.download-file')).toHaveCount(2);
   expect((await records(page)).map(file => file.expiresAt)).toEqual([START + HOUR, START + HOUR]);
   await expect(page.locator('.stored-deadline').first()).toHaveText('约 1 分钟后清理');
-  const pending = page.waitForEvent('download'); await page.locator('.download-file').first().click();
+  const pending = page.waitForEvent('download'); await page.locator('.download-file[download="saved.txt"]').click();
   const download = await pending, saved = info.outputPath('downloaded.txt'); await download.saveAs(saved);
   expect(hash(await readFile(saved))).toBe(hash(Buffer.alloc(4, 1)));
   const extended = START + 59 * 60000 + HOUR;
@@ -112,7 +112,7 @@ test('the next visit removes expired files but keeps newer files', async ({ page
   await moveClock(page, clock, START + 30 * 60000); await seed(page, ['newer.txt']);
   await page.goto('about:blank'); clock.now = START + HOUR; await page.clock.setSystemTime(clock.now); await page.goto('./');
   await expect(page.locator('.download-file')).toHaveCount(1);
-  await expect(page.locator('.download-file')).toContainText('newer.txt');
+  await expect(page.locator('.stored-file .filename-button')).toHaveText('newer.txt');
   expect((await records(page))[0].expiresAt).toBe(START + 90 * 60000);
   expect(await directories(page)).toHaveLength(1);
 });

@@ -41,7 +41,7 @@ async function verifyDownload(sender: Page, receiver: Page, expected = fixture) 
   await receiver.locator('#accept-files').click();
   await expect(sender.locator('#status')).toHaveText('传输完成，原样送达。');
   const download = receiver.waitForEvent('download');
-  await receiver.locator('.download-file').last().click();
+  await receiver.locator('.download-file').first().click();
   const file = await readFile((await (await download).path())!);
   expect(createHash('sha256').update(file).digest('hex')).toBe(createHash('sha256').update(expected).digest('hex'));
 }
