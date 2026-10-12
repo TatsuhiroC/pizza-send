@@ -32,6 +32,8 @@ Up to ten recipients can receive concurrently, with independent progress, verifi
 
 The frontend is a static Vite + TypeScript website hosted on GitHub Pages. A Cloudflare Worker with Durable Objects forwards pairing messages only, while STUN helps discover connection addresses. **File contents are never transferred through or stored by the signaling service. There is no TURN file relay.**
 
+The production signaling endpoint is `https://signal.pizzasend.dpdns.org`. The domain is registered with DigitalPlat and managed through Cloudflare's free DNS plan, and points to the existing Worker. The website uses the new endpoint automatically, including browsers that saved the previous default. Custom endpoints and an empty setting for manual pairing are preserved. Accessibility still needs to be tested on each network.
+
 Automatic pairing encrypts SDP information with an AES-256-GCM key generated in the browser. The key is stored in the share URL's `#` fragment and is not sent to the static website or signaling service in HTTP requests. The receiving page clears the fragment from the address bar after reading it. The signaling service can see the room, roles, connection times, network addresses, and encrypted message sizes. Room role tokens are stored as SHA-256 digests. Initial pairing invitations expire after 30 minutes and allow up to ten concurrent recipients. Each recipient has an independent connection room, credentials, and encryption key. Only the authenticated sender can list members and obtain connection sender credentials. Explicitly ending the share closes the invitation and all its connections. Unexpected signaling disconnections preserve the room so the same browser session can reconnect until it expires.
 
 In v0.2, initial pairing invitations still expire after 30 minutes. Once both browser sessions are bound, authenticated heartbeats renew recovery access for roughly 30 minutes after the latest renewal, capped at 24 hours from room creation. Renewal never admits a new recipient through an expired invitation or reopens an ended room.
@@ -60,7 +62,7 @@ Enter `http://127.0.0.1:8787` in the webpage's connection settings. Leave it emp
 ## Deploy your own instance
 
 1. Fork the repository. In GitHub Settings → Pages, set Source to GitHub Actions. Updates to `main` are verified before `dist` is automatically published.
-2. Edit the Worker name and `ALLOWED_ORIGINS` in `signal/wrangler.jsonc`, using your frontend's origin. The default deployment allows the current GitHub Pages origin and two local development origins.
+2. Edit the Worker name and `ALLOWED_ORIGINS` in `signal/wrangler.jsonc`, using your frontend's origin. The default deployment allows the current GitHub Pages origin and two local development origins. Replace the custom domain in `routes` with your own active Cloudflare domain, or remove `routes` to use only `workers.dev`.
 3. Run `npx wrangler login`, then `npm run signal:deploy`. Durable Objects use SQLite storage, which your account must support. Usage limits and charges depend on your Cloudflare account.
 4. Set `signalUrl` in `public/app.config.json` to the Worker's returned HTTPS URL, then commit and publish. Worker updates must be deployed separately. Access tokens are not stored in the repository.
 

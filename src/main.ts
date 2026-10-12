@@ -463,9 +463,15 @@ function createTransfer(role: 'sender' | 'receiver') {
   transfer = next; setBusy(true); $('notice').hidden = true;
   return transfer;
 }
-function endpoint() {
+function preferredSignalUrl() {
   const saved = readPreference('pizza-send-signal');
-  const value = saved !== null ? saved : config.signalUrl;
+  // Follow the moved production default without replacing custom or manual settings.
+  if (config.signalUrl === 'https://signal.pizzasend.dpdns.org' &&
+    (saved === 'https://pizza-send-signal.jimchenqizheng.workers.dev' || saved === 'https://pizza-send-signal.jimchenqizheng.workers.dev/')) return config.signalUrl;
+  return saved ?? config.signalUrl;
+}
+function endpoint() {
+  const value = preferredSignalUrl();
   if (!value) return '';
   const url = new URL(value);
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname))) throw Error('配对服务需要 HTTPS 地址');
@@ -687,7 +693,7 @@ async function init() {
   } catch {}
   const stun = readPreference('pizza-send-stun');
   if (stun !== null) config.iceServers = stun ? [{ urls: stun }] : [];
-  $<HTMLInputElement>('signal-url').value = readPreference('pizza-send-signal') ?? config.signalUrl;
+  $<HTMLInputElement>('signal-url').value = preferredSignalUrl();
   $<HTMLInputElement>('stun-url').value = String(config.iceServers[0]?.urls || '');
   if (!('RTCPeerConnection' in window) || !crypto.subtle) { notice('请在支持 WebRTC 的现代浏览器中，通过 HTTPS 打开本站。'); $<HTMLButtonElement>('drop-zone').disabled = true; return; }
   const params = new URLSearchParams(originalHash.slice(1));

@@ -31,6 +31,8 @@
 
 前端是 Vite + TypeScript 静态网页，发布在 GitHub Pages。Cloudflare Worker + Durable Objects 仅转发配对消息，STUN 帮助发现连接地址。**文件内容不会经由配对服务传输或存储，没有 TURN 文件中继。**
 
+正式配对入口为 `https://signal.pizzasend.dpdns.org`，域名由 DigitalPlat 注册、DNS 由 Cloudflare 免费方案管理，连接到原有 Worker。网页会自动使用新入口，包括曾保存旧默认地址的浏览器；自定义地址和留空的手动模式保持原设置。各地网络的可访问性仍需实测。
+
 自动配对使用浏览器生成的 AES-256-GCM 密钥加密 SDP 信息。密钥在分享 URL 的 `#` 片段中，不随 HTTP 请求发给静态网站或配对服务；接收页面解析后清理地址栏。配对服务可见房间、角色、连接时间、网络地址和加密消息大小。房间角色令牌以 SHA-256 摘要存储，首次配对邀请 30 分钟过期；同一分享最多 10 位同时接收，每位接收者使用独立的连接房间、凭据和加密密钥。成员信息及每条连接的发送凭据只向认证发送端提供。主动结束分享会关闭邀请及其全部连接。配对连接意外断开时保留房间，允许同一浏览器会话重新连接，直到房间过期。
 
 v0.2 中，首次配对邀请仍为 30 分钟；已绑定双方的会话随认证心跳延长恢复期限，最后一次续期后保留约 30 分钟，从创建起最长 24 小时。续期不会允许新的接收方使用已过期的首次邀请，也不会恢复已经结束的房间。
@@ -59,7 +61,7 @@ npm run signal:dev
 ## 自行部署
 
 1. Fork 仓库，并在 GitHub Settings → Pages 将 Source 设为 GitHub Actions。`main` 更新后先验证，再自动发布 `dist`。
-2. 修改 `signal/wrangler.jsonc` 的 Worker 名字、`ALLOWED_ORIGINS`，填写自己的前端 origin。部署默认允许当前 GitHub Pages origin 和两个本地开发 origin。
+2. 修改 `signal/wrangler.jsonc` 的 Worker 名字、`ALLOWED_ORIGINS`，填写自己的前端 origin。部署默认允许当前 GitHub Pages origin 和两个本地开发 origin。`routes` 中的自定义域名也需改成自己已在 Cloudflare 激活的域名；若只使用 `workers.dev`，删除 `routes`。
 3. `npx wrangler login`，然后 `npm run signal:deploy`。Durable Objects 使用 SQLite 存储，账号需支持此功能；用量和费用以 Cloudflare 账号额度为准。
 4. 将返回的 Worker HTTPS 地址写入 `public/app.config.json` 的 `signalUrl`，提交并发布。Worker 更新需要另行部署，仓库中不保存访问令牌。
 

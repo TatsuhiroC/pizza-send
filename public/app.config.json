@@ -1,5 +1,5 @@
 {
-  "signalUrl": "https://pizza-send-signal.jimchenqizheng.workers.dev",
+  "signalUrl": "https://signal.pizzasend.dpdns.org",
   "iceServers": [
     {
       "urls": "stun:stun.cloudflare.com:3478"

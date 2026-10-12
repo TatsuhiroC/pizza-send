@@ -4,6 +4,7 @@
   "main": "worker.js",
   "compatibility_date": "2026-10-01",
   "workers_dev": true,
+  "routes": [{ "pattern": "signal.pizzasend.dpdns.org", "custom_domain": true }],
   "vars": { "ALLOWED_ORIGINS": "https://tatsuhiroc.github.io,http://127.0.0.1:5173,http://localhost:5173" },
   "durable_objects": { "bindings": [{ "name": "ROOMS", "class_name": "Room" }, { "name": "LIMITS", "class_name": "RateLimit" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room", "RateLimit"] }]
