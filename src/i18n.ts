@@ -32,6 +32,10 @@ const messages: Record<string, string> = {
 
   '打开相机扫描': 'Open camera to scan',
   '或粘贴分享链接／配对码': 'Or paste a share link / pairing code',
+  '粘贴': 'Paste',
+  '剪贴板中没有文字': 'There is no text in the clipboard',
+  '已粘贴，请点击“连接发送方”': 'Pasted. Click “Connect to sender” to continue.',
+  '无法自动粘贴，请长按输入框或使用键盘粘贴。': 'Unable to paste automatically. Press and hold the field or use your keyboard to paste.',
   '扫描分享二维码': 'Scan a share QR code',
   '关闭相机': 'Close camera',
   '相机画面': 'Camera preview',

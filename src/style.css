@@ -23,3 +23,4 @@
 .session-action{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;max-width:100%;min-height:44px;padding:10px 16px;border:1px solid #ad4321;border-radius:10px;background:#be4e27;color:#fff;font-size:12px;font-weight:600;line-height:1.5;text-align:center;box-shadow:0 2px 5px #a7462415;transition:background .15s}
 .session-action:hover{background:#a94423}.session-action:active{background:#943c20}
 @media(max-width:640px){.session-action{flex-basis:100%;margin-top:5px}}
+.receive-code-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:15px 0 8px}.receive-code-heading .scan-alternative{margin:0;min-width:0;text-align:left}.paste-button{flex-shrink:0;min-height:44px;padding:9px 13px;font-weight:600;white-space:nowrap}.paste-button svg{width:17px;height:17px}
