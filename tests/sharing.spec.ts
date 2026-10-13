@@ -3,13 +3,12 @@ import QRCode from 'qrcode';
 import { readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
-let quota = 1;
 async function setup(context: BrowserContext, denyCamera = false) {
-  // Isolate new test rooms from other tests' per-IP quota in the local Worker.
-  const ip = `192.0.2.${quota++}`;
-  await context.route('http://127.0.0.1:8787/rooms', route => route.continue({ headers: { ...route.request().headers(), 'cf-connecting-ip': ip } }));
+  // Also isolate independently launched camera browser contexts.
+  const ip = 'isolated-sharing-' + randomUUID();
+  await context.route(url => url.hostname === '127.0.0.1' && url.port === '8787' && url.pathname.startsWith('/rooms'), route => route.continue({ headers: { ...route.request().headers(), 'cf-connecting-ip': ip } }));
   await context.addInitScript(({ denyCamera }) => {
     localStorage.setItem('pizza-send-signal', 'http://127.0.0.1:8787');
     localStorage.setItem('pizza-send-stun', '');
@@ -111,7 +110,7 @@ test('compact links retain a 256-bit secret, hide credentials from requests, and
   expect(result.secret).toHaveLength(64);
   expect(result.canonical).toBe(url.hash);
   expect(result.malformedRejected).toBe(true); expect(result.legacyMatches).toBe(true);
-  expect(creation).toEqual({ v: 2, room: result.room, receiverHash: result.digest, multi: true });
+  expect(creation).toEqual({ v: 2, room: result.room, receiverHash: result.digest, multi: true, challenge: '' });
   expect(JSON.stringify(creation)).not.toContain(result.secret);
   expect(JSON.stringify(creation)).not.toContain(result.receiver);
   const oldLength = url.origin.length + url.pathname.length + 201;

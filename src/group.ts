@@ -1,18 +1,25 @@
+import { authenticatedRequest, ticketURL } from './security';
 import { Transfer, AutoPair, randomToken, signalKey, type Config, type TransferEvent } from './protocol';
 import { deriveRecipientShare, receiverDigest } from './share';
 
 export type Recipient = {
   client: string; number: number; phase: 'pairing' | 'waiting' | 'sending' | 'recovering' | 'done' | 'error' | 'left';
   message: string; file: string; transferred: number; total: number; speed: number; path: string; started: boolean;
-  transfer?: Transfer; pair?: AutoPair;
+  transfer?: Transfer; pair?: AutoPair; verification?: string;
 };
 const valid = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 export function groupURL(api: string, room: string, role: 'sender' | 'receiver', token: string, client: string) {
   const url = new URL('/rooms/' + room, api); url.search = new URLSearchParams({ role, token, client }).toString(); return url.toString();
 }
 export async function groupRequest(url: string, body?: unknown, keepalive = false) {
-  const response = await fetch(url, { ...(body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}), keepalive, signal: AbortSignal.timeout(10000) });
-  if (!response.ok) throw Error(response.status === 410 ? '分享链接已过期或发送方已结束，请创建新链接。' : response.status === 429 ? '同时接收的人数已达 10 位，请稍后再试。' : response.status === 409 ? '分享链接已被另一接收页面占用，请关闭原页面或创建新链接。' : '无法连接配对服务');
+  const response = await authenticatedRequest(url, { ...(body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}), keepalive, signal: AbortSignal.timeout(10000) });
+  if (!response.ok) {
+    if (response.status === 429) {
+      const reason = await response.text();
+      throw Error(reason.includes('Recipient limit reached') || reason === 'Invitation unavailable' ? '同时接收的人数已达 10 位，请稍后再试。' : '请求过于频繁，请稍后重试或使用手动配对。');
+    }
+    throw Error(response.status === 410 ? '分享链接已过期或发送方已结束，请创建新链接。' : response.status === 409 ? '分享链接已被另一接收页面占用，请关闭原页面或创建新链接。' : '无法连接配对服务');
+  }
   return response.json();
 }
 export class GroupSender {
@@ -72,7 +79,9 @@ export class GroupSender {
   }
   private async openSocket() {
     const url = new URL(this.url); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    const socket = this.socket = new WebSocket(url.toString()); this.lastSeen = Date.now();
+    const connectionURL = await ticketURL(url.toString());
+    if (this.closed) return;
+    const socket = this.socket = new WebSocket(connectionURL); this.lastSeen = Date.now();
     socket.onmessage = event => {
       if (this.closed || socket !== this.socket) return; this.lastSeen = Date.now();
       if (typeof event.data !== 'string' || event.data.length > 16384) { socket.close(); return; }
@@ -118,7 +127,8 @@ export class GroupSender {
   }
   private event(client: string, event: TransferEvent) {
     const peer = this.peers.get(client); if (!peer || this.closed || this.retired.has(client)) return;
-    if (event.type === 'pairing') peer.message = event.data;
+    if (event.type === 'verification') peer.verification = event.data;
+    else if (event.type === 'pairing') peer.message = event.data;
     else if (event.type === 'connected') { peer.phase = 'waiting'; peer.message = '等待接收者确认'; }
     else if (event.type === 'started' || event.type === 'resumed') { peer.phase = 'sending'; peer.started = true; peer.message = '正在传输'; }
     else if (event.type === 'recovering') { peer.phase = 'recovering'; peer.message = '网络切换，正在恢复连接'; }

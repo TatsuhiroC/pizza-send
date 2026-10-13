@@ -4,7 +4,7 @@ export * from '@playwright/test';
 // rate limiting is unchanged; never add this header to the deployed service.
 export const test = base.extend<{ localRateLimitScope: void }>({
   localRateLimitScope: [async ({ context }, use, info) => {
-    await context.route(url => url.hostname === '127.0.0.1' && url.port === '8787' && url.pathname === '/rooms', route =>
+    await context.route(url => url.hostname === '127.0.0.1' && url.port === '8787' && url.pathname.startsWith('/rooms'), route =>
       route.continue({ headers: { ...route.request().headers(), 'cf-connecting-ip': 'isolated-test-' + info.testId } }));
     await use();
   }, { auto: true }]

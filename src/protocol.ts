@@ -1,3 +1,4 @@
+import { authenticatedRequest, ticketURL, connectionCode } from './security';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { downloadType } from './download';
 import { createTemporarySession, beginTemporaryFile, writeTemporaryFile, finishTemporaryFile, completeTemporarySession, discardTemporaryPartial } from './received-storage';
@@ -177,6 +178,7 @@ export class Transfer {
     if (this.stopped || this.completed) return;
     if (!this.recovering) {
       this.recovering = true;
+      this.emit({ type: 'verification', data: '' });
       this.emit({ type: 'recovering' });
       this.recoveryTimer = setTimeout(() => this.fail('暂时无法恢复直连，已等待两分钟。请检查双方网络，或重新创建传输。'), 120000);
     }
@@ -227,6 +229,10 @@ export class Transfer {
       this.lastSeen = Date.now();
       if (!this.opened) this.emit({ type: 'connected' });
       this.opened = true;
+      const pc = this.pc;
+      void connectionCode(pc.localDescription?.sdp || '', pc.remoteDescription?.sdp || '').then(code => {
+        if (!this.stopped && generation === this.generation && pc === this.pc) this.emit({ type: 'verification', data: code });
+      }).catch(() => {});
       if (this.role === 'sender') this.control({ type: 'manifest', files: this.manifest, version: 2 });
       clearInterval(this.heartbeat);
       this.heartbeat = setInterval(() => {
@@ -525,7 +531,7 @@ export class Signaling {
     const attempt = (async () => {
       const url = new URL(this.endpoint!);
       url.protocol = url.protocol === 'ws:' ? 'http:' : 'https:';
-      const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      const response = await authenticatedRequest(url, { signal: AbortSignal.timeout(10000) });
       if (!response.ok) {
         if ([401, 409, 410].includes(response.status)) { this.closed = true; clearTimeout(this.retry); }
         throw Error(response.status === 409 ? '分享链接已被另一接收页面占用，请关闭原页面或创建新链接。' :
@@ -533,7 +539,9 @@ export class Signaling {
       }
       const state = await response.json();
       if (this.closed) throw Error('配对服务已断开');
-      const socket = this.socket = new WebSocket(this.endpoint!);
+      const connectionURL = await ticketURL(this.endpoint!);
+      if (this.closed) throw Error('配对服务已断开');
+      const socket = this.socket = new WebSocket(connectionURL);
       this.lastSeen = Date.now();
       // Install handlers before open; peer-ready may arrive immediately.
       socket.onmessage = event => {

@@ -1,6 +1,18 @@
 export type Language = 'zh' | 'en';
 type Params = Record<string, string | number>;
 const messages: Record<string, string> = {
+  "核对连接": "Verify connection",
+  "通过当面或可信渠道核对两端校验码。一致才能确认连接相同；不一致请结束传输。重连后需要重新核对。": "Compare both codes in person or through a trusted channel. Matching codes confirm the same connection; stop if they differ. Compare again after reconnecting.",
+  "确认是你在创建分享": "Verify your share request",
+  "创建请求较多，请完成验证后继续。": "There have been several share requests. Complete verification to continue.",
+  "取消验证": "Cancel verification",
+  "此步骤由 Cloudflare 验证，不会上传你的文件。无法验证时，可以稍后重试或使用手动配对。": "Cloudflare performs this check; your files are not uploaded. If verification is unavailable, retry later or use manual pairing.",
+  "验证服务暂不可用，请稍后重试或使用手动配对。": "Verification is unavailable. Retry later or use manual pairing.",
+  "验证已取消，请重试或使用手动配对。": "Verification canceled. Retry or use manual pairing.",
+  "验证已超时，请重试或使用手动配对。": "Verification timed out. Retry or use manual pairing.",
+  "请求过于频繁，请稍后重试或使用手动配对。": "Too many requests. Retry later or use manual pairing.",
+  "新分享暂时达到服务限额，请稍后重试或使用手动配对。": "New shares have reached the service limit. Retry later or use manual pairing.",
+
   '保存到设备': 'Save to device',
   '下载全部': 'Download all',
   '发起下载：{count} / {total}': 'Starting downloads: {count} / {total}',

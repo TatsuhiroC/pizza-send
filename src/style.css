@@ -24,3 +24,5 @@
 .session-action:hover{background:#a94423}.session-action:active{background:#943c20}
 @media(max-width:640px){.session-action{flex-basis:100%;margin-top:5px}}
 .receive-code-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:15px 0 8px}.receive-code-heading .scan-alternative{margin:0;min-width:0;text-align:left}.paste-button{flex-shrink:0;min-height:44px;padding:9px 13px;font-weight:600;white-space:nowrap}.paste-button svg{width:17px;height:17px}
+
+.connection-check{margin:12px 0;padding:12px 14px;border:1px solid var(--line,#ddd3c2);border-radius:12px;background:#faf6ed}.connection-check summary{cursor:pointer;font-size:.88rem}.connection-check code{display:block;font-size:1.05rem;letter-spacing:.06em;margin-top:10px;overflow-wrap:anywhere}.connection-check p{margin:8px 0 0;font-size:.82rem}#verification-widget{min-height:65px;max-width:100%;margin:16px 0}
