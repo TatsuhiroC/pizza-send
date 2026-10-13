@@ -1,4 +1,6 @@
 import { challenge, cancelChallenge } from './challenge';
+import { MobileBatchSave, type SaveItem } from './mobile-save';
+import { downloadType } from './download';
 import { registerStatic, setText, t, toggleLanguage } from './i18n';
 import QRCode from 'qrcode';
 import { deriveShare, deriveRecipientShare, receiverDigest, shareFragment, parseShare, isSharingURL } from './share';
@@ -37,12 +39,13 @@ app.innerHTML = [
   '<div id="notice" class="notice" role="alert" hidden></div></section>',
   '<section id="stored-panel" class="stored-panel" aria-labelledby="stored-heading" hidden><div class="stored-heading"><div><h2 id="stored-heading">本机暂存</h2><span id="stored-size"></span></div><button id="clear-stored" class="secondary cleanup-stored" type="button" hidden>'+icon('trash')+'<span>清理全部暂存</span></button></div><p class="subtle">文件暂存在这台设备的磁盘里，整批接收完成后保留 10 分钟。点击保存会为该文件重新预留 10 分钟；下载完成后，也可以立即清理全部暂存。</p><p id="stored-busy" class="subtle" hidden>部分暂存正在另一个页面使用。请关闭该页面后，再清理全部暂存。</p><div id="stored-files"></div><p class="subtle">到期自动清理。网页关闭或暂停时，下次打开或返回再清理；不会删除已经下载的副本。刷新不会延长保存时间，未完成的传输不能在刷新后续传。浏览器也可能提前回收暂存，请及时保存。</p></section>',
   '<section class="benefits"><div>'+icon('bolt')+'<h3>直接送达</h3><p>两端连接后，即传即收。</p></div><div>'+icon('lock')+'<h3>加密传输</h3><p>文件在浏览器之间加密传递。</p></div><div>'+icon('file')+'<h3>原样分享</h3><p>保留内容，逐个校验文件。</p></div></section>',
-  '<details class="faq"><summary>开始之前，你可能想知道</summary><div><p><strong>要一直打开页面吗？</strong> 是的。发送和接收期间请保持页面打开，手机尽量不要锁屏。关闭页面会中断传输。</p><p><strong>大文件能传吗？</strong> 桌面 Chrome / Edge 接收单个文件时支持直接保存。多文件或 Safari 等浏览器先在本机磁盘暂存，再逐个保存或点击“下载全部”；大小取决于设备空间和浏览器额度，保存时可能同时占用两份空间。不支持写盘时仍限制为总计 256 MB。</p><p><strong>所有网络都能连上吗？</strong> 首版使用直连，不提供文件中继。部分移动、公司或受限网络可能无法连接，可以尝试同一 Wi-Fi。</p><p><strong>可以断点续传吗？</strong> 自动配对支持页面保持打开时断线重连、从已接收位置续传。刷新或关闭页面后不能续传；手动配对暂不支持自动重连。</p><p><strong>“加密”意味着什么？</strong> WebRTC 数据通道使用 DTLS 加密。自动配对信息也在浏览器里加密，配对密钥放在链接片段中。使用网页仍需要信任本站提供的程序代码。</p></div></details>',
+  '<details class="faq"><summary>开始之前，你可能想知道</summary><div><p><strong>要一直打开页面吗？</strong> 是的。发送和接收期间请保持页面打开，手机尽量不要锁屏。关闭页面会中断传输。</p><p><strong>大文件能传吗？</strong> 桌面 Chrome / Edge 接收单个文件时支持直接保存。多文件或 Safari 等浏览器先在本机磁盘暂存，再选择保存到设备；大小取决于设备空间和浏览器额度，保存时可能同时占用两份空间。不支持写盘时仍限制为总计 256 MB。</p><p><strong>所有网络都能连上吗？</strong> 首版使用直连，不提供文件中继。部分移动、公司或受限网络可能无法连接，可以尝试同一 Wi-Fi。</p><p><strong>可以断点续传吗？</strong> 自动配对支持页面保持打开时断线重连、从已接收位置续传。刷新或关闭页面后不能续传；手动配对暂不支持自动重连。</p><p><strong>“加密”意味着什么？</strong> WebRTC 数据通道使用 DTLS 加密。自动配对信息也在浏览器里加密，配对密钥放在链接片段中。使用网页仍需要信任本站提供的程序代码。</p></div></details>',
   '<details class="settings"><summary>连接设置</summary><div class="settings-body"><label for="signal-url">配对服务地址</label><input id="signal-url" placeholder="https://pizza-send-signal.…workers.dev"/><label for="stun-url">STUN 服务地址</label><input id="stun-url" placeholder="stun:stun.cloudflare.com:3478"/><button id="save-settings" class="secondary">保存设置</button><p class="subtle">没有配对服务时，可用手动配对码连接。STUN 只帮助建立连接，不中转文件。</p></div></details>',
   '</main><footer><span>🍕 一点披萨精神，一份直接的分享。</span><span>受 <a href="https://github.com/kern/filepizza" target="_blank" rel="noopener">FilePizza</a> 启发 · 开源制作</span></footer>',
   '<dialog id="pair-dialog"><div class="dialog-heading"><h2>手动配对</h2><button id="close-dialog" class="icon-button" aria-label="关闭配对窗口">'+icon('close')+'</button></div><p id="pair-instructions"></p><label id="outgoing-label" for="outgoing-code">配对码</label><textarea id="outgoing-code" rows="4" readonly></textarea><div class="dialog-actions"><button id="copy-code" class="secondary">'+icon('copy')+'复制配对码</button><button id="pair-qr-button" class="secondary">'+icon('qr')+'二维码</button></div><canvas id="pair-qr" hidden></canvas><div id="answer-section"><label for="answer-code">对方返回的应答码</label><textarea id="answer-code" rows="3" placeholder="粘贴接收方返回的 PS1. 应答码"></textarea><button id="apply-answer" class="primary wide">完成配对 '+icon('arrow')+'</button></div><p class="subtle">仅交换连接信息，文件仍通过加密直连发送。请只向预期接收者提供配对码。</p></dialog>',
   '<dialog id="scan-dialog" class="scan-dialog"><div class="dialog-heading"><h2>扫描分享二维码</h2><button id="close-scanner" class="icon-button" aria-label="关闭相机">'+icon('close')+'</button></div><div class="scan-frame"><video id="scan-video" autoplay muted playsinline aria-label="相机画面"></video><div class="scan-guide" aria-hidden="true"></div></div><p id="scan-status" role="status">请允许相机权限，将对方的二维码放入画面。</p><p class="subtle">画面仅在本机识别，关闭后相机会停止。</p><div class="dialog-actions"><button id="scan-again" class="secondary" hidden>重试相机</button><button id="choose-qr-image" class="secondary">'+icon('file')+'从图片识别</button></div><input id="qr-image-input" type="file" accept="image/*" hidden/></dialog>',
   '<dialog id="cleanup-dialog"><div class="dialog-heading"><h2>清理全部暂存？</h2></div><p id="cleanup-name"></p><p>请确认所有文件已保存，并且浏览器下载已经完成。清理后无法再从本站保存这些暂存；本地下载的副本会保留。</p><div class="dialog-actions"><button id="keep-stored" class="secondary">保留暂存</button><button id="confirm-cleanup" class="primary">确认清理</button></div><p id="cleanup-error" class="subtle" role="alert" hidden></p></dialog>',
+  '<dialog id="batch-save-dialog" aria-labelledby="batch-save-heading"><div class="dialog-heading"><h2 id="batch-save-heading">逐个保存文件</h2><button id="close-batch-save" class="icon-button" type="button" aria-label="关闭保存窗口">'+icon('close')+'</button></div><p>每次点击保存一个文件，确认浏览器下载提示后，再保存下一个。</p><p id="batch-save-progress" class="subtle" role="status"></p><p id="batch-save-filename" class="batch-save-filename"></p><a id="batch-save-next" class="primary wide"></a></dialog>',
   '<dialog id="filename-dialog" aria-labelledby="filename-heading"><div class="dialog-heading"><h2 id="filename-heading">完整文件名</h2><button id="close-filename" class="icon-button" type="button" aria-label="关闭文件名窗口">'+icon('close')+'</button></div><p id="full-filename"></p></dialog>',
   '<dialog id="verification-dialog" aria-labelledby="verification-heading"><div class="dialog-heading"><h2 id="verification-heading">确认是你在创建分享</h2></div><p>创建请求较多，请完成验证后继续。</p><div id="verification-widget"></div><button id="cancel-verification" class="secondary wide" type="button">取消验证</button><p class="subtle">此步骤由 Cloudflare 验证，不会上传你的文件。无法验证时，可以稍后重试或使用手动配对。</p></dialog>',
   '<div id="toast" class="toast" role="status" hidden></div>'
@@ -76,6 +79,19 @@ let storedRetry: ReturnType<typeof setTimeout> | undefined;
 const saveRequests = new Set<string>();
 let downloadBatch: symbol | undefined;
 let pendingSaveScroll: number | undefined;
+const mobileSave = new MobileBatchSave({
+  button: $<HTMLButtonElement>('download-all'), note: $('download-all-note'), dialog: $<HTMLDialogElement>('batch-save-dialog'), next: $<HTMLAnchorElement>('batch-save-next'),
+  filename: $('batch-save-filename'), progress: $('batch-save-progress'), close: $<HTMLButtonElement>('close-batch-save'),
+  requested: items => { for (const item of items) markSaveRequested(item.key); },
+  retain: items => {
+    const revision = sessionRevision;
+    for (const item of items) {
+      const record = storedFiles.find(record => storedKey(record) === item.key);
+      if (record) void retainTemporaryFile(record).catch(error => { if (revision === sessionRevision) notice(errorMessage(error)); });
+    }
+  },
+  feedback: (message, params) => { setText($('save-feedback'), message, params); $('save-feedback').hidden = false; }
+});
 const storageReady = supportsTemporaryStorage().then(value => diskStorageAvailable = value);
 function saveNote(manifest: FileInfo[]) {
   const native = manifest.length === 1 && typeof (window as any).showSaveFilePicker === 'function';
@@ -366,6 +382,7 @@ function events(event: TransferEvent) {
   } else if (event.type === 'resumed') {
     status('连接已恢复，继续传输', '从接收方确认的位置继续，完成后仍会校验整个文件。', 'connected');
   } else if (event.type === 'error') {
+    cancelAllDownloads();
     $('downloads').innerHTML = ''; $('save-panel').hidden = true; pendingSaveScroll = undefined; $('accept-files').hidden = true;
     notice(event.data); status('传输未完成', '可以结束这次传输，重新配对后再试。', 'error');
     leaveReceiverGroup(); signaling?.close(); signaling = undefined; setText($('cancel'), '重新开始');
@@ -397,12 +414,14 @@ function currentDownloadLinks() {
   return Array.from($('save-panel').querySelectorAll<HTMLAnchorElement>('a.download-file[href]')).filter(link => link.getAttribute('aria-disabled') !== 'true');
 }
 function cancelAllDownloads() {
+  mobileSave.cancel();
   downloadBatch = undefined; $<HTMLButtonElement>('download-all').disabled = false; setText($('download-all'), '下载全部');
 }
 $('download-all').onclick = () => run(async () => {
   if (downloadBatch || clearingStored || $('save-panel').hidden || transfer?.role !== 'receiver' || !transfer.completed || transfer.saveMode === 'device') return;
   const keys = currentDownloadLinks().map(link => link.closest<HTMLElement>('[data-save-key]')!.dataset.saveKey!);
   if (keys.length < 2) return;
+  if (mobileSave.enabled) { mobileSave.open(); return; }
   const token = downloadBatch = Symbol(), revision = sessionRevision;
   $<HTMLButtonElement>('download-all').disabled = true;
   let requested = 0;
@@ -431,6 +450,14 @@ function updateSaveAvailability() {
   const links = currentDownloadLinks();
   const available = !!links.length;
   $('download-all').hidden = links.length < 2; $('download-all-note').hidden = links.length < 2;
+  if (mobileSave.enabled) {
+    const items: SaveItem[] = links.map(link => {
+      const key = link.closest<HTMLElement>('[data-save-key]')!.dataset.saveKey!;
+      const info = storedFiles.find(record => storedKey(record) === key)?.info || transfer?.manifest.find(file => key === 'memory:' + sessionRevision + ':' + file.id);
+      return { key, url: link.href, name: link.download, size: info?.size ?? Number.MAX_SAFE_INTEGER, type: downloadType(info || { name: link.download, type: '' }) };
+    });
+    mobileSave.update(items, sessionRevision);
+  }
   $('save-empty').hidden = available; $('save-retention').hidden = !available;
 }
 function revealSaveActions() {
@@ -779,7 +806,7 @@ $('save-settings').onclick = () => run(async () => {
 window.addEventListener('beforeunload', event => {
   if (senderGroup?.active || (transfer && !transfer.completed && !transfer.stopped)) { event.preventDefault(); event.returnValue = ''; }
 });
-window.addEventListener('pagehide', () => { clearTimeout(storedRetry); closeScanner(); senderGroup?.close(); leaveReceiverGroup(); signaling?.close(); transfer?.close(false); suspendTemporaryStorage(); });
+window.addEventListener('pagehide', () => { cancelAllDownloads(); clearTimeout(storedRetry); closeScanner(); senderGroup?.close(); leaveReceiverGroup(); signaling?.close(); transfer?.close(false); suspendTemporaryStorage(); });
 window.addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
 function readPreference(key: string) {
   try { return localStorage.getItem(key); } catch { return null; }

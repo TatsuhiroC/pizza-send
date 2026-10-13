@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "playwright test",
+    "test:webkit": "playwright test --config playwright.webkit.config.ts",
     "signal:dev": "wrangler dev --config signal/wrangler.jsonc --port 8787",
     "signal:deploy": "wrangler deploy --config signal/wrangler.jsonc",
     "signal:check": "wrangler deploy --dry-run --config signal/wrangler.jsonc"

@@ -22,7 +22,7 @@ Up to ten recipients can receive concurrently, with independent progress, verifi
 - Save a single file directly to disk after choosing its location in desktop Chrome / Edge. Multiple-file reception and Safari use a Worker to write chunks into local disk storage, then offer individual Save buttons or Download all. Capacity depends on device space and browser quota; there is no application-wide 20 GiB cap. Browsers without disk storage retain the 256 MiB total memory limit.
 - Unexpired verified temporary files can be saved again after reopening or refreshing the site. Temporary files appear newest first by completion time; older records use batch time. A prominent “Clear all temporary files” button at the top clears all received temporary files after confirming their count and total size, while keeping downloaded copies. Saving can require space for two copies. Complete temporary files expire 10 minutes after the batch ends. Clicking Save gives that file another 10 minutes; refreshing does not renew it. If the page is closed or paused, expired files are removed on the next visit or return. Legacy files without deadlines receive 10 minutes on their first visit after upgrading. Existing one-hour deadlines are shortened to at most 10 more minutes; earlier deadlines are kept. Browsers may reclaim storage earlier, so this is not a guaranteed minimum retention period.
 - Cancellation and failures clear unfinished temporary files while keeping earlier verified files. Abandoned partial files are cleared on the next visit. Cross-page locks protect another page’s active files. Unfinished transfers still cannot resume after a refresh.
-- Multiple-file reception does not require choosing a folder. Download all saves the original files individually with their names and contents intact. Browsers may ask for permission to download multiple files; individual Save buttons remain available if downloads are blocked.
+- Multiple-file reception does not require choosing a folder. Desktop Chrome / Edge use Download all for individual original-file downloads. On iPhone / iPad, Save all hands the complete set of original files to the system save panel. If system batch saving is unavailable or files are large, Safari offers Save one by one, requiring an explicit click for each file. Names and contents stay intact, without ZIP packaging.
 - Automatic pairing incrementally exchanges connection addresses (Trickle ICE), including late candidates, and distinguishes sender availability, direct-path discovery, occupied links, and expired sessions.
 - Automatic pairing reconnects after network changes and resumes from the receiver’s confirmed position, preserving verification and the save location. Both pages must stay open.
 - Manual pairing by copying connection codes, without a signaling service. Automatic reconnection is not supported in manual mode.
@@ -74,8 +74,9 @@ Enter `http://127.0.0.1:8787` in the webpage's connection settings. Leave it emp
 
 ```sh
 npm run build
-npx playwright install --with-deps chromium
+npx playwright install --with-deps chromium webkit
 npm test
+npm run test:webkit
 npm run signal:check
 ```
 
