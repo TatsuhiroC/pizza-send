@@ -48,7 +48,7 @@ For troubleshooting, refresh both pages and create a new link. Keep the sending 
 
 ## Local development
 
-Requires Node.js 22 or later.
+Requires Node.js 22.12 or later.
 
 ```sh
 npm ci
