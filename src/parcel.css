@@ -32,3 +32,22 @@
 @media(max-width:640px){.parcel-hero{width:57px;height:57px}.lang-en .parcel-hero{width:46px;height:46px}}
 @media(max-width:360px){.parcel-hero{width:32px;height:32px;right:-34px;top:37px}.lang-en .parcel-hero{width:30px;height:30px;right:-32px;top:21px}}
 @media(prefers-reduced-motion:reduce){.parcel-scene,.parcel-box,.parcel-loose-slice,.parcel-lid-face,.parcel-speed,.parcel-steam{transition:none!important}.parcel-trails path,.parcel-wake,.parcel-wake path,.parcel-echo{animation:none!important}.parcel-echo{display:none}.parcel-trails path{opacity:.35}}
+
+/* The original top-down entrance hands off to the same slice and box scene. */
+.parcel-intro-base,.parcel-intro-lid,.parcel-intro-steam{display:none}
+.parcel-hero[data-intro=playing]{--unbox-duration:1800ms;--unbox-delay:100ms}
+.parcel-hero[data-intro=playing] .parcel-scene{animation:pizza-arrive var(--unbox-duration) var(--unbox-delay) both}
+.parcel-hero[data-intro=playing] .parcel-loose-slice{animation:pizza-float var(--unbox-duration) var(--unbox-delay) both}
+.parcel-hero[data-intro=playing] .parcel-intro-base{display:inline;transform-origin:52px 52px;animation:pizza-recede var(--unbox-duration) var(--unbox-delay) both}
+.parcel-hero[data-intro=playing] .parcel-intro-lid{display:inline;transform-origin:52px 5px;animation:pizza-unfold var(--unbox-duration) var(--unbox-delay) both}
+.parcel-hero[data-intro=playing] .parcel-intro-steam{display:inline;animation:pizza-warmth var(--unbox-duration) var(--unbox-delay) both}
+@keyframes pizza-arrive{0%{opacity:0;transform:translateY(4px) scale(.97)}9%,100%{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes pizza-unfold{0%,12%{opacity:1;transform:scaleY(1);animation-timing-function:cubic-bezier(.4,0,.2,1)}32%{opacity:.65;transform:scaleY(.08)}38%,100%{opacity:0;transform:scaleY(.02)}}
+@keyframes pizza-float{
+  0%,48%{transform:translate(52px,31.5px) scale(.4492) translate(-52px,-52px);filter:drop-shadow(0 1px 0 #d4ba8e);animation-timing-function:cubic-bezier(.2,.65,.25,1)}
+  76%{transform:translate(52px,49px) rotate(15deg) scale(1.015) translate(-52px,-52px);filter:drop-shadow(0 8px 2px #d9cdbb);animation-timing-function:cubic-bezier(.3,0,.3,1)}
+  100%{transform:translate(52px,52px) rotate(16deg) translate(-52px,-52px);filter:drop-shadow(0 6px 0 #e7dfce)}
+}
+@keyframes pizza-recede{0%,52%{opacity:1;transform:translateY(0) scale(1);animation-timing-function:cubic-bezier(.4,0,.3,1)}83%,100%{opacity:0;transform:translateY(10px) scale(.76)}}
+@keyframes pizza-warmth{0%,28%{opacity:0;transform:translateY(7px)}43%{opacity:.5;transform:translateY(0);animation-timing-function:ease-out}68%,100%{opacity:0;transform:translateY(-9px)}}
+@media(prefers-reduced-motion:reduce){.parcel-hero[data-intro=playing] .parcel-scene,.parcel-hero[data-intro=playing] .parcel-loose-slice{animation:none!important}.parcel-intro-base,.parcel-intro-lid,.parcel-intro-steam{display:none!important}}

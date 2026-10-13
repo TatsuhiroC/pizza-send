@@ -4,9 +4,22 @@ export const completionSymbol = '<svg viewBox="0 0 20 20" fill="none" aria-hidde
 export class DeliveryMotion {
   private state?: DeliveryState;
   private lidOpening?: Animation;
-  constructor(private hero: HTMLElement, private completion: HTMLElement) { this.setState('idle'); }
+  private readonly onIntroEnd = (event: AnimationEvent) => {
+    if (event.animationName === 'pizza-float') this.finishIntro();
+  };
+  constructor(private hero: HTMLElement, private completion: HTMLElement) {
+    this.hero.addEventListener('animationend', this.onIntroEnd);
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) this.finishIntro();
+    this.setState('idle');
+  }
+  private finishIntro() {
+    this.hero.dataset.intro = 'finished';
+    this.hero.removeEventListener('animationend', this.onIntroEnd);
+  }
   setState(state: DeliveryState) {
     if (this.state === state) return;
+    // Selecting a file can interrupt the entrance, without replaying it on reset.
+    if (state !== 'idle') this.finishIntro();
     const opens = (state === 'selected' || state === 'done') && this.state !== 'selected' && this.state !== 'done';
     this.lidOpening?.cancel();
     this.hero.dataset.state = state;

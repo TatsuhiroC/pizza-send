@@ -8,7 +8,7 @@ import './animation-preview.css';
 const root = document.querySelector<HTMLElement>('#preview-app')!;
 root.innerHTML = `<header class="header"><a class="brand" href="./animation-preview.html"><img src="./pizza.svg" alt="" width="38" height="38"/><span>PizzaSend<small>文件快传</small></span></a><span class="preview-badge">本地动效预览 · 尚未提交</span></header>
 <main><section class="intro"><div class="eyebrow"><span></span>好东西，直接分享。</div><h1>文件送到，<br/><span>热乎刚好。</span>${heroPizza}</h1><p>一个位置，从装盒到送达。</p></section>
-<section class="transfer-card preview-card"><div class="preview-actions"><button id="demo-select" class="secondary" type="button">① 选中文件</button><button id="demo-transfer" class="secondary" type="button">② 开始传输</button><button id="demo-complete" class="secondary" type="button">③ 传输完成</button><button id="demo-pause" class="secondary" type="button">暂停动画</button><button id="demo-reset" class="secondary" type="button">回到默认</button></div>
+<section class="transfer-card preview-card"><div class="preview-actions"><button id="demo-select" class="secondary" type="button">① 选中文件</button><button id="demo-transfer" class="secondary" type="button">② 开始传输</button><button id="demo-complete" class="secondary" type="button">③ 传输完成</button><button id="demo-pause" class="secondary" type="button">暂停动画</button><button id="demo-reset" class="secondary" type="button">回到默认</button><button id="demo-intro" class="secondary" type="button">重播开场</button></div>
 <p class="preview-scale">单片披萨：1 倍 · 披萨盒：1.5 倍</p>
 <div class="session-heading"><span id="preview-dot" class="status-dot connected"></span><h2 id="preview-status">正在传输</h2><span class="preview-demo">演示</span></div><p id="preview-detail" class="subtle">只演示动效，不会发送文件。</p>
 <div id="preview-picked" class="preview-picked" hidden><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#a78761" stroke-width="1.5" aria-hidden="true"><path d="M14 3H5v18h14V8l-5-5Zm0 0v5h5M8 12h8M8 16h6"/></svg><div><strong>假日照片.png</strong><small>文件已选好，披萨已放入盒中。</small></div></div>
@@ -43,5 +43,6 @@ el('demo-complete').onclick = () => {
   set('done');
 };
 el('demo-reset').onclick = () => set('idle');
+el('demo-intro').onclick = () => location.reload();
 el('demo-pause').onclick = () => set(motion.currentState === 'recovering' ? 'transferring' : 'recovering');
 set('idle');
