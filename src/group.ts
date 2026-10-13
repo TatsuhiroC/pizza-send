@@ -5,7 +5,7 @@ import { deriveRecipientShare, receiverDigest } from './share';
 export type Recipient = {
   client: string; number: number; phase: 'pairing' | 'waiting' | 'sending' | 'recovering' | 'done' | 'error' | 'left';
   message: string; file: string; transferred: number; total: number; speed: number; path: string; started: boolean;
-  transfer?: Transfer; pair?: AutoPair; verification?: string;
+  transfer?: Transfer; pair?: AutoPair;
 };
 const valid = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 export function groupURL(api: string, room: string, role: 'sender' | 'receiver', token: string, client: string) {
@@ -127,8 +127,7 @@ export class GroupSender {
   }
   private event(client: string, event: TransferEvent) {
     const peer = this.peers.get(client); if (!peer || this.closed || this.retired.has(client)) return;
-    if (event.type === 'verification') peer.verification = event.data;
-    else if (event.type === 'pairing') peer.message = event.data;
+    if (event.type === 'pairing') peer.message = event.data;
     else if (event.type === 'connected') { peer.phase = 'waiting'; peer.message = '等待接收者确认'; }
     else if (event.type === 'started' || event.type === 'resumed') { peer.phase = 'sending'; peer.started = true; peer.message = '正在传输'; }
     else if (event.type === 'recovering') { peer.phase = 'recovering'; peer.message = '网络切换，正在恢复连接'; }

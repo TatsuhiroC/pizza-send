@@ -131,16 +131,7 @@ test('missing security binding returns a safe failure instead of bypassing prote
   const f = await fixture({ REQUEST_LIMITER: undefined }); expect((await f.create(1)).status).toBe(503); expect(f.access.rooms).toBe(0);
 });
 
-test('connection codes bind both actual certificates, ignore role order and reject substituted fingerprints', async ({ page }) => {
-  await page.goto('./');
-  const result = await page.evaluate(async () => {
-    const { connectionCode } = await import('/src/security.ts');
-    const sdp = (byte: string) => 'v=0\r\na=fingerprint:sha-256 ' + Array(32).fill(byte).join(':') + '\r\n';
-    return [await connectionCode(sdp('AA'), sdp('BB')), await connectionCode(sdp('BB'), sdp('AA')), await connectionCode(sdp('AA'), sdp('CC'))];
-  });
-  expect(result[0]).toMatch(/^[0-9A-F]{4}( [0-9A-F]{4}){3}$/); expect(result[0]).toBe(result[1]); expect(result[0]).not.toBe(result[2]);
-});
-test('real transfer codes agree on both ends; new receiver has a different code and credentials stay out of request URLs', async ({ page, context }) => {
+test('real transfer and recovery preserve original files; credentials stay out of request URLs', async ({ page, context }) => {
   await context.addInitScript(() => {
     localStorage.setItem('pizza-send-signal', 'http://127.0.0.1:8787'); localStorage.setItem('pizza-send-stun', '');
     const Peer = RTCPeerConnection; (window as any).__pcs = [];
@@ -156,29 +147,18 @@ test('real transfer codes agree on both ends; new receiver has a different code 
   await page.locator('#start-send').click(); await expect(page.locator('#share-qr')).toBeVisible();
   const link = await page.locator('#share-link').inputValue();
   await receiver.goto(link); await expect(receiver.locator('#accept-files')).toBeVisible();
-  await expect(receiver.locator('#connection-check')).toBeVisible();
-  const firstCode = await receiver.locator('#connection-code').textContent();
-  await expect(page.locator('.recipient-row code')).toHaveText(firstCode!);
-  // A new certificate pair, even under the same invitation, changes the code.
   await receiver.evaluate(() => (window as any).__pcs.at(-1).close());
-  await expect(receiver.locator('#connection-code')).toHaveText(/^[0-9A-F]{4}( [0-9A-F]{4}){3}$/, { timeout: 40000 });
-  await expect(receiver.locator('#connection-code')).not.toHaveText(firstCode!);
-  await expect(receiver.locator('#accept-files')).toBeVisible();
-  const newCode = await receiver.locator('#connection-code').textContent(); expect(newCode).toMatch(/^[0-9A-F]{4}( [0-9A-F]{4}){3}$/);
-  await expect(page.locator('.recipient-row code')).toHaveText(newCode!);
+  await expect.poll(() => receiver.evaluate(() => (window as any).__pcs.length), { timeout: 40000 }).toBeGreaterThan(1);
+  await expect.poll(() => receiver.evaluate(() => (window as any).__pcs.at(-1).connectionState), { timeout: 40000 }).toBe('connected');
   await second.goto(link); await expect(second.locator('#accept-files')).toBeVisible();
-  await expect(second.locator('#connection-code')).toHaveText(/^[0-9A-F]{4}( [0-9A-F]{4}){3}$/);
-  const secondCode = await second.locator('#connection-code').textContent(); expect(secondCode).not.toBe(newCode);
-  await expect(page.locator('.recipient-row code').nth(1)).toHaveText(secondCode!);
   await receiver.locator('#accept-files').click(); await expect(receiver.locator('#status')).toHaveText('文件已收到，请保存到设备');
   const pending = receiver.waitForEvent('download'); await receiver.locator('.download-file').click(); const downloaded = await pending;
   expect(downloaded.suggestedFilename()).toBe('security-original.txt'); expect((await readFile((await downloaded.path())!)).toString()).toBe('same original bytes');
   expect(requests.length).toBeGreaterThan(5); expect(requests.every(r => !new URL(r.url).searchParams.has('token'))).toBe(true);
   expect(requests.filter(r => new URL(r.url).pathname !== '/rooms').every(r => /^Bearer [a-f0-9]{64}$/.test(r.auth || ''))).toBe(true);
   expect(sockets.length).toBeGreaterThan(3); expect(sockets.every(url => !new URL(url).searchParams.has('token') && /^[a-f0-9]{64}$/.test(new URL(url).searchParams.get('ticket') || ''))).toBe(true);
-  await receiver.setViewportSize({ width: 320, height: 800 }); await receiver.locator('#connection-check summary').click();
+  await receiver.setViewportSize({ width: 320, height: 800 });
   expect(await receiver.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await receiver.locator('#language-toggle').click(); await expect(receiver.locator('#connection-check summary')).toHaveText('Verify connection');
   await page.locator('#cancel').click();
 });
 

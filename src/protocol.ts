@@ -1,4 +1,4 @@
-import { authenticatedRequest, ticketURL, connectionCode } from './security';
+import { authenticatedRequest, ticketURL } from './security';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { downloadType } from './download';
 import { createTemporarySession, beginTemporaryFile, writeTemporaryFile, finishTemporaryFile, completeTemporarySession, discardTemporaryPartial } from './received-storage';
@@ -178,7 +178,6 @@ export class Transfer {
     if (this.stopped || this.completed) return;
     if (!this.recovering) {
       this.recovering = true;
-      this.emit({ type: 'verification', data: '' });
       this.emit({ type: 'recovering' });
       this.recoveryTimer = setTimeout(() => this.fail('暂时无法恢复直连，已等待两分钟。请检查双方网络，或重新创建传输。'), 120000);
     }
@@ -229,10 +228,6 @@ export class Transfer {
       this.lastSeen = Date.now();
       if (!this.opened) this.emit({ type: 'connected' });
       this.opened = true;
-      const pc = this.pc;
-      void connectionCode(pc.localDescription?.sdp || '', pc.remoteDescription?.sdp || '').then(code => {
-        if (!this.stopped && generation === this.generation && pc === this.pc) this.emit({ type: 'verification', data: code });
-      }).catch(() => {});
       if (this.role === 'sender') this.control({ type: 'manifest', files: this.manifest, version: 2 });
       clearInterval(this.heartbeat);
       this.heartbeat = setInterval(() => {

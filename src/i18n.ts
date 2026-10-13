@@ -1,8 +1,6 @@
 export type Language = 'zh' | 'en';
 type Params = Record<string, string | number>;
 const messages: Record<string, string> = {
-  "核对连接": "Verify connection",
-  "通过当面或可信渠道核对两端校验码。一致才能确认连接相同；不一致请结束传输。重连后需要重新核对。": "Compare both codes in person or through a trusted channel. Matching codes confirm the same connection; stop if they differ. Compare again after reconnecting.",
   "确认是你在创建分享": "Verify your share request",
   "创建请求较多，请完成验证后继续。": "There have been several share requests. Complete verification to continue.",
   "取消验证": "Cancel verification",

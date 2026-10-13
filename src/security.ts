@@ -16,16 +16,3 @@ export async function ticketURL(value: string) {
   url.protocol = websocketProtocol; url.searchParams.delete('token'); url.searchParams.set('ticket', state.ticket);
   return url.toString();
 }
-
-// Compare over a trusted channel. This binds the code to both actual DTLS
-// certificate fingerprints, rather than to the reusable invitation secret.
-export async function connectionCode(local: string, remote: string) {
-  const fingerprints = (sdp: string) => {
-    const values = [...sdp.matchAll(/^a=fingerprint:sha-256 ([A-Fa-f0-9:]+)\r?$/gm)].map(match => match[1].replace(/:/g, '').toLowerCase());
-    if (!values.length || values.some(value => !/^[a-f0-9]{64}$/.test(value))) throw Error('配对信息无效');
-    return [...new Set(values)].sort().join(',');
-  };
-  const pair = [fingerprints(local), fingerprints(remote)].sort();
-  const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('PizzaSend/connection-check/v1\n' + pair.join('\n'))));
-  return Array.from(bytes.slice(0, 8), byte => byte.toString(16).padStart(2, '0')).join('').toUpperCase().match(/.{4}/g)!.join(' ');
-}
