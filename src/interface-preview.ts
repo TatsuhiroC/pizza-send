@@ -39,4 +39,7 @@ document.getElementById('preview-scan')!.onclick = async () => {
     fixture(document.getElementById('qr-image-input') as HTMLInputElement, new File([blob], 'share.png', { type: 'image/png' }));
   } finally { button.disabled = false; }
 };
-document.getElementById('preview-reset')!.onclick = () => location.reload();
+document.getElementById('preview-reset')!.onclick = () => {
+  document.getElementById('cancel')!.click();
+  location.reload();
+};
