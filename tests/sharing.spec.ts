@@ -33,12 +33,17 @@ async function share(page: Page) {
   await page.locator('#file-input').setInputFiles({ name: 'scan.txt', mimeType: 'text/plain', buffer: fixture });
   await page.locator('#start-send').click();
   await expect(page.locator('#share-box')).toBeVisible();
+  await expect(page.locator('#drop-zone')).toBeHidden();
+  await expect(page.locator('#start-send')).toBeHidden();
   return page.locator('#share-link').inputValue();
 }
 async function verifyDownload(sender: Page, receiver: Page, expected = fixture) {
   await expect(receiver.locator('#accept-files')).toBeVisible();
+  await expect(receiver.locator('#receive-entry')).toBeHidden();
   await receiver.locator('#accept-files').click();
   await expect(sender.locator('#status')).toHaveText('传输完成，原样送达。');
+  await expect(sender.locator('#drop-zone')).toBeHidden();
+  await expect(receiver.locator('#receive-entry')).toBeHidden();
   const download = receiver.waitForEvent('download');
   await receiver.locator('.download-file').first().click();
   const file = await readFile((await (await download).path())!);
@@ -76,6 +81,8 @@ test('a second transfer shows a fresh QR and the same receiver camera connects t
   await scanDisplayedQR(firstLink);
   await verifyDownload(page, receiver);
   await page.locator('#cancel').click(); await receiver.locator('#cancel').click();
+  await expect(page.locator('#drop-zone')).toBeVisible();
+  await expect(receiver.locator('#receive-entry')).toBeVisible();
   await page.locator('.remove-file').click();
   const secondFile = Buffer.from('This is the second file, sent through a new QR invitation.');
   await page.locator('#file-input').setInputFiles({ name: 'second.txt', mimeType: 'text/plain', buffer: secondFile });
