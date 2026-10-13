@@ -1,0 +1,32 @@
+#filename-dialog{background:transparent;border:0;padding:10px;overflow:visible;box-shadow:none;width:min(560px,calc(100vw - 28px));max-height:none}
+#filename-dialog::backdrop{background:#30271f28;-webkit-backdrop-filter:blur(14px) saturate(.85);backdrop-filter:blur(14px) saturate(.85);animation:overlay-appear 220ms ease both}
+.filename-surface{padding:23px 24px 26px;border-radius:26px;border:1px solid #ffffffa6;background:#fffaf0df;-webkit-backdrop-filter:blur(24px) saturate(1.3);backdrop-filter:blur(24px) saturate(1.3);box-shadow:0 24px 70px #35271926,inset 0 1px 0 #fff9;max-height:80vh;max-height:80dvh;overflow:auto}
+#filename-dialog[open] .filename-surface{animation:filename-appear 260ms cubic-bezier(.2,.75,.25,1) both}
+#filename-dialog .dialog-heading h2{font-size:12px;color:#8e7d68;font-weight:500;letter-spacing:.5px}
+#filename-dialog .icon-button{background:#b3a58f18;flex-shrink:0;width:32px;height:32px;border-radius:50%}
+#filename-dialog #full-filename{font-size:18px;font-weight:500;line-height:1.75;margin:20px 0 0}
+#filename-dialog.is-closing .filename-surface{animation:filename-disappear 160ms ease both}
+#filename-dialog.is-closing::backdrop{animation:overlay-disappear 160ms ease both}
+.scan-frame #scan-freeze{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;margin:0;border-radius:0;max-width:none}
+.scan-success{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:12px;color:#fffaf1;background:#20321e9c;-webkit-backdrop-filter:blur(7px);backdrop-filter:blur(7px)}
+.scan-success strong{font-size:20px}.scan-success>span:last-child{font-size:12px;color:#e8f2e2}
+.scan-check{width:58px;height:58px;border-radius:50%;display:grid;place-items:center;background:#f2faec;color:#63874f;box-shadow:0 8px 26px #17241433}
+.scan-check svg{width:32px;height:32px}
+.scan-succeeded .scan-success{animation:scan-success-appear 260ms ease-out both}
+.scan-succeeded .scan-check{animation:scan-check-appear 400ms cubic-bezier(.2,.8,.2,1) both}
+.scan-succeeded .scan-guide{border-color:#cce8b6;opacity:0;transition:opacity 200ms ease}
+.scan-dialog.is-leaving{animation:scanner-depart 180ms ease-in both}
+.scan-dialog.is-leaving::backdrop{animation:overlay-disappear 180ms ease both}
+.session-panel{scroll-margin-top:24px}
+.session-panel.connection-arriving .session-heading{animation:connection-arrive 650ms ease-out both}
+#status:focus{outline:none}
+@keyframes overlay-appear{from{opacity:0}to{opacity:1}}
+@keyframes overlay-disappear{from{opacity:1}to{opacity:0}}
+@keyframes filename-appear{from{opacity:0;transform:translateY(12px) scale(.95)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes filename-disappear{from{opacity:1;transform:translateY(0) scale(1)}to{opacity:0;transform:translateY(5px) scale(.97)}}
+@keyframes scan-success-appear{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+@keyframes scan-check-appear{0%{opacity:0;transform:scale(.7)}65%{opacity:1;transform:scale(1.08)}100%{opacity:1;transform:scale(1)}}
+@keyframes scanner-depart{from{opacity:1;transform:translateY(0) scale(1)}to{opacity:0;transform:translateY(-8px) scale(.98)}}
+@keyframes connection-arrive{from{opacity:.5;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:640px){.filename-surface{padding:19px 20px 23px;border-radius:24px}#filename-dialog #full-filename{font-size:16px}.scan-success strong{font-size:18px}}
+@media(prefers-reduced-motion:reduce){#filename-dialog::backdrop,#filename-dialog[open] .filename-surface,#filename-dialog.is-closing .filename-surface,#filename-dialog.is-closing::backdrop,.scan-succeeded .scan-success,.scan-succeeded .scan-check,.scan-dialog.is-leaving,.scan-dialog.is-leaving::backdrop,.session-panel.connection-arriving .session-heading{animation:none!important}}
