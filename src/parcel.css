@@ -1,0 +1,34 @@
+.parcel-hero{display:block;width:104px;height:104px;pointer-events:none;user-select:none}
+.parcel-scene{display:block;width:100%;height:100%;overflow:visible;transform-origin:50% 50%;transform:scale(1);transition:transform 750ms cubic-bezier(.25,.7,.25,1)}
+.parcel-hero:not([data-state=idle]) .parcel-scene{transform:scale(1.5)}
+.parcel-box{opacity:0;transition:opacity 350ms ease}
+.parcel-loose-slice{transform-origin:0 0;transform:translate(52px,52px) rotate(16deg) translate(-52px,-52px);filter:drop-shadow(0 6px 0 #e7dfce);transition:transform 750ms cubic-bezier(.25,.7,.25,1),filter 750ms ease}
+.parcel-lid-face{transform-origin:0 0;transform:matrix(.36,.25456,-.36,.25456,42,39);transition:transform 700ms cubic-bezier(.3,.65,.3,1)}
+.parcel-steam{opacity:0;transition:opacity 350ms ease}
+.parcel-speed{opacity:0;transition:opacity 180ms ease}
+ .parcel-trails path{stroke-dasharray:28 115;stroke-dashoffset:0;opacity:.5;animation:parcel-airflow 430ms linear infinite;animation-play-state:paused}
+.parcel-trails path:nth-child(2n){animation-duration:350ms;animation-delay:-130ms}
+.parcel-trails path:nth-child(3n){animation-duration:520ms;animation-delay:-370ms}
+.parcel-trails path:nth-child(4n){animation-delay:-220ms}
+.parcel-trails .parcel-trail-fine{stroke-width:.8;stroke-dasharray:14 129;animation-duration:680ms;opacity:.35}
+.parcel-wake{opacity:.6;animation:parcel-wake-flow 550ms ease-in-out infinite;animation-play-state:paused}
+.parcel-wake path{transform-origin:42px 70px;animation:parcel-slipstream 440ms ease-in-out infinite;animation-play-state:paused}
+.parcel-wake path:nth-child(2){animation-delay:-150ms}.parcel-wake path:nth-child(3){animation-delay:-290ms;animation-duration:530ms}
+.parcel-echo{opacity:0;animation:parcel-afterimage 600ms linear infinite;animation-play-state:paused}
+.parcel-echo-far{animation-delay:-300ms}
+.parcel-hero:not([data-state=idle]) .parcel-box{opacity:1}
+.parcel-hero:not([data-state=idle]) .parcel-loose-slice{transform:matrix(.161723,.114357,-.161723,.114357,49.3728,48.367808);filter:none}
+/* Rear diagonal hinge: the free edge travels from lower left to upper right. */
+.parcel-hero[data-state=selected] .parcel-lid-face,.parcel-hero[data-state=done] .parcel-lid-face{transform:matrix(.36,.25456,.25456,-.36,38.9272,42.0728)}
+.parcel-hero[data-state=transferring] .parcel-lid-face,.parcel-hero[data-state=recovering] .parcel-lid-face{transform:matrix(.36,.25456,-.36,.25456,42,39);transition-duration:230ms}
+.parcel-hero[data-state=transferring] .parcel-speed{opacity:1;transition-delay:180ms}
+.parcel-hero[data-state=transferring] .parcel-trails path,.parcel-hero[data-state=transferring] .parcel-wake,.parcel-hero[data-state=transferring] .parcel-wake path,.parcel-hero[data-state=transferring] .parcel-echo{animation-play-state:running}
+.parcel-hero[data-state=recovering] .parcel-speed{opacity:.15}
+.parcel-hero[data-state=done] .parcel-steam{opacity:.42;transition-delay:400ms}
+@keyframes parcel-airflow{0%{stroke-dashoffset:-143}100%{stroke-dashoffset:0}}
+@keyframes parcel-wake-flow{0%,100%{opacity:.5}50%{opacity:.85}}
+@keyframes parcel-slipstream{0%,100%{transform:scale(.85,.96)}50%{transform:scale(1.07,1.04)}}
+@keyframes parcel-afterimage{0%{opacity:.3;transform:translateX(-3px)}100%{opacity:0;transform:translateX(-25px)}}
+@media(max-width:640px){.parcel-hero{width:57px;height:57px}.lang-en .parcel-hero{width:46px;height:46px}}
+@media(max-width:360px){.parcel-hero{width:32px;height:32px;right:-34px;top:37px}.lang-en .parcel-hero{width:30px;height:30px;right:-32px;top:21px}}
+@media(prefers-reduced-motion:reduce){.parcel-scene,.parcel-box,.parcel-loose-slice,.parcel-lid-face,.parcel-speed,.parcel-steam{transition:none!important}.parcel-trails path,.parcel-wake,.parcel-wake path,.parcel-echo{animation:none!important}.parcel-echo{display:none}.parcel-trails path{opacity:.35}}
