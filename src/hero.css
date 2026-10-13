@@ -1,27 +1,32 @@
-.hero-pizza{display:block;width:104px;height:104px;pointer-events:none;user-select:none}
-.pizza-scene{display:block;width:100%;height:100%;overflow:visible}
-.pizza-slice{transform-origin:52px 52px;transform:rotate(16deg);filter:drop-shadow(0 6px 0 #e7dfce);animation:pizza-pop 1120ms 120ms both}
-.pizza-box-part{opacity:0;transform-origin:52px 82px;animation:pizza-box-away 1120ms 120ms both}
-.pizza-lid{transform-origin:40px 61px;animation:pizza-lid-open 1120ms 120ms both}
-@keyframes pizza-pop{
-  0%,18%{opacity:0;transform:translate(-8px,39px) rotate(-16deg) scale(.38)}
-  25%{opacity:1;transform:translate(-8px,33px) rotate(-16deg) scale(.42);animation-timing-function:cubic-bezier(.16,.8,.3,1)}
-  58%{opacity:1;transform:translate(5px,-14px) rotate(24deg) scale(1.04);animation-timing-function:cubic-bezier(.45,0,.65,1)}
-  78%{transform:translate(-1px,3px) rotate(13deg) scale(.98);animation-timing-function:ease-out}
-  91%{transform:translate(0,-2px) rotate(17deg) scale(1.01)}
-  100%{opacity:1;transform:translate(0,0) rotate(16deg) scale(1)}
+.hero-pizza{--unbox-duration:1800ms;--unbox-delay:100ms;display:block;width:104px;height:104px;pointer-events:none;user-select:none}
+.pizza-scene{display:block;width:100%;height:100%;overflow:visible;transform-origin:52px 52px;animation:pizza-arrive var(--unbox-duration) var(--unbox-delay) both}
+.pizza-slice{transform-origin:52px 52px;transform:rotate(16deg);filter:drop-shadow(0 6px 0 #e7dfce);animation:pizza-float var(--unbox-duration) var(--unbox-delay) both}
+.pizza-remaining{opacity:0;transform-origin:52px 52px;animation:pizza-recede var(--unbox-duration) var(--unbox-delay) both}
+.pizza-lid{opacity:0;transform-origin:52px 5px;animation:pizza-unfold var(--unbox-duration) var(--unbox-delay) both}
+.pizza-steam{opacity:0;animation:pizza-warmth var(--unbox-duration) var(--unbox-delay) both}
+@keyframes pizza-arrive{
+  0%{opacity:0;transform:translateY(4px) scale(.97)}
+  9%,100%{opacity:1;transform:translateY(0) scale(1)}
 }
-@keyframes pizza-box-away{
-  0%{opacity:0;transform:translateY(9px) scale(.9)}
-  13%,51%{opacity:1;transform:translateY(0) scale(1)}
-  77%{opacity:0;transform:translate(8px,22px) scale(.87)}
-  100%{opacity:0;transform:translate(8px,22px) scale(.87)}
+@keyframes pizza-unfold{
+  0%,12%{opacity:1;transform:scaleY(1);animation-timing-function:cubic-bezier(.4,0,.2,1)}
+  32%{opacity:.65;transform:scaleY(.08)}
+  38%,100%{opacity:0;transform:scaleY(.02)}
 }
-@keyframes pizza-lid-open{
-  0%,12%{transform:scaleY(.08)}
-  34%{transform:scaleY(1.06)}
-  45%,100%{transform:scaleY(1)}
+@keyframes pizza-float{
+  0%,48%{transform:translate(0,-20.5px) rotate(0deg) scale(.4492);filter:drop-shadow(0 1px 0 #d4ba8e);animation-timing-function:cubic-bezier(.2,.65,.25,1)}
+  76%{transform:translate(0,-3px) rotate(15deg) scale(1.015);filter:drop-shadow(0 8px 2px #d9cdbb);animation-timing-function:cubic-bezier(.3,0,.3,1)}
+  100%{transform:translate(0,0) rotate(16deg) scale(1);filter:drop-shadow(0 6px 0 #e7dfce)}
+}
+@keyframes pizza-recede{
+  0%,52%{opacity:1;transform:translateY(0) scale(1);animation-timing-function:cubic-bezier(.4,0,.3,1)}
+  83%,100%{opacity:0;transform:translateY(10px) scale(.76)}
+}
+@keyframes pizza-warmth{
+  0%,28%{opacity:0;transform:translateY(7px)}
+  43%{opacity:.5;transform:translateY(0);animation-timing-function:ease-out}
+  68%,100%{opacity:0;transform:translateY(-9px)}
 }
 @media(max-width:640px){.hero-pizza{width:57px;height:57px}.lang-en .hero-pizza{width:46px;height:46px}}
 @media(max-width:360px){.hero-pizza{width:32px;height:32px;right:-34px;top:37px}.lang-en .hero-pizza{width:30px;height:30px;right:-32px;top:21px}}
-@media(prefers-reduced-motion:reduce){.pizza-slice,.pizza-box-part,.pizza-lid{animation:none!important}.pizza-slice{transform:rotate(16deg)}.pizza-box-part{display:none}}
+@media(prefers-reduced-motion:reduce){.pizza-scene,.pizza-slice,.pizza-remaining,.pizza-lid,.pizza-steam{animation:none!important}.pizza-slice{transform:rotate(16deg)}.pizza-remaining,.pizza-lid,.pizza-steam{display:none}}
