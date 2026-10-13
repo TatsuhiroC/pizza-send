@@ -1,6 +1,11 @@
 export type Language = 'zh' | 'en';
 type Params = Record<string, string | number>;
 const messages: Record<string, string> = {
+  '已取消保存，文件仍在暂存中，可以再次保存。': 'Saving canceled. The temporary file remains available to save again.',
+  '系统保存面板暂不可用，请再次点按保存，使用浏览器下载。': 'The system save panel is unavailable. Tap Save again to download with your browser.',
+  '已将文件交给系统，请确认保存完成后再清理暂存。': 'File handed to the system. Confirm saving finishes before clearing temporary files.',
+  '已交给系统，请确认保存结果': 'Handed to the system. Confirm the save result.',
+  '请确认文件已保存到你选择的位置，再清理暂存。': 'Confirm the files are saved to your chosen location before clearing temporary files.',
   '保存全部': 'Save all',
   '逐个保存': 'Save one by one',
   '逐个保存文件': 'Save files one by one',

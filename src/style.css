@@ -27,3 +27,4 @@
 
 #verification-widget{min-height:65px;max-width:100%;margin:16px 0}
 .batch-save-filename{overflow-wrap:anywhere;font-weight:600;max-height:160px;overflow:auto}#batch-save-next{text-decoration:none;display:flex}#batch-save-next[aria-disabled=true]{pointer-events:none;opacity:.65}
+.download-file[aria-disabled=true]{opacity:.65;cursor:wait}

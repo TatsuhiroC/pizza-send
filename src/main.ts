@@ -77,12 +77,13 @@ let storedRevision = 0;
 let storedFingerprint = '';
 let storedRetry: ReturnType<typeof setTimeout> | undefined;
 const saveRequests = new Set<string>();
+const systemSaveRequests = new Set<string>();
 let downloadBatch: symbol | undefined;
 let pendingSaveScroll: number | undefined;
 const mobileSave = new MobileBatchSave({
   button: $<HTMLButtonElement>('download-all'), note: $('download-all-note'), dialog: $<HTMLDialogElement>('batch-save-dialog'), next: $<HTMLAnchorElement>('batch-save-next'),
   filename: $('batch-save-filename'), progress: $('batch-save-progress'), close: $<HTMLButtonElement>('close-batch-save'),
-  requested: items => { for (const item of items) markSaveRequested(item.key); },
+  requested: (items, system) => { for (const item of items) markSaveRequested(item.key, system); },
   retain: items => {
     const revision = sessionRevision;
     for (const item of items) {
@@ -90,7 +91,10 @@ const mobileSave = new MobileBatchSave({
       if (record) void retainTemporaryFile(record).catch(error => { if (revision === sessionRevision) notice(errorMessage(error)); });
     }
   },
-  feedback: (message, params) => { setText($('save-feedback'), message, params); $('save-feedback').hidden = false; }
+  feedback: (message, params) => {
+    const target = $('save-panel').hidden ? $('notice') : $('save-feedback');
+    setText(target, message, params); target.hidden = false;
+  }
 });
 const storageReady = supportsTemporaryStorage().then(value => diskStorageAvailable = value);
 function saveNote(manifest: FileInfo[]) {
@@ -127,7 +131,7 @@ async function refreshStored() {
       const a = document.createElement('a'); a.download = record.info.name; a.className = 'download-file';
       if (url) {
         a.href = url;
-        // Preserve Safari's direct download gesture; extending retention runs alongside it.
+        // Desktop downloads keep their direct gesture; mobile handlers are bound below.
         a.onclick = () => { markSaveRequested(storedKey(record)); void retainTemporaryFile(record).catch(error => notice(errorMessage(error))); };
       } else { a.setAttribute('aria-disabled', 'true'); a.classList.add('unavailable-file'); }
       const prominent = record.session === currentSession;
@@ -320,7 +324,7 @@ function clearShareQR() {
 }
 function reset() {
   cancelChallenge();
-  sessionRevision++; pendingSaveScroll = undefined; saveRequests.clear(); cancelAllDownloads();
+  sessionRevision++; pendingSaveScroll = undefined; saveRequests.clear(); systemSaveRequests.clear(); cancelAllDownloads();
   closeScanner();
   senderGroup?.close(); senderGroup = undefined; leaveReceiverGroup();
   signaling?.close(); signaling = undefined;
@@ -397,21 +401,23 @@ function restoreSaveRequest(row: HTMLElement, key: string) {
   if (!saveRequests.has(key)) return;
   let state = row.querySelector<HTMLElement>('.save-request-state');
   if (!state) { state = document.createElement('p'); state.className = 'save-request-state'; row.append(state); }
-  setText(state, '已发起保存，请确认下载提示');
+  setText(state, systemSaveRequests.has(key) ? '已交给系统，请确认保存结果' : '已发起保存，请确认下载提示');
 }
-function markSaveRequested(key: string) {
+function markSaveRequested(key: string, system = false) {
   saveRequests.add(key);
+  if (system) systemSaveRequests.add(key); else systemSaveRequests.delete(key);
   for (const row of document.querySelectorAll<HTMLElement>('[data-save-key]')) if (row.dataset.saveKey === key) restoreSaveRequest(row, key);
   setText($('save-feedback'), '已发起保存，请确认浏览器的下载提示。下载完成后，可在手机的“文件”App 或浏览器下载记录中查找。');
   // A download click is not proof of a completed or accepted browser download.
   $('save-feedback').hidden = $('save-panel').hidden;
   const currentRows = Array.from($('save-panel').querySelectorAll<HTMLElement>('[data-save-key]'));
   if (transfer?.role === 'receiver' && transfer.completed && currentRows.length === transfer.manifest.length && currentRows.every(row => saveRequests.has(row.dataset.saveKey!))) {
-    status('已发起保存，请确认下载提示', '请在浏览器中确认保存，并等待下载完成。');
+    if (currentRows.some(row => systemSaveRequests.has(row.dataset.saveKey!))) status('已交给系统，请确认保存结果', '请确认文件已保存到你选择的位置，再清理暂存。');
+    else status('已发起保存，请确认下载提示', '请在浏览器中确认保存，并等待下载完成。');
   }
 }
 function currentDownloadLinks() {
-  return Array.from($('save-panel').querySelectorAll<HTMLAnchorElement>('a.download-file[href]')).filter(link => link.getAttribute('aria-disabled') !== 'true');
+  return Array.from($('save-panel').querySelectorAll<HTMLAnchorElement>('a.download-file[href]')).filter(link => !link.classList.contains('unavailable-file'));
 }
 function cancelAllDownloads() {
   mobileSave.cancel();
@@ -446,16 +452,22 @@ $('download-all').onclick = () => run(async () => {
   }
 });
 function updateSaveAvailability() {
+  const itemFor = (link: HTMLAnchorElement): SaveItem => {
+    const key = link.closest<HTMLElement>('[data-save-key]')!.dataset.saveKey!;
+    const info = storedFiles.find(record => storedKey(record) === key)?.info || transfer?.manifest.find(file => key === 'memory:' + sessionRevision + ':' + file.id);
+    return { key, url: link.href, name: link.download, size: info?.size ?? Number.MAX_SAFE_INTEGER, type: downloadType(info || { name: link.download, type: '' }) };
+  };
+  if (mobileSave.enabled) {
+    // Prioritize the current transfer, then the retained files from older transfers.
+    const allLinks = [...currentDownloadLinks(), ...$('stored-files').querySelectorAll<HTMLAnchorElement>('a.download-file[href]')];
+    mobileSave.syncLinks(allLinks.filter(link => !link.classList.contains('unavailable-file')).map(link => ({ link, item: itemFor(link) })));
+  }
   if (transfer?.role !== 'receiver' || !transfer.completed || transfer.saveMode === 'device') return;
   const links = currentDownloadLinks();
   const available = !!links.length;
   $('download-all').hidden = links.length < 2; $('download-all-note').hidden = links.length < 2;
   if (mobileSave.enabled) {
-    const items: SaveItem[] = links.map(link => {
-      const key = link.closest<HTMLElement>('[data-save-key]')!.dataset.saveKey!;
-      const info = storedFiles.find(record => storedKey(record) === key)?.info || transfer?.manifest.find(file => key === 'memory:' + sessionRevision + ':' + file.id);
-      return { key, url: link.href, name: link.download, size: info?.size ?? Number.MAX_SAFE_INTEGER, type: downloadType(info || { name: link.download, type: '' }) };
-    });
+    const items = links.map(itemFor);
     mobileSave.update(items, sessionRevision);
   }
   $('save-empty').hidden = available; $('save-retention').hidden = !available;

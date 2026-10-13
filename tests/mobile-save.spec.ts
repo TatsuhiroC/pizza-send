@@ -21,17 +21,17 @@ async function setup(context: BrowserContext, memory: boolean, mode: 'success' |
     void navigator.mediaDevices.getUserMedia({ audio: true }).then(s => s.getTracks().forEach(t => t.stop()));
   }, { memory, mode });
 }
-async function receive(sender: Page, receiver: Page) {
+async function receive(sender: Page, receiver: Page, count = 3) {
   await sender.goto('./');
   const pictures = await sender.evaluate(() => ['red', 'green', 'blue'].map(color => {
     const canvas = document.createElement('canvas'); canvas.width = canvas.height = 4; const ctx = canvas.getContext('2d')!; ctx.fillStyle = color; ctx.fillRect(0, 0, 4, 4);
     return canvas.toDataURL('image/png').split(',')[1];
   }));
-  const files = pictures.map((data, i) => ({ name: `原图 ${i + 1}.png`, mimeType: '', buffer: Buffer.from(data, 'base64') }));
+  const files = pictures.slice(0, count).map((data, i) => ({ name: `原图 ${i + 1}.png`, mimeType: '', buffer: Buffer.from(data, 'base64') }));
   await sender.locator('#file-input').setInputFiles(files); await sender.locator('#start-send').click(); await expect(sender.locator('#share-qr')).toBeVisible();
   await receiver.goto(await sender.locator('#share-link').inputValue()); await expect(receiver.locator('#accept-files')).toBeVisible(); await receiver.locator('#accept-files').click();
   await expect(receiver.locator('#status')).toHaveText('文件已收到，请保存到设备');
-  await expect(receiver.locator('#save-panel .download-file')).toHaveCount(3); return files;
+  await expect(receiver.locator('#save-panel .download-file')).toHaveCount(count); return files;
 }
 for (const memory of [false, true]) test(`${memory ? 'memory' : 'disk'} iPhone saves three original images in one activated system request`, async ({ page, context }, info) => {
   await setup(context, memory); const receiver = await context.newPage(); await receiver.setViewportSize({ width: 320, height: 844 });
@@ -77,4 +77,23 @@ test('late system-save completion cannot mark a reset session as saved', async (
   await expect(receiver.locator('#download-all')).toHaveText('保存全部'); await receiver.locator('#download-all').click(); await expect(receiver.locator('#download-all')).toBeDisabled();
   await receiver.locator('#cancel').click(); await receiver.evaluate(() => (window as any).__finishShare());
   await expect(receiver.locator('#save-panel')).toBeHidden(); await expect(receiver.locator('.save-request-state')).toHaveCount(0);
+});
+
+for (const memory of [false, true]) test(`${memory ? 'memory' : 'disk'} iPhone can choose just one image from a received batch`, async ({ page, context }) => {
+  await setup(context, memory); const receiver = await context.newPage(); const files = await receive(page, receiver);
+  const link = receiver.locator('#save-panel .download-file').nth(1); await expect(link).not.toHaveAttribute('aria-disabled', 'true');
+  const name = await link.getAttribute('download'); const downloads: any[] = []; receiver.on('download', d => downloads.push(d)); await link.click();
+  await expect(receiver.locator('#save-feedback')).toContainText('已将文件交给系统');
+  const result = await receiver.evaluate(async () => { const s = window as any; return { active: s.__shareActive, calls: s.__shares.length, files: await Promise.all(s.__shares[0].map(async (f: File) => ({ name: f.name, type: f.type, bytes: Array.from(new Uint8Array(await f.arrayBuffer())) }))) }; });
+  expect(result.active).toEqual([true]); expect(result.calls).toBe(1); expect(result.files).toHaveLength(1); expect(result.files[0].name).toBe(name); expect(result.files[0].type).toBe('image/png');
+  expect(digest(Buffer.from(result.files[0].bytes))).toBe(digest(files.find(f => f.name === name)!.buffer)); expect(downloads).toHaveLength(0);
+  await expect(receiver.locator('.save-request-state')).toHaveCount(1); await expect(receiver.locator('.save-request-state')).toHaveText('已交给系统，请确认保存结果');
+});
+test('single-file reception and retained files after a reload both use the system panel', async ({ page, context }) => {
+  await setup(context, false); const receiver = await context.newPage(); await receive(page, receiver, 1);
+  await expect(receiver.locator('#download-all')).toBeHidden(); const link = receiver.locator('#save-panel .download-file'); await expect(link).not.toHaveAttribute('aria-disabled', 'true'); await link.click();
+  await expect(receiver.locator('#status')).toHaveText('已交给系统，请确认保存结果');
+  await receiver.goto('./'); const retained = receiver.locator('#stored-files .download-file'); await expect(retained).toHaveCount(1); await expect(retained).not.toHaveAttribute('aria-disabled', 'true'); await retained.click();
+  await expect(receiver.locator('#notice')).toHaveText('已将文件交给系统，请确认保存完成后再清理暂存。');
+  expect(await receiver.evaluate(() => { const s = window as any; return s.__shares.map((files: File[]) => files.map(f => f.name)); })).toEqual([['原图 1.png']]);
 });
