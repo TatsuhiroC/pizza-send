@@ -388,7 +388,7 @@ export class Transfer {
       if (picker.showSaveFilePicker && this.manifest.length === 1) {
         handles.push(await picker.showSaveFilePicker({ suggestedName: this.manifest[0].name }));
       } else if (picker.showDirectoryPicker && this.manifest.length > 1) {
-        const directory = await picker.showDirectoryPicker({ mode: 'readwrite' });
+        const directory = await picker.showDirectoryPicker({ id: 'pizza-send-receive-folder', mode: 'readwrite' });
         const used = new Set<string>();
         // Avoid overwriting existing files or colliding with directories, including
         // on case-insensitive filesystems. Commit handles only after a full selection.

@@ -83,6 +83,53 @@ test('native disk reception reports saved only after the writer closes, without 
   await expect(receiver.locator('#save-panel')).toBeHidden(); await expect(receiver.locator('.download-file')).toHaveCount(0);
   expect(await receiver.evaluate(async () => (await (await (await navigator.storage.getDirectory()).getFileHandle('native-save-flow.txt')).getFile()).text())).toBe('already on disk');
 });
+test('native multi-file reception explains the subfolder restriction before picking, allows cancellation and preserves existing files', async ({ page, context }, info) => {
+  await setup(context);
+  const receiver = await context.newPage();
+  await receiver.addInitScript(() => {
+    (window as any).__folderChoices = [];
+    Object.defineProperty(window, 'showDirectoryPicker', { configurable: true, value: async (options: any) => {
+      const choices = (window as any).__folderChoices;
+      choices.push(options);
+      if (choices.length === 1) throw new DOMException('Cancelled by user', 'AbortError');
+      const directory = await (await navigator.storage.getDirectory()).getDirectoryHandle('native-multiple', { create: true });
+      const existing = await directory.getFileHandle('first.txt', { create: true });
+      const writer = await existing.createWritable(); await writer.write('keep existing'); await writer.close();
+      return directory;
+    } });
+  });
+  await page.goto('./');
+  await page.locator('#file-input').setInputFiles([
+    { name: 'first.txt', mimeType: 'text/plain', buffer: Buffer.from('first received') },
+    { name: '第二份.txt', mimeType: 'text/plain', buffer: Buffer.from('second received') }
+  ]);
+  await page.locator('#start-send').click();
+  await expect(page.locator('#share-box')).toBeVisible();
+  await receiver.goto(await page.locator('#share-link').inputValue());
+  const accept = receiver.locator('#accept-files'), note = receiver.locator('#save-note');
+  await expect(accept).toHaveText('选择子文件夹并接收');
+  await expect(note).toBeVisible(); await expect(note).toContainText('浏览器不允许直接选择');
+  expect(await receiver.evaluate(() => (window as any).__folderChoices.length)).toBe(0);
+  expect(await note.evaluate(el => el.getBoundingClientRect().bottom <= document.getElementById('accept-files')!.getBoundingClientRect().top)).toBe(true);
+  await receiver.locator('#language-toggle').click();
+  await expect(accept).toHaveText('Choose a subfolder and receive');
+  await expect(note).toContainText('Downloads, Desktop or Documents themselves');
+  await receiver.setViewportSize({ width: 320, height: 844 });
+  expect(await receiver.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await receiver.locator('#receive-view').screenshot({ path: info.outputPath('native-folder-guidance.png') });
+  await accept.click();
+  await expect(accept).toBeEnabled(); await expect(receiver.locator('#progress-box')).toBeHidden();
+  await accept.click();
+  await expect(receiver.locator('#status')).toHaveText('Saved to your device');
+  await expect(receiver.locator('#save-panel')).toBeHidden();
+  expect(await receiver.evaluate(async () => {
+    const directory = await (await navigator.storage.getDirectory()).getDirectoryHandle('native-multiple');
+    const contents = await Promise.all(['first.txt', '1-first.txt', '第二份.txt'].map(async name => (await (await directory.getFileHandle(name)).getFile()).text()));
+    return { contents, choices: (window as any).__folderChoices };
+  })).toEqual({ contents: ['keep existing', 'first received', 'second received'], choices: [
+    { id: 'pizza-send-receive-folder', mode: 'readwrite' }, { id: 'pizza-send-receive-folder', mode: 'readwrite' }
+  ] });
+});
 test('completion waits for an open filename dialog and reveals saving after it closes, without following later resets', async ({ page, context }) => {
   await setup(context);
   const receiver = await context.newPage(); await receiver.setViewportSize({ width: 320, height: 640 });
