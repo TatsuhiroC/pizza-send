@@ -32,14 +32,23 @@ test('canceling scan success prevents a delayed connection and permits scanning 
   await page.goto('./'); await page.locator('#receive-tab').click(); await page.locator('#open-scanner').click();
   const link = 'http://127.0.0.1:5173/#' + shareFragment('11'.repeat(32));
   const image = { name: 'share.png', mimeType: 'image/png', buffer: await QRCode.toBuffer(link, { width: 480, margin: 4 }) };
-  await page.locator('#qr-image-input').setInputFiles(image);
+  const uploadImage = () => page.evaluate(({ name, mimeType, base64 }) => {
+    const input = document.getElementById('qr-image-input') as HTMLInputElement;
+    const files = new DataTransfer();
+    files.items.add(new File([Uint8Array.from(atob(base64), c => c.charCodeAt(0))], name, { type: mimeType }));
+    input.files = files.files; input.dispatchEvent(new Event('change', { bubbles: true }));
+  }, { name: image.name, mimeType: image.mimeType, base64: image.buffer.toString('base64') });
+  // WebKit's automation upload waits forever when the change handler immediately
+  // clears the input for re-selection. Exercise that same handler and real PNG
+  // decoder without depending on the native upload acknowledgment.
+  await uploadImage();
   await expect(page.locator('#scan-success')).toBeVisible();
   await expect(page.locator('#scan-status')).toContainText('扫描成功');
   await page.locator('#close-scanner').click(); await expect(page.locator('#scan-dialog')).toBeHidden();
   await page.waitForTimeout(950);
   expect(connections).toBe(0); await expect(page.locator('#session-panel')).toBeHidden();
   await page.locator('#open-scanner').click(); await expect(page.locator('#scan-success')).toBeHidden();
-  await page.locator('#qr-image-input').setInputFiles(image); await expect(page.locator('#scan-success')).toBeVisible();
+  await uploadImage(); await expect(page.locator('#scan-success')).toBeVisible();
   await expect(page.locator('#scan-dialog')).toBeHidden(); await expect(page.locator('#session-panel')).toBeVisible();
   await expect.poll(() => connections).toBeGreaterThan(0);
   await expect(page.locator('#status')).toBeInViewport({ ratio: 1 });
