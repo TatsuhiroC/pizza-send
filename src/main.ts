@@ -1,4 +1,5 @@
 import { challenge, cancelChallenge } from './challenge';
+import { heroPizza } from './hero';
 import { MobileBatchSave, type SaveItem } from './mobile-save';
 import { downloadType } from './download';
 import { registerStatic, setText, t, toggleLanguage } from './i18n';
@@ -9,6 +10,7 @@ import { supportsTemporaryStorage, listTemporaryFiles, temporaryURL, retainTempo
 import { Transfer, AutoPair, bytes, randomToken, packDescription, unpackDescription, signalKey, type Config, type FileInfo, type TransferEvent } from './protocol';
 import { GroupSender, groupURL, groupRequest, type Recipient } from './group';
 import './style.css';
+import './hero.css';
 
 const icon = (name: string) => {
   const paths: Record<string, string> = {
@@ -31,7 +33,7 @@ const icon = (name: string) => {
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = [
   '<header class="header"><a class="brand" href="./"><img src="./pizza.svg" alt="" width="38" height="38"/><span>PizzaSend<small>文件快传</small></span></a><div class="header-right"><span class="version">第二片 · v0.2</span><button id="language-toggle" class="language-toggle" type="button"><span data-language="zh">中</span><span class="language-divider" aria-hidden="true">/</span><span data-language="en">EN</span></button><a class="github" href="https://github.com/TatsuhiroC/pizza-send" target="_blank" rel="noopener">GitHub ↗</a></div></header>',
-  '<main><section class="intro"><div class="eyebrow"><span></span>好东西，直接分享。</div><h1>文件送到，<br/><span>热乎刚好。</span><img class="hero-pizza" src="./pizza.svg" alt="" width="104" height="104"/></h1><p>不用安装，不用注册。<br class="mobile-break"/>打开网页，把文件直接送到另一台设备。</p></section>',
+  '<main><section class="intro"><div class="eyebrow"><span></span>好东西，直接分享。</div><h1>文件送到，<br/><span>热乎刚好。</span>'+heroPizza+'</h1><p>不用安装，不用注册。<br class="mobile-break"/>打开网页，把文件直接送到另一台设备。</p></section>',
   '<section class="transfer-card" aria-label="文件传输"><div class="card-top"><div class="tabs" role="tablist" aria-label="传输角色"><button id="send-tab" class="tab active" role="tab" aria-selected="true">'+icon('upload')+'发送文件</button><button id="receive-tab" class="tab" role="tab" aria-selected="false">'+icon('down')+'接收文件</button></div><span class="secure">'+icon('lock')+'加密直传</span></div>',
   '<div id="send-view"><button id="drop-zone" class="drop-zone" type="button"><span class="drop-icon">'+icon('upload')+'</span><strong>把文件放在这里</strong><span>拖放文件，或点击选择</span><small>支持多个文件 · 文件内容不上传到服务器</small></button><input id="file-input" type="file" multiple hidden/><div id="files" class="file-list" aria-live="polite"></div><div class="send-bottom"><span id="selection-summary">先选一个文件，就可以开始。</span><button id="start-send" class="primary" disabled>创建传输 '+icon('arrow')+'</button></div></div>',
   '<div id="receive-view" hidden><div class="receive-intro"><span class="drop-icon">'+icon('down')+'</span><h2>接住这一份分享</h2><p>打开对方发来的分享链接即可连接。<br/>也可以在这里粘贴链接或配对码。</p></div><button id="open-scanner" class="secondary wide scan-button" type="button">'+icon('camera')+'打开相机扫描</button><div class="receive-code-heading"><p class="scan-alternative subtle">或粘贴分享链接／配对码</p><button id="paste-receive" class="secondary paste-button" type="button" aria-controls="receive-code">'+icon('paste')+'粘贴</button></div><label class="sr-only" for="receive-code">分享链接或配对码</label><textarea id="receive-code" rows="3" placeholder="粘贴 PizzaSend 分享链接或 PS1. 配对码"></textarea><button id="connect-receive" class="primary wide">连接发送方 '+icon('arrow')+'</button><div id="incoming-files" class="file-list"></div><p id="save-note" class="subtle" hidden></p><button id="accept-files" class="primary wide" aria-describedby="save-note" hidden>选择保存位置并接收 '+icon('down')+'</button></div>',
