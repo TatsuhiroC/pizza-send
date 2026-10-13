@@ -1,6 +1,7 @@
 import { test, expect } from './fixtures';
 import QRCode from 'qrcode';
 import { shareFragment } from '../src/share';
+test.use({ trace: 'retain-on-failure' });
 
 test('glass filename overlay dismisses outside, retains inside interaction, and restores focus', async ({ page }, info) => {
   await page.setViewportSize({ width: 390, height: 844 }); await page.goto('./');
@@ -23,6 +24,7 @@ test('glass filename overlay dismisses outside, retains inside interaction, and 
 });
 
 test('canceling scan success prevents a delayed connection and permits scanning again', async ({ page }) => {
+  test.setTimeout(45000);
   await page.addInitScript(() => {
     localStorage.setItem('pizza-send-signal', 'http://127.0.0.1:8787');
     navigator.mediaDevices.getUserMedia = async () => { throw new DOMException('Denied for fixture', 'NotAllowedError'); };
@@ -38,13 +40,20 @@ test('canceling scan success prevents a delayed connection and permits scanning 
     files.items.add(new File([Uint8Array.from(atob(base64), c => c.charCodeAt(0))], name, { type: mimeType }));
     input.files = files.files; input.dispatchEvent(new Event('change', { bubbles: true }));
   }, { name: image.name, mimeType: image.mimeType, base64: image.buffer.toString('base64') });
-  // WebKit's automation upload waits forever when the change handler immediately
-  // clears the input for re-selection. Exercise that same handler and real PNG
-  // decoder without depending on the native upload acknowledgment.
+  // Cancel at the actual success event. A remote automation click can arrive
+  // after this short-lived dialog has already closed, especially in WebKit.
+  const canceledSuccess = page.evaluate(() => new Promise<string>(resolve => {
+    const success = document.getElementById('scan-success')!;
+    const observer = new MutationObserver(() => {
+      if (success.hidden) return;
+      const message = document.getElementById('scan-status')!.textContent!;
+      observer.disconnect(); document.getElementById('close-scanner')!.click(); resolve(message);
+    });
+    observer.observe(success, { attributes: true, attributeFilter: ['hidden'] });
+  }));
   await uploadImage();
-  await expect(page.locator('#scan-success')).toBeVisible();
-  await expect(page.locator('#scan-status')).toContainText('扫描成功');
-  await page.locator('#close-scanner').click(); await expect(page.locator('#scan-dialog')).toBeHidden();
+  expect(await canceledSuccess).toContain('扫描成功');
+  await expect(page.locator('#scan-dialog')).toBeHidden();
   await page.waitForTimeout(950);
   expect(connections).toBe(0); await expect(page.locator('#session-panel')).toBeHidden();
   await page.locator('#open-scanner').click(); await expect(page.locator('#scan-success')).toBeHidden();
