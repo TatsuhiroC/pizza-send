@@ -102,4 +102,4 @@ Multi-recipient tests cover three concurrent real DataChannel transfers, one rec
 
 Receiving into browser storage now shows “Files received. Save to your device.” with prominent save buttons above the progress summary. Completion scrolls to the save area, waiting if a dialog is open or the page is hidden. Each file has a separate action; “Save requested” asks you to confirm the browser download prompt and does not claim it succeeded. Direct disk reception shows “Saved to your device” only after the writers close. Disk temporary files keep their existing ten-minute retention; the memory fallback is lost on refresh or close.
 
-See the [2026-10-13 code review](docs/review-2026-10-13.md) (in Chinese) for connection-failure reporting, stale save-operation isolation, cleanup and regression validation.
+See the [2026-10-14 code review](docs/review-2026-10-14.md) (in Chinese) for stale scanner-result isolation, dependency and unused-code checks, validation scope and maintenance recommendations. The [2026-10-13 review](docs/review-2026-10-13.md) retains the earlier connection and saving fixes.

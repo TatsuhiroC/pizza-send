@@ -45,7 +45,11 @@ export class CameraScanner {
             ctx.drawImage(this.video, 0, 0, this.canvas.width, this.canvas.height);
             const image = ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
             const result = decode(image.data, image.width, image.height, { inversionAttempts: 'attemptBoth' });
-            if (result && await this.found(result.data)) { this.stop(); return; }
+            if (result && await this.found(result.data)) {
+              // Recognition may finish after cancellation and a new camera start.
+              if (generation === this.generation) this.stop();
+              return;
+            }
           }
           if (generation === this.generation) this.timer = setTimeout(frame, 200);
         } catch {
