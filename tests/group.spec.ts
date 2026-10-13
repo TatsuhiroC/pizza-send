@@ -18,7 +18,6 @@ async function setup(context: BrowserContext) {
     const read = Blob.prototype.arrayBuffer;
     Blob.prototype.arrayBuffer = async function() { if (this.size <= 32768) await new Promise(r => setTimeout(r, 3)); return read.call(this); };
     Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true });
-    Object.defineProperty(window, 'showDirectoryPicker', { value: undefined, configurable: true });
     void navigator.mediaDevices.getUserMedia({ audio: true }).then(s => s.getTracks().forEach(t => t.stop()));
   });
 }

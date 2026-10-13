@@ -9,7 +9,6 @@ async function setup(context: BrowserContext) {
   await context.addInitScript(() => {
     localStorage.setItem('pizza-send-signal', 'http://127.0.0.1:8787'); localStorage.setItem('pizza-send-stun', '');
     Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true });
-    Object.defineProperty(window, 'showDirectoryPicker', { value: undefined, configurable: true });
     void navigator.mediaDevices.getUserMedia({ audio: true }).then(s => s.getTracks().forEach(t => t.stop()));
   });
 }

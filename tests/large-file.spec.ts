@@ -1,7 +1,7 @@
 import { test as base, expect, chromium } from './fixtures';
-import { open, mkdir, rm, mkdtemp } from 'node:fs/promises';
+import { open, rm, mkdtemp } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { resolve, join } from 'node:path';
+import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 // A temporary persistent profile gives OPFS disk-backed storage; private contexts
@@ -21,9 +21,8 @@ const test = base.extend({
 for (const megabytes of [200, 1024]) {
   test(`${megabytes} MiB file streams to browser disk with SHA-256`, async ({ page, context }) => {
     test.setTimeout(360000);
-    const directory = resolve('../../work/large-test');
-    await mkdir(directory, { recursive: true });
-    const path = resolve(directory, `stream-${megabytes}.bin`);
+    const directory = await mkdtemp(join(tmpdir(), 'pizza-send-large-fixture-'));
+    const path = join(directory, `stream-${megabytes}.bin`);
     const block = Buffer.alloc(1024 * 1024);
     for (let i = 0; i < block.length; i++) block[i] = i % 251;
     const hash = createHash('sha256');
@@ -75,6 +74,6 @@ for (const megabytes of [200, 1024]) {
       expect(result.size).toBe(megabytes * 1024 * 1024);
       expect(result.digest).toBe(expected);
       console.log(`LOCAL_ONLY_${megabytes}MiB_SECONDS=${((Date.now() - started) / 1000).toFixed(2)} (includes independent disk verification)`);
-    } finally { await rm(path, { force: true }); }
+    } finally { await rm(directory, { recursive: true, force: true }); }
   });
 }

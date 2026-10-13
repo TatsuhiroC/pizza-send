@@ -5,7 +5,6 @@ async function setup(context: BrowserContext, memory = false) {
   await context.addInitScript(memory => {
     localStorage.setItem('pizza-send-signal', 'http://127.0.0.1:8787'); localStorage.setItem('pizza-send-stun', '');
     Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true });
-    Object.defineProperty(window, 'showDirectoryPicker', { value: undefined, configurable: true });
     if (memory) Object.defineProperty(navigator.storage, 'getDirectory', { value: undefined, configurable: true });
     const read = Blob.prototype.arrayBuffer;
     Blob.prototype.arrayBuffer = async function() { if (this.size <= 32768) await new Promise(r => setTimeout(r, 5)); return read.call(this); };

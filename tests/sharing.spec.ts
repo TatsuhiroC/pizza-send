@@ -1,6 +1,6 @@
 import { test, expect, chromium, type BrowserContext, type Page } from './fixtures';
 import QRCode from 'qrcode';
-import { readFile, writeFile, mkdtemp, rm, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -84,7 +84,6 @@ test('a second transfer shows a fresh QR and the same receiver camera connects t
   await expect(page.locator('#share-box')).toBeVisible();
   const secondLink = await page.locator('#share-link').inputValue();
   expect(secondLink).not.toBe(firstLink);
-  await expect(page.locator('#share-qr')).toBeVisible();
   await expect(page.locator('#share-qr')).toBeVisible();
   await scanDisplayedQR(secondLink);
   await expect(receiver.locator('#incoming-files')).toContainText('second.txt');
@@ -192,7 +191,7 @@ test('camera button scans real video frames and stops the camera before pairing'
   } finally { await browser.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
-test('closing a pending camera permission request releases a late stream and mobile UI stays within viewport', async ({ page, context }) => {
+test('closing a pending camera permission request releases a late stream and mobile UI stays within viewport', async ({ page, context }, info) => {
   await setup(context);
   await page.addInitScript(() => {
     const get = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices), state = window as any;
@@ -212,8 +211,7 @@ test('closing a pending camera permission request releases a late stream and mob
   }
   await page.locator('#open-scanner').click();
   await expect.poll(() => page.evaluate(() => !!(window as any).__releaseCamera)).toBe(true);
-  await mkdir('../../work/qa', { recursive: true });
-  await page.screenshot({ path: '../../work/qa/pizza-send-camera-mobile.png' });
+  await page.screenshot({ path: info.outputPath('pizza-send-camera-mobile.png') });
   await page.locator('#close-scanner').click();
   await page.evaluate(() => (window as any).__releaseCamera());
   await expect.poll(() => page.evaluate(() => (window as any).__lateTracks.map((track: MediaStreamTrack) => track.readyState))).toEqual(['ended']);

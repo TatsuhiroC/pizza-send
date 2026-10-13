@@ -12,7 +12,6 @@ async function setup(context: BrowserContext, signal = true) {
     localStorage.setItem('pizza-send-stun', '');
     void navigator.mediaDevices.getUserMedia({ audio: true }).then(s => s.getTracks().forEach(t => t.stop()));
     Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true });
-    Object.defineProperty(window, 'showDirectoryPicker', { value: undefined, configurable: true });
   }, { signalUrl });
 }
 async function automatic(sender: Page, receiver: Page, payload: { name: string; mimeType: string; buffer: Buffer }[]) {

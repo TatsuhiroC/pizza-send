@@ -15,7 +15,6 @@ for (const memory of [false, true]) test(`${memory ? 'memory' : 'disk'} long fil
   await context.addInitScript(memory => {
     localStorage.setItem('pizza-send-signal', 'http://127.0.0.1:8787'); localStorage.setItem('pizza-send-stun', '');
     Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true });
-    Object.defineProperty(window, 'showDirectoryPicker', { value: undefined, configurable: true });
     if (memory) Object.defineProperty(navigator.storage, 'getDirectory', { value: undefined });
     void navigator.mediaDevices.getUserMedia({ audio: true }).then(s => s.getTracks().forEach(t => t.stop()));
   }, memory);

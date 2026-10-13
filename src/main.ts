@@ -225,7 +225,10 @@ async function connectValue(input: string) {
   try { await receiveInput(input, revision); }
   catch (e) {
     if (revision !== sessionRevision) return;
-    leaveReceiverGroup(); transfer?.close(false); signaling?.close(); signaling = undefined; transfer = undefined; setBusy(false); throw e;
+    const failed = transfer;
+    leaveReceiverGroup(); transfer?.close(false); signaling?.close(); signaling = undefined; transfer = undefined; setBusy(false);
+    if (failed) { status('连接未完成', '可以重试，或检查连接设置。', 'error'); setText($('cancel'), '重新开始'); }
+    throw e;
   }
 }
 async function scannedCode(text: string): Promise<boolean> {
@@ -251,9 +254,13 @@ async function scannedCode(text: string): Promise<boolean> {
 }
 function toast(message: string) { setText($('toast'), message); $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').hidden = true, 2600); }
 function notice(message: string) { setText($('notice'), message); $('notice').hidden = false; }
-function errorMessage(error: unknown) { return error instanceof Error ? error.message : String(error); }
+function errorMessage(error: unknown) {
+  if (error instanceof DOMException && error.name === 'AbortError') return '操作已中断，请重试。';
+  if (error instanceof DOMException && error.name === 'TimeoutError') return '操作超时，请检查网络后重试。';
+  return error instanceof Error ? error.message : String(error);
+}
 async function run(fn: () => Promise<void>) {
-  try { await fn(); } catch (e) { if (e instanceof DOMException && e.name === 'AbortError') toast('已取消选择保存位置'); else notice(errorMessage(e)); }
+  try { await fn(); } catch (e) { notice(errorMessage(e)); }
 }
 function view(role: 'sender' | 'receiver') {
   $('send-view').hidden = role !== 'sender'; $('receive-view').hidden = role !== 'receiver';
@@ -632,7 +639,12 @@ $('start-send').onclick = () => run(async () => {
   const t = createTransfer('sender'); t.prepare(files);
   status('正在创建传输', '正在准备连接，请稍候。');
   try { if (endpoint()) await automaticSender(t); else await manualSender(t); }
-  catch (e) { if (transfer !== t || t.stopped) return; senderGroup?.close(); senderGroup = undefined; t.close(false); signaling?.close(); transfer = undefined; setBusy(false); throw e; }
+  catch (e) {
+    if (transfer !== t || t.stopped) return;
+    senderGroup?.close(); senderGroup = undefined; t.close(false); signaling?.close(); transfer = undefined; setBusy(false);
+    status('连接未完成', '可以重试，或检查连接设置。', 'error'); setText($('cancel'), '重新开始');
+    throw e;
+  }
 });
 $('connect-receive').onclick = () => run(async () => {
   await connectValue($<HTMLTextAreaElement>('receive-code').value);
@@ -686,9 +698,19 @@ $<HTMLInputElement>('qr-image-input').onchange = () => {
   })();
 };
 $('accept-files').onclick = () => run(async () => {
+  const current = transfer;
+  if (!current || current.role !== 'receiver' || current.stopped) return;
+  const nativePicker = current.manifest.length === 1 && typeof (window as any).showSaveFilePicker === 'function';
   $('notice').hidden = true;
   $<HTMLButtonElement>('accept-files').disabled = true;
-  try { await transfer?.accept(); } finally { $<HTMLButtonElement>('accept-files').disabled = false; }
+  try { await current.accept(); }
+  catch (error) {
+    if (transfer !== current || current.stopped) return;
+    if (nativePicker && error instanceof DOMException && error.name === 'AbortError') toast('已取消选择保存位置');
+    else throw error;
+  } finally {
+    if (transfer === current && !current.stopped) $<HTMLButtonElement>('accept-files').disabled = false;
+  }
 });
 $('cancel').onclick = reset;
 $('close-dialog').onclick = () => $<HTMLDialogElement>('pair-dialog').close();

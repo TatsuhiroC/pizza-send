@@ -28,7 +28,6 @@ async function setup(context: BrowserContext) {
     };
     void navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => stream.getTracks().forEach(track => track.stop()));
     Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true });
-    Object.defineProperty(window, 'showDirectoryPicker', { value: undefined, configurable: true });
   });
 }
 async function begin(sender: Page, receiver: Page, buffer: Buffer, multiple = false) {
