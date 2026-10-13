@@ -24,4 +24,3 @@
 .session-action:hover{background:#a94423}.session-action:active{background:#943c20}
 @media(max-width:640px){.session-action{flex-basis:100%;margin-top:5px}}
 .receive-code-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:15px 0 8px}.receive-code-heading .scan-alternative{margin:0;min-width:0;text-align:left}.paste-button{flex-shrink:0;min-height:44px;padding:9px 13px;font-weight:600;white-space:nowrap}.paste-button svg{width:17px;height:17px}
-.folder-hint{padding:12px 14px;background:#fff5e9;border:1px solid #e9bd92;border-radius:11px;color:#8b5f35;overflow-wrap:anywhere}

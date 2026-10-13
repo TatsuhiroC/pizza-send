@@ -29,6 +29,7 @@ for (const memory of [false, true]) test(`${memory ? 'memory' : 'disk'} receptio
   await expect(save).toHaveText('保存到设备');
   await expect.poll(() => save.evaluate(el => { const r = el.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; })).toBe(true);
   await expect(receiver.locator('#save-heading')).toBeFocused();
+  await expect(receiver.locator('#download-all')).toBeHidden();
   const layout = await receiver.evaluate(() => ({ save: document.getElementById('save-panel')!.getBoundingClientRect().bottom, progress: document.getElementById('progress-box')!.getBoundingClientRect().top, overflow: document.documentElement.scrollWidth > innerWidth }));
   expect(layout.save).toBeLessThanOrEqual(layout.progress); expect(layout.overflow).toBe(false);
   await expect(receiver.locator('#save-retention')).toContainText(memory ? '刷新或关闭页面会丢失' : '10 分钟');
@@ -83,52 +84,67 @@ test('native disk reception reports saved only after the writer closes, without 
   await expect(receiver.locator('#save-panel')).toBeHidden(); await expect(receiver.locator('.download-file')).toHaveCount(0);
   expect(await receiver.evaluate(async () => (await (await (await navigator.storage.getDirectory()).getFileHandle('native-save-flow.txt')).getFile()).text())).toBe('already on disk');
 });
-test('native multi-file reception explains the subfolder restriction before picking, allows cancellation and preserves existing files', async ({ page, context }, info) => {
+for (const memory of [false, true]) test(`${memory ? 'memory' : 'disk'} Download all uses original files without a folder picker and keeps individual saving available`, async ({ page, context }, info) => {
+  await setup(context, memory);
+  const receiver = await context.newPage(); await receiver.setViewportSize({ width: 320, height: 844 });
+  await receiver.addInitScript(() => {
+    (window as any).__pickerCalls = 0;
+    const rejectPicker = async () => { (window as any).__pickerCalls++; throw new Error('Multi-file reception must not open a picker'); };
+    Object.defineProperty(window, 'showDirectoryPicker', { configurable: true, value: rejectPicker });
+    Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: rejectPicker });
+  });
+  const files = [
+    { name: '原文件.mp4', mimeType: 'video/mp4', buffer: Buffer.alloc(4096, 71) },
+    { name: 'empty.txt', mimeType: 'text/plain', buffer: Buffer.alloc(0) },
+    ...Array.from({ length: memory ? 1 : 98 }, (_, i) => ({ name: 'file-' + i + '.txt', mimeType: 'text/plain', buffer: Buffer.from('file content ' + i) }))
+  ];
+  await begin(page, receiver, files);
+  await expect(receiver.locator('#status')).toHaveText('文件已收到，请保存到设备');
+  expect(await receiver.evaluate(() => (window as any).__pickerCalls)).toBe(0);
+  const all = receiver.locator('#download-all'), saves = receiver.locator('#save-panel .download-file');
+  await expect(all).toBeVisible(); await expect(all).toHaveText('下载全部'); await expect(saves).toHaveCount(files.length);
+  await receiver.locator('#language-toggle').click(); await expect(all).toHaveText('Download all');
+  await expect(receiver.locator('#download-all-note')).toContainText('Allow multiple downloads');
+  expect(await receiver.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await receiver.locator('#save-heading').scrollIntoViewIfNeeded();
+  await receiver.screenshot({ path: info.outputPath('download-all-' + (memory ? 'memory' : 'disk') + '.png') });
+  const downloads: any[] = []; receiver.on('download', download => downloads.push(download));
+  await all.click();
+  await expect.poll(() => downloads.length, { timeout: 35000 }).toBe(files.length);
+  expect(downloads.map(download => download.suggestedFilename()).sort()).toEqual(files.map(file => file.name).sort());
+  for (const download of downloads) {
+    const original = files.find(file => file.name === download.suggestedFilename())!;
+    expect(createHash('sha256').update(await readFile((await download.path())!)).digest('hex')).toBe(createHash('sha256').update(original.buffer).digest('hex'));
+  }
+  await expect(receiver.locator('#save-feedback')).toContainText(`Downloads requested for ${files.length} files`);
+  await expect(receiver.locator('#status')).not.toHaveText('Saved to your device');
+  await expect(saves).toHaveCount(files.length);
+  // A separate user click can save a file again if the browser blocked it in the batch.
+  const firstName = await saves.first().locator('..').locator('.filename-button').textContent();
+  const repeated = receiver.waitForEvent('download'); await saves.first().click();
+  expect((await repeated).suggestedFilename()).toBe(firstName);
+  if (!memory) {
+    await receiver.locator('#clear-stored').click(); await receiver.locator('#confirm-cleanup').click();
+    await expect(all).toBeHidden(); await expect(saves).toHaveCount(0);
+  }
+});
+for (const action of ['reset', 'cleanup']) test(`Download all stops pending batches after ${action}`, async ({ page, context }) => {
   await setup(context);
   const receiver = await context.newPage();
-  await receiver.addInitScript(() => {
-    (window as any).__folderChoices = [];
-    Object.defineProperty(window, 'showDirectoryPicker', { configurable: true, value: async (options: any) => {
-      const choices = (window as any).__folderChoices;
-      choices.push(options);
-      if (choices.length === 1) throw new DOMException('Cancelled by user', 'AbortError');
-      const directory = await (await navigator.storage.getDirectory()).getDirectoryHandle('native-multiple', { create: true });
-      const existing = await directory.getFileHandle('first.txt', { create: true });
-      const writer = await existing.createWritable(); await writer.write('keep existing'); await writer.close();
-      return directory;
-    } });
-  });
-  await page.goto('./');
-  await page.locator('#file-input').setInputFiles([
-    { name: 'first.txt', mimeType: 'text/plain', buffer: Buffer.from('first received') },
-    { name: '第二份.txt', mimeType: 'text/plain', buffer: Buffer.from('second received') }
-  ]);
-  await page.locator('#start-send').click();
-  await expect(page.locator('#share-box')).toBeVisible();
-  await receiver.goto(await page.locator('#share-link').inputValue());
-  const accept = receiver.locator('#accept-files'), note = receiver.locator('#save-note');
-  await expect(accept).toHaveText('选择子文件夹并接收');
-  await expect(note).toBeVisible(); await expect(note).toContainText('浏览器不允许直接选择');
-  expect(await receiver.evaluate(() => (window as any).__folderChoices.length)).toBe(0);
-  expect(await note.evaluate(el => el.getBoundingClientRect().bottom <= document.getElementById('accept-files')!.getBoundingClientRect().top)).toBe(true);
-  await receiver.locator('#language-toggle').click();
-  await expect(accept).toHaveText('Choose a subfolder and receive');
-  await expect(note).toContainText('Downloads, Desktop or Documents themselves');
-  await receiver.setViewportSize({ width: 320, height: 844 });
-  expect(await receiver.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await receiver.locator('#receive-view').screenshot({ path: info.outputPath('native-folder-guidance.png') });
-  await accept.click();
-  await expect(accept).toBeEnabled(); await expect(receiver.locator('#progress-box')).toBeHidden();
-  await accept.click();
-  await expect(receiver.locator('#status')).toHaveText('Saved to your device');
-  await expect(receiver.locator('#save-panel')).toBeHidden();
-  expect(await receiver.evaluate(async () => {
-    const directory = await (await navigator.storage.getDirectory()).getDirectoryHandle('native-multiple');
-    const contents = await Promise.all(['first.txt', '1-first.txt', '第二份.txt'].map(async name => (await (await directory.getFileHandle(name)).getFile()).text()));
-    return { contents, choices: (window as any).__folderChoices };
-  })).toEqual({ contents: ['keep existing', 'first received', 'second received'], choices: [
-    { id: 'pizza-send-receive-folder', mode: 'readwrite' }, { id: 'pizza-send-receive-folder', mode: 'readwrite' }
-  ] });
+  await begin(page, receiver, Array.from({ length: 12 }, (_, i) => ({ name: `cancel-${i}.txt`, mimeType: 'text/plain', buffer: Buffer.from(`file ${i}`) })));
+  await expect(receiver.locator('#download-all')).toBeVisible();
+  const downloads: any[] = []; receiver.on('download', download => downloads.push(download));
+  await receiver.locator('#download-all').click();
+  await expect(receiver.locator('#download-all')).toBeDisabled();
+  await expect.poll(() => downloads.length).toBe(5);
+  if (action === 'reset') await receiver.locator('#cancel').click();
+  else { await receiver.locator('#clear-stored').click(); await receiver.locator('#confirm-cleanup').click(); }
+  if (action === 'reset') await expect(receiver.locator('#save-panel')).toBeHidden();
+  else await expect(receiver.locator('#save-empty')).toBeVisible();
+  // Observe beyond the next batch's delay: cancelled work must not download stale files.
+  await receiver.waitForTimeout(1500);
+  expect(downloads).toHaveLength(5);
+  await expect(receiver.locator('#download-all')).toBeHidden();
 });
 test('completion waits for an open filename dialog and reveals saving after it closes, without following later resets', async ({ page, context }) => {
   await setup(context);

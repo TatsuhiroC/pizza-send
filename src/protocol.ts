@@ -7,7 +7,6 @@ export type Config = { signalUrl: string; iceServers: RTCIceServer[]; memoryLimi
 export type TransferEvent = { type: string; data?: any };
 type PickerWindow = Window & {
   showSaveFilePicker?: (options: any) => Promise<FileSystemFileHandle>;
-  showDirectoryPicker?: (options: any) => Promise<FileSystemDirectoryHandle>;
 };
 const hex = (b: Uint8Array) => Array.from(b, n => n.toString(16).padStart(2, '0')).join('');
 export const randomToken = () => hex(crypto.getRandomValues(new Uint8Array(32)));
@@ -387,18 +386,6 @@ export class Transfer {
       const handles: FileSystemFileHandle[] = [];
       if (picker.showSaveFilePicker && this.manifest.length === 1) {
         handles.push(await picker.showSaveFilePicker({ suggestedName: this.manifest[0].name }));
-      } else if (picker.showDirectoryPicker && this.manifest.length > 1) {
-        const directory = await picker.showDirectoryPicker({ id: 'pizza-send-receive-folder', mode: 'readwrite' });
-        const used = new Set<string>();
-        // Avoid overwriting existing files or colliding with directories, including
-        // on case-insensitive filesystems. Commit handles only after a full selection.
-        for await (const name of directory.keys()) used.add(name.toLowerCase());
-        for (const info of this.manifest) {
-          let name = info.name;
-          let suffix = 0;
-          while (used.has(name.toLowerCase())) name = ++suffix + '-' + info.name;
-          used.add(name.toLowerCase()); handles.push(await directory.getFileHandle(name, { create: true }));
-        }
       } else {
         const session = await createTemporarySession(total);
         if (this.stopped) { if (session) await discardTemporaryPartial(session); return; }

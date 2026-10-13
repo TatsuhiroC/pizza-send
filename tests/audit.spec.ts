@@ -12,47 +12,6 @@ async function setup(context: BrowserContext) {
   });
 }
 
-test('retrying a partially failed folder selection uses only the new folder and preserves existing files', async ({ page }) => {
-  await page.goto('./');
-  const result = await page.evaluate(async () => {
-    const { Transfer } = await import('/src/protocol.ts');
-    const root = await navigator.storage.getDirectory();
-    const first = await root.getDirectoryHandle('first', { create: true });
-    const second = await root.getDirectoryHandle('second', { create: true });
-    const existing = await second.getFileHandle('a.txt', { create: true });
-    const writer = await existing.createWritable(); await writer.write('keep me'); await writer.close();
-    let attempts = 0;
-    Object.defineProperty(window, 'showDirectoryPicker', { configurable: true, value: async () => {
-      if (++attempts > 1) return second;
-      return {
-        keys: () => first.keys(),
-        getFileHandle: (name: string, options: any) => {
-          if (name === 'b.txt') throw new DOMException('Fixture failure', 'NotAllowedError');
-          return first.getFileHandle(name, options);
-        }
-      };
-    } });
-    const transfer: any = new Transfer({ signalUrl: '', iceServers: [], memoryLimitBytes: 268435456 }, 'receiver', () => {});
-    transfer.manifest = [{ id: 0, name: 'a.txt', size: 1, type: '' }, { id: 1, name: 'b.txt', size: 1, type: '' }];
-    transfer.channel = { readyState: 'open', send() {}, close() {} };
-    let failed = false;
-    try { await transfer.accept(); } catch { failed = true; }
-    await transfer.accept();
-    const handles = transfer.handles;
-    const names = handles.map((handle: FileSystemFileHandle) => handle.name);
-    const fromSecond = await Promise.all(handles.map((handle: FileSystemFileHandle) => second.resolve(handle)));
-    for (const handle of handles) {
-      const stream = await handle.createWritable(); await stream.write('x'); await stream.close();
-    }
-    const preserved = await (await existing.getFile()).text();
-    const oldFile = await (await (await first.getFileHandle('a.txt')).getFile()).text();
-    transfer.close(false);
-    await root.removeEntry('first', { recursive: true }); await root.removeEntry('second', { recursive: true });
-    return { failed, names, fromSecond, preserved, oldFile };
-  });
-  expect(result).toEqual({ failed: true, names: ['1-a.txt', 'b.txt'], fromSecond: [['1-a.txt'], ['b.txt']], preserved: 'keep me', oldFile: '' });
-});
-
 test('an old receiving request cannot cancel or show errors in a new sending session', async ({ page, context }) => {
   await setup(context);
   let release!: () => void;
