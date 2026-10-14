@@ -142,7 +142,14 @@ export class RateLimit extends DurableObject {
     });
     await this.ctx.storage.setAlarm(Date.now() + 120000); return result;
   }
-  async alarm() { await this.ctx.storage.deleteAll(); }
+  async alarm() {
+    const bucket = await this.ctx.storage.get('bucket');
+    // An old alarm may arrive after creation() has started a fresh window.
+    if (bucket && Date.now() - bucket.at < 120000) {
+      await this.ctx.storage.setAlarm(bucket.at + 120000); return;
+    }
+    await this.ctx.storage.deleteAll();
+  }
 }
 export class Admission extends DurableObject {
   constructor(ctx, env) { super(ctx, env); this.runtime = env; }
