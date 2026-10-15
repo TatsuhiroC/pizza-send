@@ -11,7 +11,8 @@
     "test:webkit": "playwright test --config playwright.webkit.config.ts",
     "signal:dev": "wrangler dev --config signal/wrangler.jsonc --port 8787",
     "signal:deploy": "wrangler deploy --config signal/wrangler.jsonc",
-    "signal:check": "wrangler deploy --dry-run --config signal/wrangler.jsonc"
+    "signal:check": "wrangler deploy --dry-run --config signal/wrangler.jsonc",
+    "test:headers": "playwright test --config playwright.headers.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.0",

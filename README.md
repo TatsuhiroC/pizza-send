@@ -106,3 +106,5 @@ MIT License.
 iPhone 多文件保存的修复及验证范围见 [移动端批量保存记录](docs/mobile-batch-save.md)。
 
 迁移说明、正式构建配置和旧站停用影响见 [Cloudflare 迁移记录](docs/cloudflare-migration.md)。
+
+正式网页启用 CSP 脚本限制、防 iframe 嵌套和不发送来源信息。HSTS 先以 24 小时仅作用于正式主域，不包含其他子域和预加载；自行部署时请调整 `public/_headers` 中的主机名。自定义 HTTPS 配对服务继续支持。配置与验证边界见 [网页安全头说明](docs/web-security-headers.md)。

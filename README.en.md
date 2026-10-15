@@ -105,3 +105,5 @@ Receiving into browser storage now shows “Files received. Save to your device.
 See the [2026-10-14 code review](docs/review-2026-10-14.md) (in Chinese) for stale scanner and rate-limit cleanup isolation, dependency and unused-code checks, validation scope and maintenance recommendations. The [2026-10-13 review](docs/review-2026-10-13.md) retains the earlier connection and saving fixes.
 
 See the [Cloudflare migration record](docs/cloudflare-migration.md) for production build settings and the effects of retiring the old site.
+
+The production site enforces CSP script restrictions, blocks framing, and sends no referrer information. HSTS initially lasts 24 hours on the production hostname only, without subdomain inclusion or preload; change the hostname in `public/_headers` when self-hosting. Custom HTTPS signaling endpoints remain supported. See [web security headers](docs/web-security-headers.md) for policy and validation limits.
