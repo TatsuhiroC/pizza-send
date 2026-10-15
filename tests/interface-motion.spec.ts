@@ -60,6 +60,8 @@ test('canceling scan success prevents a delayed connection and permits scanning 
   await uploadImage(); await expect(page.locator('#scan-success')).toBeVisible();
   await expect(page.locator('#scan-dialog')).toBeHidden(); await expect(page.locator('#session-panel')).toBeVisible();
   await expect.poll(() => connections).toBeGreaterThan(0);
+  await expect(page.locator('#receive-entry')).toBeVisible();
+  await expect(page.locator('#status')).toHaveText('连接未完成');
   await expect(page.locator('#status')).toBeInViewport({ ratio: 1 });
   expect(await page.locator('#scan-freeze').evaluate(el => (el as HTMLCanvasElement).width)).toBe(0);
 });

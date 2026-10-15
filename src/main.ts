@@ -193,6 +193,8 @@ app.addEventListener('click', event => {
   const button = (event.target as Element).closest<HTMLButtonElement>('.filename-button');
   if (!button || !button.textContent) return;
   $('full-filename').textContent = button.textContent;
+  // Safari does not focus a button on click; give the dialog a return target.
+  button.focus({ preventScroll: true });
   $<HTMLDialogElement>('filename-dialog').showModal();
 });
 filenameOverlay($<HTMLDialogElement>('filename-dialog'), $('close-filename'));
@@ -309,7 +311,7 @@ async function scannedCode(text: string): Promise<boolean> {
   status('正在连接发送方', '扫码成功，正在与发送方建立加密连接。');
   const connecting = run(() => connectValue(value));
   const revision = sessionRevision;
-  requestAnimationFrame(() => {
+  const revealConnection = () => requestAnimationFrame(() => {
     if (revision !== sessionRevision || $('session-panel').hidden || document.hidden || document.querySelector('dialog[open]')) return;
     $('session-panel').scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'start' });
     $('status').focus({ preventScroll: true });
@@ -317,7 +319,11 @@ async function scannedCode(text: string): Promise<boolean> {
     void $('session-panel').offsetWidth;
     $('session-panel').classList.add('connection-arriving');
   });
+  revealConnection();
   await connecting;
+  // A failed connection restores the input area above this panel and moves it.
+  // Reveal the final error after that layout change, guarded against old tasks.
+  if (!busy) revealConnection();
   return true;
 }
 function toast(message: string) { setText($('toast'), message); $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').hidden = true, 2600); }

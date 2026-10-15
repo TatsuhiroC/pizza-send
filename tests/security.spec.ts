@@ -4,7 +4,7 @@ import { webcrypto, createHash } from 'node:crypto';
 import vm from 'node:vm';
 const hex = (n: number) => n.toString(16).padStart(64, '0');
 const hash = (s: string) => createHash('sha256').update(s).digest('hex');
-const origin = 'https://tatsuhiroc.github.io';
+const origin = 'https://pizzasend.dpdns.org';
 function memory() {
   const data = new Map<string, any>(); let lock = Promise.resolve();
   const storage = { get: async (k: string) => structuredClone(data.get(k)), put: async (k: string, v: any) => { data.set(k, structuredClone(v)); },
@@ -89,10 +89,10 @@ test('conditional verification validates hostname, action and room server-side b
   const access = f.access.rooms;
   expect((await f.create(4)).status).toBe(428); expect(f.access.siteverify).toBe(0);
   for (const wrong of [{ success: false }, { hostname: 'evil.test' }, { action: 'wrong' }, { cdata: hex(5) }]) {
-    f.scope.verification = { success: true, hostname: 'tatsuhiroc.github.io', action: 'create-share', cdata: hex(4), ...wrong };
+    f.scope.verification = { success: true, hostname: 'pizzasend.dpdns.org', action: 'create-share', cdata: hex(4), ...wrong };
     expect((await f.create(4, 'test-ip', 'fake-token')).status).toBe(428); expect(f.access.rooms).toBe(access);
   }
-  f.scope.verification = { success: true, hostname: 'tatsuhiroc.github.io', action: 'create-share', cdata: hex(4) };
+  f.scope.verification = { success: true, hostname: 'pizzasend.dpdns.org', action: 'create-share', cdata: hex(4) };
   expect((await f.create(4, 'test-ip', 'real-token')).status).toBe(201);
 });
 test('unavailable verification fails closed, malformed legacy payloads do not allocate rooms', async () => {
@@ -211,4 +211,16 @@ test('recipient capacity, request limiting and backend outages keep distinct exp
   reason = 'Pairing temporarily unavailable'; status = 503;
   await page.locator('#file-input').setInputFiles({ name: 'test.txt', mimeType: 'text/plain', buffer: Buffer.from('test') }); await page.locator('#start-send').click();
   await expect(page.locator('#notice')).toContainText('配对服务暂不可用'); await expect(page.locator('#notice')).not.toContainText('服务限额');
+});
+
+// Validate the deployed allowlist, rather than only the fixture's default.
+test('production signaling accepts the custom frontend origin and rejects the retired Pages origin', async () => {
+  const config = JSON.parse(await readFile('signal/wrangler.jsonc', 'utf8'));
+  const f = await fixture({ ALLOWED_ORIGINS: config.vars.ALLOWED_ORIGINS });
+  const allowed = await f.request('/rooms', { method: 'OPTIONS' });
+  expect(allowed.status).toBe(204);
+  expect(allowed.headers.get('access-control-allow-origin')).toBe(origin);
+  const retired = await f.request('/rooms', { method: 'OPTIONS', headers: { Origin: 'https://tatsuhiroc.github.io' } });
+  expect(retired.status).toBe(403);
+  expect(f.access.rooms).toBe(0);
 });

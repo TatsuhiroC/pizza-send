@@ -4,7 +4,7 @@
 
 Open a webpage and send files directly to another device. An independent implementation inspired by [FilePizza](https://github.com/kern/filepizza).
 
-**Try it: [tatsuhiroc.github.io/pizza-send](https://tatsuhiroc.github.io/pizza-send/)**
+**Try it: [pizzasend.dpdns.org](https://pizzasend.dpdns.org/)**
 
 Choose files → Create a transfer (the QR code appears automatically) → Share the same link or QR code with several recipients → Each recipient confirms reception → Click “Save to device” when prompted. Keep the sending page and all receiving pages open.
 
@@ -13,7 +13,7 @@ Up to ten recipients can receive concurrently, with independent progress, verifi
 ## Features
 
 - Multiple files, shareable links, and QR codes; up to 100 files per transfer.
-- Compact share links carry one 43-character secret instead of three random fields. The default URL shrinks from about 241 to 86 characters; older links remain supported.
+- Compact share links carry one 43-character secret instead of three random fields. The complete URL on the production domain is about 74 characters. Older protocol formats still parse; the former GitHub Pages site is retired, so create new invitations from the new site.
 - The receiving page scans QR codes using the rear camera or an image. Decoding stays on this device. The camera stops after recognition, when the dialog closes, or when the page goes into the background. No microphone access is requested.
 - Long filenames use ellipses to fit the screen. Click a name to see it in full; separate Save buttons preserve the complete download name.
 - Direct file transfer over an ordered, reliable WebRTC DataChannel with DTLS encryption.
@@ -30,7 +30,7 @@ Up to ten recipients can receive concurrently, with independent progress, verifi
 
 ## Deployment architecture
 
-The frontend is a static Vite + TypeScript website hosted on GitHub Pages. A Cloudflare Worker with Durable Objects forwards pairing messages only, while STUN helps discover connection addresses. **File contents are never transferred through or stored by the signaling service. There is no TURN file relay.**
+The frontend is a static Vite + TypeScript website hosted on Cloudflare Pages at `https://pizzasend.dpdns.org/`. GitHub retains the source and automated checks; the former GitHub Pages deployment is disabled. A Cloudflare Worker with Durable Objects forwards pairing messages only, while STUN helps discover connection addresses. **File contents are never transferred through or stored by the signaling service. There is no TURN file relay.**
 
 The production signaling endpoint is `https://signal.pizzasend.dpdns.org`. The domain is registered with DigitalPlat and managed through Cloudflare's free DNS plan, and points to the existing Worker. The website uses the new endpoint automatically, including browsers that saved the previous default. Custom endpoints and an empty setting for manual pairing are preserved. Accessibility still needs to be tested on each network.
 
@@ -65,8 +65,8 @@ Enter `http://127.0.0.1:8787` in the webpage's connection settings. Leave it emp
 
 ## Deploy your own instance
 
-1. Fork the repository. In GitHub Settings → Pages, set Source to GitHub Actions. Updates to `main` are verified before `dist` is automatically published.
-2. Edit the Worker name and `ALLOWED_ORIGINS` in `signal/wrangler.jsonc`, using your frontend's origin. The default deployment allows the current GitHub Pages origin and two local development origins. Replace the custom domain in `routes` with your own active Cloudflare domain, or remove `routes` to use only `workers.dev`.
+1. Fork the repository and import it into Cloudflare Pages. Use production branch `main`, build command `npm run build`, output directory `dist`, and Node.js 22.12 or a newer 22.x release. Connect your custom domain and verify HTTPS. Cloudflare builds and publishes updates to `main`; GitHub Actions runs the checks separately and no longer publishes GitHub Pages. Complete local verification before pushing to the production branch.
+2. Edit the Worker name and `ALLOWED_ORIGINS` in `signal/wrangler.jsonc`, using your frontend's origin. The default deployment allows only the production custom origin and two local development origins; Cloudflare preview hostnames cannot use the production signaling service by default. Replace the custom domain in `routes` with your own active Cloudflare domain, or remove `routes` to use only `workers.dev`.
 3. Run `npx wrangler login`. Create a free Turnstile widget restricted to your frontend hostname, replace `TURNSTILE_SITE_KEY`, and store its server secret using `npx wrangler secret put TURNSTILE_SECRET_KEY --config signal/wrangler.jsonc`. Never commit the secret. Then run `npm run signal:deploy`. Durable Objects use SQLite storage, which your account must support. Usage limits and charges depend on your Cloudflare account.
 4. Set `signalUrl` in `public/app.config.json` to the Worker's returned HTTPS URL, then commit and publish. Worker updates must be deployed separately. Access tokens are not stored in the repository.
 
@@ -103,3 +103,5 @@ Multi-recipient tests cover three concurrent real DataChannel transfers, one rec
 Receiving into browser storage now shows “Files received. Save to your device.” with prominent save buttons above the progress summary. Completion scrolls to the save area, waiting if a dialog is open or the page is hidden. Each file has a separate action; “Save requested” asks you to confirm the browser download prompt and does not claim it succeeded. Direct disk reception shows “Saved to your device” only after the writers close. Disk temporary files keep their existing ten-minute retention; the memory fallback is lost on refresh or close.
 
 See the [2026-10-14 code review](docs/review-2026-10-14.md) (in Chinese) for stale scanner and rate-limit cleanup isolation, dependency and unused-code checks, validation scope and maintenance recommendations. The [2026-10-13 review](docs/review-2026-10-13.md) retains the earlier connection and saving fixes.
+
+See the [Cloudflare migration record](docs/cloudflare-migration.md) for production build settings and the effects of retiring the old site.

@@ -4,7 +4,7 @@
 
 打开网页，把文件直接送到另一台设备。受 [FilePizza](https://github.com/kern/filepizza) 启发，独立实现。
 
-**使用地址：[tatsuhiroc.github.io/pizza-send](https://tatsuhiroc.github.io/pizza-send/)**
+**使用地址：[pizzasend.dpdns.org](https://pizzasend.dpdns.org/)**
 
 选择文件 → 创建传输（自动显示二维码）→ 将同一个链接或二维码发给多位接收者 → 接收方各自确认接收 → 完成后点击「保存到设备」。发送页面和各接收页面需保持打开。
 
@@ -12,7 +12,7 @@
 
 - 多文件传输、分享链接、自动显示分享二维码；一次最多 100 个文件。
 - 同一分享最多 10 位同时接收，每人独立连接、进度、校验与断点恢复。一人取消或断线不影响其他人；完成后仍可让后来的人加入。多人共享发送设备的上传带宽，并不会自动提高总速度。点击「结束分享」关闭全部连接。手动配对仍是一对一。
-- 分享链接由三段随机信息缩短为一段 43 字符密钥；当前默认网址约从 241 字符缩短到 86 字符，旧链接仍可使用。
+- 分享链接由三段随机信息缩短为一段 43 字符密钥；当前正式域名下的完整链接约 74 字符。协议仍可解析旧格式；旧 GitHub Pages 已停用，请使用新入口重新创建分享。
 - 接收页支持后置相机扫描二维码，以及从二维码图片识别。扫码仅在本机进行；成功、关闭窗口或页面进入后台时停止相机，不申请麦克风权限。
 - 长文件名按屏幕宽度显示省略号，点击名称弹出完整文件名；保存按钮独立，下载名称不因显示省略而改变。
 - WebRTC 有序可靠 DataChannel，DTLS 加密文件直传。
@@ -29,7 +29,7 @@
 
 ## 部署结构
 
-前端是 Vite + TypeScript 静态网页，发布在 GitHub Pages。Cloudflare Worker + Durable Objects 仅转发配对消息，STUN 帮助发现连接地址。**文件内容不会经由配对服务传输或存储，没有 TURN 文件中继。**
+前端是 Vite + TypeScript 静态网页，发布在 Cloudflare Pages，自有域名为 `https://pizzasend.dpdns.org/`。GitHub 保留源码和自动检查，原 GitHub Pages 部署已停用。Cloudflare Worker + Durable Objects 仅转发配对消息，STUN 帮助发现连接地址。**文件内容不会经由配对服务传输或存储，没有 TURN 文件中继。**
 
 正式配对入口为 `https://signal.pizzasend.dpdns.org`，域名由 DigitalPlat 注册、DNS 由 Cloudflare 免费方案管理，连接到原有 Worker。网页会自动使用新入口，包括曾保存旧默认地址的浏览器；自定义地址和留空的手动模式保持原设置。各地网络的可访问性仍需实测。
 
@@ -64,8 +64,8 @@ npm run signal:dev
 
 ## 自行部署
 
-1. Fork 仓库，并在 GitHub Settings → Pages 将 Source 设为 GitHub Actions。`main` 更新后先验证，再自动发布 `dist`。
-2. 修改 `signal/wrangler.jsonc` 的 Worker 名字、`ALLOWED_ORIGINS`，填写自己的前端 origin。部署默认允许当前 GitHub Pages origin 和两个本地开发 origin。`routes` 中的自定义域名也需改成自己已在 Cloudflare 激活的域名；若只使用 `workers.dev`，删除 `routes`。
+1. Fork 仓库，在 Cloudflare Pages 导入该 Git 仓库；生产分支为 `main`，构建命令 `npm run build`，输出目录 `dist`，Node.js 使用 22.12 或更新的 22.x。绑定自己的自定义域名并确认 HTTPS。Cloudflare 随 `main` 更新构建、发布；GitHub Actions 独立运行完整检查，不再发布 GitHub Pages。推送生产分支前应先完成本地验证。
+2. 修改 `signal/wrangler.jsonc` 的 Worker 名字、`ALLOWED_ORIGINS`，填写自己的前端 origin。部署默认仅允许正式自有域名 origin 和两个本地开发 origin；Cloudflare 的预览域名默认不能连接正式配对服务。`routes` 中的自定义域名也需改成自己已在 Cloudflare 激活的域名；若只使用 `workers.dev`，删除 `routes`。
 3. `npx wrangler login`，创建自己的免费 Turnstile 组件并添加前端主机名。将公开站点密钥写入 `TURNSTILE_SITE_KEY`，通过 `npx wrangler secret put TURNSTILE_SECRET_KEY --config signal/wrangler.jsonc` 保存服务端密钥；不要把密钥提交到仓库。然后 `npm run signal:deploy`。Durable Objects 使用 SQLite 存储，账号需支持此功能；用量和费用以 Cloudflare 账号额度为准。
 4. 将返回的 Worker HTTPS 地址写入 `public/app.config.json` 的 `signalUrl`，提交并发布。Worker 更新需要另行部署，仓库中不保存访问令牌。
 
@@ -104,3 +104,5 @@ MIT License.
 最新代码审查见 [2026-10-14 审查记录](docs/review-2026-10-14.md)，包含扫码与限流旧任务隔离、依赖与无用代码核对、验证范围及维护建议；[2026-10-13 记录](docs/review-2026-10-13.md) 保留此前的连接与保存修复。
 
 iPhone 多文件保存的修复及验证范围见 [移动端批量保存记录](docs/mobile-batch-save.md)。
+
+迁移说明、正式构建配置和旧站停用影响见 [Cloudflare 迁移记录](docs/cloudflare-migration.md)。
