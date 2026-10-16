@@ -116,6 +116,45 @@ export class Transfer {
   private resumedGeneration = -1;
   private opened = false;
   private lastSeen = Date.now();
+  private localHidden = document.hidden;
+  private localBackgroundUntil = 0;
+  private peerHidden = false;
+  private peerBackgroundUntil = 0;
+  private backgroundSupport = false;
+  private activityRevision = 0;
+  private visibilityChanged = () => {
+    if (this.stopped || this.completed) return;
+    this.localHidden = document.hidden;
+    this.localBackgroundUntil = this.localHidden ? Date.now() + 10 * 60 * 1000 : 0;
+    this.activityRevision++;
+    this.reportVisibility();
+    if (!this.localHidden) {
+      this.lastSeen = Date.now();
+      if (this.recovering) this.armRecoveryTimeout();
+      if (this.connectTimer && this.channel?.readyState !== 'open') this.startTimeout();
+      if (this.opened && (this.channel?.readyState !== 'open' || ['failed', 'disconnected', 'closed'].includes(this.pc.connectionState))) this.requestRecovery();
+    }
+    this.wake();
+  };
+  private get backgroundDeadline() { return Math.max(this.localBackgroundUntil, this.peerBackgroundUntil); }
+  private get waitingInBackground() { return Date.now() < this.backgroundDeadline; }
+  private reportVisibility() {
+    if (this.backgroundSupport && this.channel?.readyState === 'open') {
+      try { this.control({ type: 'visibility', hidden: this.localHidden }); } catch {}
+    }
+  }
+  private scheduleFailure(kind: 'connectTimer' | 'recoveryTimer', delay: number, message: string) {
+    clearTimeout(this[kind]);
+    this[kind] = setTimeout(() => {
+      if (this.stopped || this.completed) return;
+      const remaining = this.backgroundDeadline - Date.now();
+      if (remaining > 0) { this.scheduleFailure(kind, Math.min(remaining, 5000), message); return; }
+      this.fail(this.localHidden || this.peerHidden ? '后台等待已超过 10 分钟，请回到双方页面重新创建传输。' : message);
+    }, delay);
+  }
+  private armRecoveryTimeout() {
+    this.scheduleFailure('recoveryTimer', 120000, '暂时无法恢复直连，已等待两分钟。请检查双方网络，或重新创建传输。');
+  }
   private heartbeat?: ReturnType<typeof setInterval>;
   private recoveryTimer?: ReturnType<typeof setTimeout>;
   private hashes = new Map<string, ReturnType<typeof sha256.create>>();
@@ -141,6 +180,8 @@ export class Transfer {
   private outputs: { info: FileInfo; url: string }[] = [];
   constructor(public config: Config, public role: 'sender' | 'receiver', private emit: (event: TransferEvent) => void) {
     this.pc = this.createPeer();
+    if (this.localHidden) this.localBackgroundUntil = Date.now() + 10 * 60 * 1000;
+    document.addEventListener('visibilitychange', this.visibilityChanged);
   }
   enableRecovery(callback: () => void) {
     this.recovery = callback;
@@ -179,7 +220,7 @@ export class Transfer {
     if (!this.recovering) {
       this.recovering = true;
       this.emit({ type: 'recovering' });
-      this.recoveryTimer = setTimeout(() => this.fail('暂时无法恢复直连，已等待两分钟。请检查双方网络，或重新创建传输。'), 120000);
+      this.armRecoveryTimeout();
     }
   }
   private transportQueue = Promise.resolve();
@@ -228,11 +269,12 @@ export class Transfer {
       this.lastSeen = Date.now();
       if (!this.opened) this.emit({ type: 'connected' });
       this.opened = true;
-      if (this.role === 'sender') this.control({ type: 'manifest', files: this.manifest, version: 2 });
+      if (this.role === 'sender') this.control({ type: 'manifest', files: this.manifest, version: 2, backgroundSupport: true });
+      this.reportVisibility();
       clearInterval(this.heartbeat);
       this.heartbeat = setInterval(() => {
         if (this.stopped || this.completed || this.recovering) return;
-        if (Date.now() - this.lastSeen > 8000) { this.requestRecovery(); return; }
+        if (Date.now() - this.lastSeen > 8000 && !this.waitingInBackground) { this.requestRecovery(); return; }
         try { this.control({ type: 'ping' }); } catch { this.requestRecovery(); }
       }, 2000);
     };
@@ -268,11 +310,12 @@ export class Transfer {
   private wake() { for (const resolve of this.waiters) resolve(); this.waiters.clear(); }
   private async waitFor(predicate: () => boolean, generation: number, timeout = 60000) {
     let deadline = Date.now() + timeout;
+    let activity = this.activityRevision;
     while (true) {
       if (this.stopped || generation !== this.generation) throw new TransportInterrupted();
       if (this.channel?.readyState !== 'open') throw new TransportInterrupted('连接已关闭');
       if (!this.recovering && predicate()) return;
-      if (this.recovering) deadline = Date.now() + timeout;
+      if (this.recovering || this.waitingInBackground || activity !== this.activityRevision) { deadline = Date.now() + timeout; activity = this.activityRevision; }
       else if (Date.now() > deadline) throw Error('对方长时间没有响应，请重新传输');
       await new Promise<void>(resolve => {
         const timer = setTimeout(() => { this.waiters.delete(done); resolve(); }, 250);
@@ -312,8 +355,24 @@ export class Transfer {
     const message = JSON.parse(data);
     if (message.type === 'ping') { this.reply({ type: 'pong' }, generation); return; }
     if (message.type === 'pong') return;
+    if (message.type === 'visibility') {
+      if (typeof message.hidden !== 'boolean') throw Error('后台状态信息无效');
+      const first = !this.backgroundSupport;
+      this.backgroundSupport = true;
+      if (message.hidden !== this.peerHidden) {
+        this.peerHidden = message.hidden;
+        this.peerBackgroundUntil = message.hidden ? Date.now() + 10 * 60 * 1000 : 0;
+        this.activityRevision++;
+        if (!message.hidden && this.recovering) this.armRecoveryTimeout();
+        this.emit({ type: 'background', data: message.hidden }); this.wake();
+      }
+      if (first) this.reportVisibility();
+      return;
+    }
     if (message.type === 'manifest' && this.role === 'receiver') {
       const manifest = validateManifest(message.files);
+      this.backgroundSupport = message.backgroundSupport === true;
+      this.reportVisibility();
       if (this.manifest.length) {
         if (JSON.stringify(manifest) !== JSON.stringify(this.manifest)) throw Error('续传文件列表不一致');
         this.reply({ type: 'resume', file: this.receivedFiles, offset: this.incoming?.received || 0, bytes: this.received, accepted: this.accepted, complete: this.completed }, generation);
@@ -459,7 +518,7 @@ export class Transfer {
   private startTimeout() {
     if (this.channel?.readyState === 'open') return;
     clearTimeout(this.connectTimer);
-    this.connectTimer = setTimeout(() => this.fail('未能建立直连。请让手机保持在发送页面，并检查 VPN 是否允许本地网络和 WebRTC；可先关闭双方 VPN 再试。'), 90000);
+    this.scheduleFailure('connectTimer', 90000, '未能建立直连。请让手机保持在发送页面，并检查 VPN 是否允许本地网络和 WebRTC；可先关闭双方 VPN 再试。');
   }
   private async gather() {
     if (this.pc.iceGatheringState === 'complete') return;
@@ -480,6 +539,7 @@ export class Transfer {
     }
     this.stopped = true; clearTimeout(this.connectTimer); clearTimeout(this.disconnectedTimer); clearTimeout(this.recoveryTimer); clearInterval(this.heartbeat);
     window.removeEventListener('online', this.networkChanged); window.removeEventListener('offline', this.networkChanged);
+    document.removeEventListener('visibilitychange', this.visibilityChanged);
     this.hashes.clear();
     void this.incoming?.writer?.abort().catch(() => {});
     if (this.temporary) {

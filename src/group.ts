@@ -5,7 +5,7 @@ import { deriveRecipientShare, receiverDigest } from './share';
 export type Recipient = {
   client: string; number: number; phase: 'pairing' | 'waiting' | 'sending' | 'recovering' | 'done' | 'error' | 'left';
   message: string; file: string; transferred: number; total: number; speed: number; path: string; started: boolean;
-  transfer?: Transfer; pair?: AutoPair;
+  transfer?: Transfer; pair?: AutoPair; background?: boolean;
 };
 const valid = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 export function groupURL(api: string, room: string, role: 'sender' | 'receiver', token: string, client: string) {
@@ -42,6 +42,7 @@ export class GroupSender {
     this.url = groupURL(api, room, 'sender', token, randomToken());
   }
   get active() { return [...this.peers.values()].some(peer => !['done', 'error', 'left'].includes(peer.phase)); }
+  get needsAwake() { return !this.closed && (this.active || (!this.expired && Date.now() < this.inviteExpiresAt && !this.peers.size)); }
   async connect() { await this.poll(); this.schedule(); }
   firstEvent(event: TransferEvent) { if (this.firstClient) this.event(this.firstClient, event); }
   private notify() { if (!this.closed) this.changed([...this.peers.values()], this.expired || Date.now() >= this.inviteExpiresAt); }
@@ -72,7 +73,7 @@ export class GroupSender {
     this.inviteExpiresAt = state.inviteExpiresAt;
     const listed = new Set<string>(state.members.map((member: any) => member.client));
     for (const peer of this.peers.values()) if (!listed.has(peer.client) && !this.retired.has(peer.client)) {
-      peer.phase = 'left'; peer.message = '接收者已退出'; peer.pair?.close(); peer.transfer?.close(false); this.retired.add(peer.client);
+      peer.phase = 'left'; peer.message = '接收者已退出'; peer.background = false; peer.pair?.close(); peer.transfer?.close(false); this.retired.add(peer.client);
     }
     await Promise.allSettled(state.members.filter((member: any) => !this.peers.has(member.client) && !this.retired.has(member.client)).map((member: any) => this.add(member)));
     this.notify();
@@ -131,6 +132,7 @@ export class GroupSender {
     else if (event.type === 'connected') { peer.phase = 'waiting'; peer.message = '等待接收者确认'; }
     else if (event.type === 'started' || event.type === 'resumed') { peer.phase = 'sending'; peer.started = true; peer.message = '正在传输'; }
     else if (event.type === 'recovering') { peer.phase = 'recovering'; peer.message = '网络切换，正在恢复连接'; }
+    else if (event.type === 'background') { peer.background = event.data; }
     else if (event.type === 'file') peer.file = event.data;
     else if (event.type === 'path') peer.path = event.data;
     else if (event.type === 'progress') { peer.transferred = event.data.transferred; peer.total = event.data.total; peer.speed = event.data.speed; }
@@ -138,6 +140,7 @@ export class GroupSender {
       peer.phase = event.type === 'done' ? 'done' : /对方已取消|对方已结束|接收方已结束/.test(event.data) ? 'left' : 'error'; peer.message = event.type === 'done' ? '传输完成，原样送达。' : event.data;
       if (event.type === 'done') peer.transferred = peer.total;
       this.retired.add(client); this.pendingRetire.add(client);
+      peer.background = false;
       peer.pair?.close(); peer.transfer?.close(false);
       void groupRequest(this.url, { type: 'finished', client }).then(() => this.pendingRetire.delete(client)).catch(() => {});
     }
