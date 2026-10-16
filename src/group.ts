@@ -1,4 +1,4 @@
-import { authenticatedRequest, ticketURL } from './security';
+import { authenticatedRequest, retryPairingRequest, ticketURL } from './security';
 import { Transfer, AutoPair, randomToken, signalKey, type Config, type TransferEvent } from './protocol';
 import { deriveRecipientShare, receiverDigest } from './share';
 
@@ -12,7 +12,8 @@ export function groupURL(api: string, room: string, role: 'sender' | 'receiver',
   const url = new URL('/rooms/' + room, api); url.search = new URLSearchParams({ role, token, client }).toString(); return url.toString();
 }
 export async function groupRequest(url: string, body?: unknown, keepalive = false) {
-  const response = await authenticatedRequest(url, { ...(body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}), keepalive, signal: AbortSignal.timeout(10000) });
+  const retryable = !body || (typeof body === 'object' && 'type' in body && body.type === 'join');
+  const response = await (retryable ? retryPairingRequest : authenticatedRequest)(url, { ...(body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}), keepalive, signal: AbortSignal.timeout(10000) });
   if (!response.ok) {
     if (response.status === 429) {
       const reason = await response.text();

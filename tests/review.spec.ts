@@ -36,11 +36,11 @@ for (const kind of ['AbortError', 'TimeoutError']) for (const role of ['sender',
     await target.locator('#receive-tab').click(); await target.locator('#receive-code').fill(originalLink);
     await target.locator('#connect-receive').click();
   }
-  await expect(target.locator('#notice')).toContainText(kind === 'AbortError' ? '操作已中断' : '操作超时');
+  await expect(target.locator('#notice')).toContainText(role === 'receiver' ? (kind === 'AbortError' ? '配对连接已中断' : '配对服务响应超时') : (kind === 'AbortError' ? '操作已中断' : '操作超时'));
   await expect(target.locator('#status')).toHaveText('连接未完成');
   await expect(target.locator('#toast')).toBeHidden();
   await target.locator('#language-toggle').click();
-  await expect(target.locator('#notice')).toContainText(kind === 'AbortError' ? 'Operation interrupted' : 'Operation timed out');
+  await expect(target.locator('#notice')).toContainText(role === 'receiver' ? (kind === 'AbortError' ? 'Pairing connection interrupted' : 'Pairing service timed out') : (kind === 'AbortError' ? 'Operation interrupted' : 'Operation timed out'));
   await expect(target.locator('#status')).toHaveText('Connection failed');
   await target.locator('#language-toggle').click();
   await target.evaluate(() => { (window as any).__abortPairing = false; });

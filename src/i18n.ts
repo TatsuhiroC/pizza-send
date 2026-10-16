@@ -1,6 +1,17 @@
 export type Language = 'zh' | 'en';
 type Params = Record<string, string | number>;
 const messages: Record<string, string> = {
+  '选择文件夹': 'Choose a folder',
+  '检查文件…': 'Checking files…',
+  '配对连接已中断，请检查网络后重新连接。': 'Pairing connection interrupted. Check your network and reconnect.',
+  '配对服务响应超时，请检查网络后重试。': 'Pairing service timed out. Check your network and retry.',
+  '文件夹中的文件会逐个分享，不打包。': 'Share the files individually, without an archive.',
+  '文件夹中没有可发送的文件。': 'There are no files to share in this folder.',
+  '无法读取原文件“{name}”。请确认文件仍在本机、未被移动或修改，再重新选择。': 'Cannot read “{name}”. Check that the original is on this device and has not been moved or changed, then select it again.',
+  '文件大小无效，请重新选择原文件。': 'Invalid file size. Select the original file again.',
+  '发送方无法读取原文件，请让对方重新选择本机原文件后再试。': 'The sender cannot read the original file. Ask them to select the local original again.',
+  '正在估算': 'Estimating', '正在校验': 'Verifying', '已停止': 'Stopped',
+  '{progress} · {time}': '{progress} · {time}',
   '保持屏幕常亮': 'Keep screen awake',
   '保持常亮': 'Keep awake',
   '关闭常亮': 'Keep awake off',
@@ -259,7 +270,7 @@ const messages: Record<string, string> = {
 };
 let language: Language = 'zh';
 try { if (localStorage.getItem('pizza-send-language') === 'en') language = 'en'; } catch {}
-const fill = (value: string, params: Params) => value.replace(/\{(\w+)\}/g, (match, key) => String(key === 'path' && typeof params[key] === 'string' ? t(params[key]) : params[key] ?? match));
+const fill = (value: string, params: Params) => value.replace(/\{(\w+)\}/g, (match, key) => String((key === 'path' || key === 'time') && typeof params[key] === 'string' ? t(params[key]) : params[key] ?? match));
 const patterns = Object.entries(messages).filter(([key]) => key.includes('{')).map(([key, value]) => {
   const names: string[] = [];
   const pattern = key.split(/(\{\w+\})/g).map(part => {

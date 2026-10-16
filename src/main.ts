@@ -12,6 +12,8 @@ import { Transfer, AutoPair, bytes, randomToken, packDescription, unpackDescript
 import { GroupSender, groupURL, groupRequest, type Recipient } from './group';
 import { filenameOverlay, motionPause, reducedMotion } from './interface-motion';
 import { ScreenAwake } from './screen-awake';
+import { checkSources, droppedFiles } from './source-files';
+import { remainingTime } from './remaining-time';
 import './style.css';
 import './interface-motion.css';
 import './parcel.css';
@@ -40,7 +42,7 @@ app.innerHTML = [
   '<header class="header"><a class="brand" href="./"><img src="./pizza.svg" alt="" width="38" height="38"/><span>PizzaSend<small>文件快传</small></span></a><div class="header-right"><span class="version">第二片 · v0.2</span><button id="language-toggle" class="language-toggle" type="button"><span data-language="zh">中</span><span class="language-divider" aria-hidden="true">/</span><span data-language="en">EN</span></button><a class="github" href="https://github.com/TatsuhiroC/pizza-send" target="_blank" rel="noopener">GitHub ↗</a></div></header>',
   '<main><section class="intro"><div class="eyebrow"><span></span>好东西，直接分享。</div><h1>文件送到，<br/><span>热乎刚好。</span>'+heroPizza+'</h1><p>不用安装，不用注册。<br class="mobile-break"/>打开网页，把文件直接送到另一台设备。</p></section>',
   '<section class="transfer-card" aria-label="文件传输"><div class="card-top"><div class="tabs" role="tablist" aria-label="传输角色"><button id="send-tab" class="tab active" role="tab" aria-selected="true">'+icon('upload')+'发送文件</button><button id="receive-tab" class="tab" role="tab" aria-selected="false">'+icon('down')+'接收文件</button></div><span class="secure">'+icon('lock')+'加密直传</span></div>',
-  '<div id="send-view"><button id="drop-zone" class="drop-zone" type="button"><span class="drop-icon">'+icon('upload')+'</span><strong>把文件放在这里</strong><span>拖放文件，或点击选择</span><small>支持多个文件 · 文件内容不上传到服务器</small></button><input id="file-input" type="file" multiple hidden/><div id="files" class="file-list" aria-live="polite"></div><div class="send-bottom"><span id="selection-summary">先选一个文件，就可以开始。</span><button id="start-send" class="primary" disabled>创建传输 '+icon('arrow')+'</button></div></div>',
+  '<div id="send-view"><button id="drop-zone" class="drop-zone" type="button"><span class="drop-icon">'+icon('upload')+'</span><strong>把文件放在这里</strong><span>拖放文件，或点击选择</span><small>支持多个文件 · 文件内容不上传到服务器</small></button><input id="file-input" type="file" multiple hidden/><div class="folder-choice"><button id="choose-folder" type="button">选择文件夹</button><span>文件夹中的文件会逐个分享，不打包。</span></div><input id="folder-input" type="file" webkitdirectory multiple hidden/><div id="files" class="file-list" aria-live="polite"></div><div class="send-bottom"><span id="selection-summary">先选一个文件，就可以开始。</span><button id="start-send" class="primary" disabled><span id="start-send-label">创建传输</span> '+icon('arrow')+'</button></div></div>',
   '<div id="receive-view" hidden><div id="receive-entry"><div class="receive-intro"><span class="drop-icon">'+icon('down')+'</span><h2>接住这一份分享</h2><p>打开对方发来的分享链接即可连接。<br/>也可以在这里粘贴链接或配对码。</p></div><button id="open-scanner" class="secondary wide scan-button" type="button">'+icon('camera')+'打开相机扫描</button><div class="receive-code-heading"><p class="scan-alternative subtle">或粘贴分享链接／配对码</p><button id="paste-receive" class="secondary paste-button" type="button" aria-controls="receive-code">'+icon('paste')+'粘贴</button></div><label class="sr-only" for="receive-code">分享链接或配对码</label><textarea id="receive-code" rows="3" placeholder="粘贴 PizzaSend 分享链接或 PS1. 配对码"></textarea><button id="connect-receive" class="primary wide">连接发送方 '+icon('arrow')+'</button></div><div id="incoming-files" class="file-list"></div><p id="save-note" class="subtle" hidden></p><button id="accept-files" class="primary wide" aria-describedby="save-note" hidden>选择保存位置并接收 '+icon('down')+'</button></div>',
   '<div id="session-panel" class="session-panel" hidden><div class="session-heading"><span id="status-dot" class="status-dot"></span><h2 id="status" tabindex="-1">等待接收方</h2><button id="cancel" class="session-action" type="button">结束传输</button></div><p id="status-detail" class="subtle">传输期间请保持双方页面打开。</p><p id="background-note" class="background-note subtle" role="status" hidden></p><section id="save-panel" class="save-panel" aria-labelledby="save-heading" hidden><h3 id="save-heading" tabindex="-1">保存到设备</h3><p id="save-location-note" class="subtle">文件目前保存在浏览器暂存中，保存后才能在手机的“文件”App 或浏览器下载记录中找到。</p><button id="download-all" class="primary wide" type="button" aria-describedby="download-all-note" hidden>'+icon('down')+'下载全部</button><p id="download-all-note" class="subtle" hidden>如浏览器询问是否允许下载多个文件，请选择允许。若有文件未下载，请使用下方的单个保存按钮。</p><div id="save-files"></div><div id="downloads" class="downloads"></div><p id="save-empty" class="subtle" hidden>暂存已清理或到期。如未保存，请让发送方重新分享。</p><p id="save-retention" class="subtle"></p><p id="save-feedback" class="save-feedback" role="status" hidden></p></section><div id="share-box" hidden><label for="share-link">把链接发给对方，或者让对方扫码</label><div class="link-row"><input id="share-link" readonly/><button id="copy-link" class="icon-button" aria-label="复制分享链接">'+icon('copy')+'</button></div><canvas id="share-qr" hidden></canvas><p id="share-note" class="subtle">链接 30 分钟内可加入，最多 10 位同时接收。请只分享给预期接收者。</p></div><div id="recipients" class="recipients" hidden></div><div id="progress-box" hidden><div class="progress-meta"><button id="current-file" class="filename-button" type="button" aria-haspopup="dialog"></button><span class="progress-result"><span id="percent">0%</span><span id="transfer-complete" class="completion-mark" aria-hidden="true" hidden>'+completionSymbol+'</span></span></div><progress id="progress" max="100" value="0" aria-label="传输进度"></progress><div class="metrics"><div><span id="transferred">0 B</span><small>已接收</small></div><div><span id="speed">—</span><small>平均速度</small></div><div><span id="remaining">—</span><small>预计剩余</small></div></div><div class="path-label">'+icon('lock')+'<span id="connection-path">浏览器之间加密传输</span><span>SHA-256 校验</span></div></div><div id="awake-panel" class="awake-panel" hidden><div class="awake-controls"><label class="awake-switch"><input id="keep-awake" type="checkbox" role="switch" checked aria-label="保持屏幕常亮" aria-describedby="awake-hint"/><span id="awake-label">保持常亮</span><span class="awake-track" aria-hidden="true"></span></label><button id="retry-awake" class="awake-retry" type="button" hidden>重试</button></div><p id="awake-hint" class="subtle" role="status" hidden></p></div></div>',
   '<div id="notice" class="notice" role="alert" hidden></div></section>',
@@ -71,6 +73,8 @@ let shareLink = '';
 let shareQRRevision = 0;
 let pairingKind: 'offer' | 'answer' = 'offer';
 let busy = false;
+let checkingFiles = false;
+let selectionRevision = 0;
 let transferFailed = false;
 const screenAwake = new ScreenAwake(renderAwake);
 let pasting = false;
@@ -271,6 +275,8 @@ async function connectValue(input: string) {
     const failed = transfer;
     leaveReceiverGroup(); transfer?.close(false); signaling?.close(); signaling = undefined; transfer = undefined; setBusy(false);
     if (failed) { status('连接未完成', '可以重试，或检查连接设置。', 'error'); setText($('cancel'), '重新开始'); }
+    if (e instanceof DOMException && e.name === 'AbortError') throw Error('配对连接已中断，请检查网络后重新连接。');
+    if (e instanceof DOMException && e.name === 'TimeoutError') throw Error('配对服务响应超时，请检查网络后重试。');
     throw e;
   }
 }
@@ -388,19 +394,21 @@ function select(next: File[]) {
   const combined = [...files, ...next];
   if (combined.length > 100) { notice('一次最多选择 100 个文件'); return; }
   if (combined.some(f => f.name.length > 255)) { notice('文件名过长，请缩短后重试'); return; }
-  files = combined; renderFiles();
+  selectionRevision++; files = combined; renderFiles();
 }
 function renderFiles() {
   if (!busy) deliveryMotion.setState(files.length ? 'selected' : 'idle');
   $('files').innerHTML = fileMarkup(files, true); $('drop-zone').classList.toggle('compact', files.length > 0);
   setText($('selection-summary'), files.length ? '{count} 个文件 · {size}' : '先选一个文件，就可以开始。', { count: files.length, size: bytes(files.reduce((n, f) => n + f.size, 0)) });
-  $<HTMLButtonElement>('start-send').disabled = !files.length || busy;
+  $<HTMLButtonElement>('start-send').disabled = !files.length || busy || checkingFiles;
+  setText($('start-send-label'), checkingFiles ? '检查文件…' : '创建传输');
 }
 function setBusy(value: boolean) {
   busy = value; renderFiles();
   view($('send-tab').getAttribute('aria-selected') === 'true' ? 'sender' : 'receiver');
   document.querySelector('.transfer-card')!.classList.toggle('in-session', value);
   $<HTMLButtonElement>('drop-zone').disabled = value;
+  $<HTMLButtonElement>('choose-folder').disabled = value;
   document.querySelectorAll<HTMLButtonElement>('.remove-file').forEach(b => b.disabled = value);
   $<HTMLButtonElement>('connect-receive').disabled = value;
   $<HTMLButtonElement>('open-scanner').disabled = value;
@@ -459,8 +467,7 @@ function events(event: TransferEvent) {
     $<HTMLProgressElement>('progress').value = percent; setText($('percent'), Math.floor(percent) + '%');
     setText($('transferred'), bytes(p.transferred) + ' / ' + bytes(p.total));
     setText($('speed'), bytes(p.speed) + '/s');
-    const seconds = p.speed > 0 ? Math.ceil((p.total - p.transferred) / p.speed) : 0;
-    setText($('remaining'), seconds > 60 ? Math.ceil(seconds / 60) + ' 分钟' : seconds ? seconds + ' 秒' : '即将完成');
+    setText($('remaining'), remainingTime(p.total, p.transferred, p.speed));
   } else if (event.type === 'download') {
     const a = document.createElement('a'); a.href = event.data.url; a.download = event.data.info.name;
     a.className = 'download-file';
@@ -629,7 +636,7 @@ function renderRecipients(peers: Recipient[], expired: boolean) {
     const peer = peers[0], percentage = peer.total ? peer.transferred / peer.total * 100 : peer.phase === 'done' ? 100 : 0;
     $('current-file').textContent = peer.file; $<HTMLProgressElement>('progress').value = percentage;
     setText($('percent'), Math.floor(percentage) + '%'); setText($('transferred'), bytes(peer.transferred) + ' / ' + bytes(peer.total));
-    setText($('speed'), bytes(peer.speed) + '/s'); setText($('remaining'), peer.phase === 'done' ? '完成' : peer.phase === 'recovering' ? '等待网络恢复' : '即将完成');
+    setText($('speed'), bytes(peer.speed) + '/s'); setText($('remaining'), remainingTime(peer.total, peer.transferred, peer.speed, peer.phase));
     if (peer.path) setText($('connection-path'), '{path} · DTLS 加密', { path: peer.path });
   }
   const rows = new Map(Array.from($('recipients').querySelectorAll<HTMLElement>('.recipient-row'), row => [row.dataset.client, row]));
@@ -650,7 +657,7 @@ function renderRecipients(peers: Recipient[], expired: boolean) {
     const percent = peer.total ? Math.min(100, peer.transferred / peer.total * 100) : peer.phase === 'done' ? 100 : 0;
     const bar = row.querySelector('progress')!; bar.value = percent; bar.setAttribute('aria-label', t('接收者 {number} 的进度', { number: peer.number }));
     const detail = row.querySelectorAll<HTMLElement>('.recipient-detail span');
-    setText(detail[0], bytes(peer.transferred) + ' / ' + bytes(peer.total)); setText(detail[1], Math.floor(percent) + '% · ' + bytes(peer.speed) + '/s');
+    setText(detail[0], bytes(peer.transferred) + ' / ' + bytes(peer.total)); setText(detail[1], '{progress} · {time}', { progress: Math.floor(percent) + '% · ' + bytes(peer.speed) + '/s', time: remainingTime(peer.total, peer.transferred, peer.speed, peer.phase) });
   }
 }
 function createTransfer(role: 'sender' | 'receiver') {
@@ -788,14 +795,39 @@ $('send-tab').onclick = () => { if (busy && transfer?.role !== 'sender') { toast
 $('receive-tab').onclick = () => { if (busy && transfer?.role !== 'receiver') { toast('请先结束当前传输'); return; } view('receiver'); };
 $('drop-zone').onclick = () => $<HTMLInputElement>('file-input').click();
 $<HTMLInputElement>('file-input').onchange = event => { const input = event.target as HTMLInputElement; select(Array.from(input.files || [])); input.value = ''; };
-$('files').onclick = event => { const button = (event.target as HTMLElement).closest<HTMLElement>('.remove-file'); if (button && !busy) { files.splice(Number(button.dataset.index), 1); renderFiles(); } };
+$('files').onclick = event => { const button = (event.target as HTMLElement).closest<HTMLElement>('.remove-file'); if (button && !busy) { selectionRevision++; files.splice(Number(button.dataset.index), 1); renderFiles(); } };
 for (const event of ['dragenter', 'dragover']) $('drop-zone').addEventListener(event, e => { e.preventDefault(); if (!busy) $('drop-zone').classList.add('dragging'); });
 $('drop-zone').addEventListener('dragleave', () => $('drop-zone').classList.remove('dragging'));
-$('drop-zone').addEventListener('drop', event => { event.preventDefault(); $('drop-zone').classList.remove('dragging'); select(Array.from((event as DragEvent).dataTransfer?.files || [])); });
+$('drop-zone').addEventListener('drop', event => {
+  event.preventDefault(); $('drop-zone').classList.remove('dragging');
+  const data = (event as DragEvent).dataTransfer;
+  if (!data || busy) return;
+  const revision = selectionRevision;
+  void run(async () => {
+    const imported = await droppedFiles(data);
+    if (busy || revision !== selectionRevision) return;
+    if (!imported.length) { notice('文件夹中没有可发送的文件。'); return; }
+    select(imported);
+  });
+});
+$('choose-folder').hidden = !('webkitdirectory' in $<HTMLInputElement>('folder-input'));
+$('choose-folder').onclick = () => $<HTMLInputElement>('folder-input').click();
+$<HTMLInputElement>('folder-input').onchange = event => {
+  const input = event.target as HTMLInputElement, imported = Array.from(input.files || []);
+  if (imported.length) select(imported);
+  input.value = '';
+};
 window.addEventListener('dragover', event => event.preventDefault());
 window.addEventListener('drop', event => event.preventDefault());
 $('start-send').onclick = () => run(async () => {
-  if (busy || !files.length) return;
+  if (busy || checkingFiles || !files.length) return;
+  const revision = selectionRevision, session = sessionRevision, selected = [...files];
+  const current = () => revision === selectionRevision && session === sessionRevision && !busy && $('send-tab').getAttribute('aria-selected') === 'true';
+  checkingFiles = true; renderFiles(); $('notice').hidden = true;
+  try { await checkSources(selected, current); }
+  catch (error) { if (!current()) return; throw error; }
+  finally { checkingFiles = false; renderFiles(); }
+  if (!current()) return;
   sessionRevision++;
   const t = createTransfer('sender'); t.prepare(files);
   status('正在创建传输', '正在准备连接，请稍候。');

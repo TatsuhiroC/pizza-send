@@ -18,6 +18,7 @@ export class CameraScanner {
   constructor(private video: HTMLVideoElement, private found: (text: string) => Promise<boolean>, private error: (text: string) => void) {}
   stop() {
     this.generation++; clearTimeout(this.timer);
+    delete this.video.dataset.ready;
     this.stream?.getTracks().forEach(track => track.stop()); this.stream = undefined;
     this.video.pause(); this.video.srcObject = null;
   }
@@ -39,6 +40,7 @@ export class CameraScanner {
         if (generation !== this.generation) return;
         try {
           if (this.video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && this.video.videoWidth) {
+            this.video.dataset.ready = 'true';
             const scale = Math.min(1, 640 / Math.max(this.video.videoWidth, this.video.videoHeight));
             this.canvas.width = Math.round(this.video.videoWidth * scale); this.canvas.height = Math.round(this.video.videoHeight * scale);
             const ctx = this.canvas.getContext('2d', { willReadFrequently: true })!;

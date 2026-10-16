@@ -1,4 +1,5 @@
-import { authenticatedRequest, ticketURL } from './security';
+import { retryPairingRequest, ticketURL } from './security';
+import { readSource, SourceReadError } from './source-files';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { downloadType } from './download';
 import { createTemporarySession, beginTemporaryFile, writeTemporaryFile, finishTemporaryFile, completeTemporarySession, discardTemporaryPartial } from './received-storage';
@@ -102,6 +103,9 @@ export class Transfer {
   recovering = false;
   private recovery?: () => void;
   private candidate?: (candidate: RTCIceCandidateInit | null) => void;
+  private sourceFailure?: () => Promise<void>;
+  private failing = false;
+  private failureTimer?: ReturnType<typeof setTimeout>;
   get hasAccepted() { return this.accepted; }
   get saveMode(): 'device' | 'disk' | 'memory' { return this.handles.length ? 'device' : this.temporary ? 'disk' : 'memory'; }
   get temporarySession() { return this.temporary; }
@@ -112,6 +116,7 @@ export class Transfer {
     this.pairingStage('等待接收方');
   }
   enableCandidates(callback: (candidate: RTCIceCandidateInit | null) => void) { this.candidate = callback; }
+  enableSourceFailure(callback: () => Promise<void>) { this.sourceFailure = callback; }
   private generation = 0;
   private resumedGeneration = -1;
   private opened = false;
@@ -210,7 +215,7 @@ export class Transfer {
     return pc;
   }
   requestRecovery() {
-    if (this.stopped || this.completed) return;
+    if (this.stopped || this.completed || this.failing) return;
     if (!this.recovery) { this.fail('连接已中断，请重新创建传输。'); return; }
     this.pauseRecovery();
     this.recovery();
@@ -434,7 +439,7 @@ export class Transfer {
     } else if (message.type === 'complete' && this.role === 'sender') {
       if (this.fileConfirmed !== this.manifest.length - 1) throw Error('文件尚未保存完整');
       this.completed = true; clearInterval(this.heartbeat); this.progress(true); this.emit({ type: 'done' });
-    } else if (message.type === 'cancel') { this.fail('对方已取消传输。'); }
+    } else if (message.type === 'cancel') { this.fail(message.reason === 'source-unavailable' ? '发送方无法读取原文件，请让对方重新选择本机原文件后再试。' : '对方已取消传输。'); }
     else throw Error('收到不支持的传输消息');
   }
   async accept() {
@@ -465,7 +470,7 @@ export class Transfer {
     void this.sendFiles(file, offset, generation).catch(e => {
       if (this.stopped || generation !== this.generation) return;
       if (e instanceof TransportInterrupted) this.requestRecovery();
-      else this.fail(e.message);
+      else this.fail(e.message, e instanceof SourceReadError);
     });
   }
   private async sendFiles(firstFile: number, firstOffset: number, generation: number) {
@@ -479,7 +484,7 @@ export class Transfer {
       if (!hash) {
         hash = sha256.create();
         for (let offset = 0; offset < start; offset += 1048576) {
-          const prefix = await file.slice(offset, Math.min(offset + 1048576, start)).arrayBuffer();
+          const prefix = await readSource(file, offset, Math.min(offset + 1048576, start));
           if (this.stopped || generation !== this.generation) throw new TransportInterrupted();
           hash.update(new Uint8Array(prefix));
         }
@@ -488,7 +493,7 @@ export class Transfer {
       this.control({ type: 'file-start', id, offset: start }); this.emit({ type: 'file', data: file.name });
       for (let offset = start; offset < file.size; offset += chunkSize) {
         await this.waitFor(() => this.channel!.bufferedAmount < 1048576 && this.sent - this.acknowledged < 4 * 1048576, generation);
-        const buffer = await file.slice(offset, Math.min(offset + chunkSize, file.size)).arrayBuffer();
+        const buffer = await readSource(file, offset, Math.min(offset + chunkSize, file.size));
         if (this.stopped || generation !== this.generation) throw new TransportInterrupted();
         hash.update(new Uint8Array(buffer));
         try { this.channel!.send(buffer); } catch { throw new TransportInterrupted('连接已关闭'); }
@@ -529,15 +534,30 @@ export class Transfer {
       this.pc.addEventListener('icegatheringstatechange', change);
     });
   }
-  fail(message: string) {
-    if (this.stopped || this.completed) return;
-    this.emit({ type: 'error', data: message }); this.close(false);
+  fail(message: string, sourceUnavailable = false) {
+    if (this.stopped || this.completed || this.failing) return;
+    const finish = () => {
+      clearTimeout(this.failureTimer);
+      if (this.stopped || this.completed) return;
+      this.emit({ type: 'error', data: message }); this.close(false);
+    };
+    if (sourceUnavailable) {
+      this.failing = true;
+      if (this.channel?.readyState === 'open') {
+        try { this.control({ type: 'cancel', reason: 'source-unavailable' }); } catch {}
+      }
+      // Send the reason and wait for the peer's receipt before the group closes
+      // its socket. Otherwise "ended" can overtake the data channel's final
+      // cancellation. Both automatic and manual pairing have a bounded grace.
+      this.failureTimer = setTimeout(finish, 1000);
+      if (this.sourceFailure) void this.sourceFailure().then(finish, () => {});
+    } else finish();
   }
   close(notify = true) {
     if (notify && this.channel?.readyState === 'open' && !this.completed && (this.role === 'sender' || this.accepted)) {
       try { this.control({ type: 'cancel' }); } catch {}
     }
-    this.stopped = true; clearTimeout(this.connectTimer); clearTimeout(this.disconnectedTimer); clearTimeout(this.recoveryTimer); clearInterval(this.heartbeat);
+    this.stopped = true; clearTimeout(this.failureTimer); this.sourceFailure = undefined; clearTimeout(this.connectTimer); clearTimeout(this.disconnectedTimer); clearTimeout(this.recoveryTimer); clearInterval(this.heartbeat);
     window.removeEventListener('online', this.networkChanged); window.removeEventListener('offline', this.networkChanged);
     document.removeEventListener('visibilitychange', this.visibilityChanged);
     this.hashes.clear();
@@ -570,7 +590,7 @@ export class Signaling {
   private failures = 0;
   private lastSeen = Date.now();
   private client = randomToken();
-  constructor(private key: CryptoKey, private onMessage: (message: any) => Promise<void>, private onError: (message: string) => void) {}
+  constructor(private key: CryptoKey, private onMessage: (message: any, authenticated?: boolean) => Promise<void>, private onError: (message: string) => void) {}
   async connect(endpoint: string, room: string, role: string, token: string) {
     const url = new URL(endpoint);
     url.protocol = url.protocol === 'http:' ? 'ws:' : 'wss:';
@@ -586,7 +606,7 @@ export class Signaling {
     const attempt = (async () => {
       const url = new URL(this.endpoint!);
       url.protocol = url.protocol === 'ws:' ? 'http:' : 'https:';
-      const response = await authenticatedRequest(url, { signal: AbortSignal.timeout(10000) });
+      const response = await retryPairingRequest(url);
       if (!response.ok) {
         if ([401, 409, 410].includes(response.status)) { this.closed = true; clearTimeout(this.retry); }
         throw Error(response.status === 409 ? '分享链接已被另一接收页面占用，请关闭原页面或创建新链接。' :
@@ -613,7 +633,7 @@ export class Signaling {
               this.peerSession = decoded.session; this.lastReceived = 0; this.allowNewPeer = false;
             }
             if (!Number.isInteger(decoded.sequence) || decoded.sequence <= this.lastReceived) throw Error('重复或无效的配对消息');
-            this.lastReceived = decoded.sequence; await this.onMessage(decoded.message);
+            this.lastReceived = decoded.sequence; await this.onMessage(decoded.message, true);
           } else await this.onMessage(message);
         }).catch(e => this.onError(e.message));
       };
@@ -660,11 +680,13 @@ export class Signaling {
     }
     throw Error('配对服务已断开');
   }
-  async send(message: unknown) {
+  async send(message: unknown, connectedOnly = false) {
     const task = this.sendQueue.then(async () => {
-      await this.ready();
+      if (connectedOnly) {
+        if (this.closed || this.socket?.readyState !== WebSocket.OPEN) throw Error('配对服务已断开');
+      } else await this.ready();
       const payload = await seal(this.key, { session: this.client, sequence: ++this.sequence, message });
-      if (this.socket?.readyState !== WebSocket.OPEN) throw Error('配对服务已断开');
+      if (this.closed || this.socket?.readyState !== WebSocket.OPEN) throw Error('配对服务已断开');
       this.socket.send(JSON.stringify({ type: 'signal', payload }));
     });
     this.sendQueue = task.catch(() => {});
@@ -690,6 +712,7 @@ export class AutoPair {
   private closed = false;
   private lastAttempt = 0;
   private finishedAt = 0;
+  private sourceFailureAck?: () => void;
   private lastOffer?: RTCSessionDescriptionInit;
   private lastAnswer?: RTCSessionDescriptionInit;
   private descriptionSent = false;
@@ -701,7 +724,12 @@ export class AutoPair {
   private waitingTimer?: ReturnType<typeof setTimeout>;
   private retry: ReturnType<typeof setInterval>;
   constructor(private transfer: Transfer, key: CryptoKey, private onError: (message: string) => void) {
-    this.signal = new Signaling(key, message => this.handle(message), onError);
+    this.signal = new Signaling(key, (message, authenticated) => this.handle(message, authenticated), onError);
+    transfer.enableSourceFailure(async () => {
+      const receipt = new Promise<void>(resolve => { this.sourceFailureAck = resolve; });
+      try { await this.signal.send({ type: 'source-unavailable' }, true); await receipt; }
+      finally { this.sourceFailureAck = undefined; }
+    });
     transfer.enableCandidates(candidate => {
       if (this.closed || this.candidateHistory.length >= 128) return;
       this.candidateHistory.push(candidate); this.localCandidates.push(candidate);
@@ -749,7 +777,7 @@ export class AutoPair {
       this.seenCandidates.add(id);
     }
   }
-  private async handle(message: any) {
+  private async handle(message: any, authenticated = false) {
     const t = this.transfer;
     if (this.closed || t.stopped) return;
     if (message.type === 'signal-ready') {
@@ -805,6 +833,11 @@ export class AutoPair {
         this.epoch++; this.offered = false; this.lastOffer = undefined; this.resetCandidates();
         await t.replaceTransport(); t.waitForReceiver();
       } finally { this.negotiating = false; }
+    } else if (message.type === 'source-unavailable-ack' && authenticated && t.role === 'sender') {
+      this.sourceFailureAck?.();
+    } else if (message.type === 'source-unavailable' && authenticated && t.role === 'receiver') {
+      await this.signal.send({ type: 'source-unavailable-ack' }, true).catch(() => {});
+      t.fail('发送方无法读取原文件，请让对方重新选择本机原文件后再试。');
     } else if (message.type === 'ended') {
       if (t.completed) this.close();
       else t.fail('对方已结束传输，或页面已关闭。');
@@ -834,5 +867,5 @@ export class AutoPair {
     } catch { /* Preserve the checkpoint and retry until the recovery deadline. */ }
     finally { this.negotiating = false; }
   }
-  close() { this.closed = true; clearInterval(this.retry); clearTimeout(this.candidateTimer); clearTimeout(this.waitingTimer); this.signal.close(); }
+  close() { this.closed = true; this.sourceFailureAck?.(); this.sourceFailureAck = undefined; clearInterval(this.retry); clearTimeout(this.candidateTimer); clearTimeout(this.waitingTimer); this.signal.close(); }
 }
