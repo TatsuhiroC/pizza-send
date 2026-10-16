@@ -242,6 +242,11 @@ test('compact wake switch supports keyboard, remembers the choice and fits a nar
   await page.locator('#language-toggle').click();
   await expect(page.locator('#awake-label')).toHaveText('Keep awake off');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  // A wider system font exposes the enlarged hero's overflow on Linux WebKit.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const widerFont = await page.addStyleTag({ content: ':root{font-family:Verdana,sans-serif}' });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await widerFont.evaluate(node => node.remove());
   await page.locator('#cancel').click();
   await page.reload(); await share(page);
   const restored = page.getByRole('switch', { name: 'Keep screen awake' });

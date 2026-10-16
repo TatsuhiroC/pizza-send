@@ -51,3 +51,7 @@
 @keyframes pizza-recede{0%,52%{opacity:1;transform:translateY(0) scale(1);animation-timing-function:cubic-bezier(.4,0,.3,1)}83%,100%{opacity:0;transform:translateY(10px) scale(.76)}}
 @keyframes pizza-warmth{0%,28%{opacity:0;transform:translateY(7px)}43%{opacity:.5;transform:translateY(0);animation-timing-function:ease-out}68%,100%{opacity:0;transform:translateY(-9px)}}
 @media(prefers-reduced-motion:reduce){.parcel-hero[data-intro=playing] .parcel-scene,.parcel-hero[data-intro=playing] .parcel-loose-slice{animation:none!important}.parcel-intro-base,.parcel-intro-lid,.parcel-intro-steam{display:none!important}}
+
+/* Reserve space for the enlarged box beside narrow English headings. System
+   fonts can be wider than macOS fonts; the complete title and box must fit. */
+@media(max-width:360px){.lang-en h1{max-width:100%;padding-right:42px}.lang-en .parcel-hero{right:6px}}

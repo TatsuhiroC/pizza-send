@@ -49,3 +49,9 @@ Mac Chrome → 真正 iPhone Safari 的大电影失败仍需实体设备复测�
 - [W3C File API：文件读取错误](https://www.w3.org/TR/FileAPI/)
 - [MDN：webkitdirectory](https://developer.mozilla.org/en-US/docs/Web/API/HTMLInputElement/webkitdirectory)
 - [MDN：视频固有尺寸](https://developer.mozilla.org/en-US/docs/Web/API/HTMLVideoElement/videoHeight)
+
+## 发布检查补充
+
+2026-10-17 首次 Cloudflare 发布成功，正式站点安全策略、扫码及 20 MiB / 空文件 / 中文名文件的配对、收发与独立 SHA-256 校验通过。GitHub Linux WebKit 检查随后发现 320px 英文分享页的横向溢出；原因是较宽的系统字体与标题旁 1.5 倍披萨盒共同超出页面，不是常亮开关本身过宽。
+
+用 Verdana 在本机复现到页面宽度 324px 后，为窄屏英文标题预留披萨盒位置，保留动画比例而不通过裁切页面隐藏溢出。四种字体的诊断均回到 320px，Chromium / WebKit 的常亮及语言布局 4 项检查通过，并把较宽字体加入原有常亮回归断言。
