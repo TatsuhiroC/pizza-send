@@ -34,12 +34,22 @@ test('screen wake lock follows visibility, user choice, OS release and cancellat
   await setup(context); await page.goto('./');
   await expect(page.locator('#awake-panel')).toBeHidden(); await share(page);
   await expect(page.locator('#awake-hint')).toContainText('已保持屏幕常亮');
+  await expect(page.getByRole('switch', { name: '保持屏幕常亮' })).toBeChecked();
+  await expect(page.locator('#awake-label')).toHaveText('保持常亮');
+  await expect(page.locator('#awake-hint')).toBeHidden();
+  expect(await page.locator('#awake-panel').evaluate(panel => panel.parentElement!.lastElementChild === panel)).toBe(true);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.locator('#awake-panel').scrollIntoViewIfNeeded();
+  expect((await page.locator('#awake-panel').boundingBox())!.height).toBeLessThanOrEqual(56);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: info.outputPath('awake-mobile.png') });
+  await page.locator('#awake-panel').screenshot({ path: info.outputPath('awake-switch-on.png'), animations: 'disabled' });
   await page.locator('#keep-awake').uncheck();
   await expect.poll(() => page.evaluate(() => (window as any).__releases)).toBe(1);
   await expect(page.locator('#awake-hint')).toContainText('已允许自动锁屏');
+  await expect(page.locator('#awake-label')).toHaveText('关闭常亮');
+  await expect(page.getByRole('switch', { name: '保持屏幕常亮' })).not.toBeChecked();
+  await page.locator('#awake-panel').screenshot({ path: info.outputPath('awake-switch-off.png'), animations: 'disabled' });
   await page.locator('#keep-awake').check();
   await expect.poll(() => page.evaluate(() => (window as any).__requests)).toBe(2);
   await page.evaluate(() => (window as any).__visibility(true));
@@ -51,7 +61,9 @@ test('screen wake lock follows visibility, user choice, OS release and cancellat
   await page.locator('#retry-awake').click();
   await expect(page.locator('#awake-hint')).toContainText('已保持屏幕常亮');
   await page.locator('#language-toggle').click();
-  await expect(page.locator('#awake-hint')).toContainText('Screen will stay awake');
+  await expect(page.locator('#awake-hint')).toContainText('Screen stays awake');
+  await expect(page.locator('#awake-label')).toHaveText('Keep awake');
+  await expect(page.getByRole('switch', { name: 'Keep screen awake' })).toBeChecked();
   await page.locator('#cancel').click();
   await expect.poll(() => page.evaluate(() => (window as any).__releases)).toBe(4);
   await expect(page.locator('#awake-panel')).toBeHidden();
@@ -96,7 +108,7 @@ test('a late OS request is released and cannot attach to a replacement share', a
 
 for (const mode of ['denied', 'unsupported'] as const) test(`${mode} wake lock does not claim protection or prevent sharing`, async ({ page, context }) => {
   await setup(context, mode); await page.setViewportSize({ width: 390, height: 844 }); await page.goto('./'); await share(page);
-  await expect(page.locator('#awake-hint')).toContainText(mode === 'denied' ? '暂未保持' : '不支持防自动锁屏');
+  await expect(page.locator('#awake-hint')).toContainText(mode === 'denied' ? '常亮暂不可用' : '不支持常亮');
   if (mode === 'unsupported') await expect(page.locator('#keep-awake')).toBeDisabled();
   else await expect(page.locator('#keep-awake')).toBeEnabled();
   if (mode === 'denied') await expect(page.locator('#retry-awake')).toBeVisible();
@@ -113,6 +125,8 @@ test('a background recipient leaving clears its notice without releasing another
   const first = await context.newPage(), second = await context.newPage();
   for (const receiver of [first, second]) {
     await receiver.goto(link); await expect(receiver.locator('#accept-files')).toBeVisible();
+    await expect(receiver.getByRole('switch', { name: '保持屏幕常亮' })).toBeChecked();
+    expect(await receiver.locator('#awake-panel').evaluate(panel => panel.parentElement!.lastElementChild === panel)).toBe(true);
   }
   await expect(page.locator('.recipient-row')).toHaveCount(2);
   await first.evaluate(() => (window as any).__visibility(true));
@@ -215,5 +229,26 @@ for (const background of ['sender', 'receiver'] as const) test(`${background} re
   expect(file.suggestedFilename()).toBe('background-original.bin');
   expect(createHash('sha256').update(await readFile((await file.path())!)).digest('hex')).toBe(createHash('sha256').update(buffer).digest('hex'));
   for (const p of [page, receiver]) expect(await p.evaluate(() => (window as any).__locks.every((lock: any) => lock.released))).toBe(true);
+  await page.locator('#cancel').click();
+});
+
+test('compact wake switch supports keyboard, remembers the choice and fits a narrow English layout', async ({ page, context }) => {
+  await setup(context); await page.setViewportSize({ width: 320, height: 740 });
+  await page.goto('./'); await share(page);
+  const control = page.getByRole('switch', { name: '保持屏幕常亮' });
+  await control.focus(); await page.keyboard.press('Space');
+  await expect(page.locator('#awake-label')).toHaveText('关闭常亮');
+  await expect(control).not.toBeChecked();
+  await page.locator('#language-toggle').click();
+  await expect(page.locator('#awake-label')).toHaveText('Keep awake off');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.locator('#cancel').click();
+  await page.reload(); await share(page);
+  const restored = page.getByRole('switch', { name: 'Keep screen awake' });
+  await expect(restored).not.toBeChecked();
+  expect(await page.evaluate(() => (window as any).__requests)).toBe(0);
+  await restored.check();
+  await expect(page.locator('#awake-panel')).toHaveAttribute('data-state', 'held');
+  await expect(page.locator('#awake-label')).toHaveText('Keep awake');
   await page.locator('#cancel').click();
 });

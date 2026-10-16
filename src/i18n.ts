@@ -1,13 +1,15 @@
 export type Language = 'zh' | 'en';
 type Params = Record<string, string | number>;
 const messages: Record<string, string> = {
-  '传输时保持屏幕常亮': 'Keep screen awake while sharing',
+  '保持屏幕常亮': 'Keep screen awake',
+  '保持常亮': 'Keep awake',
+  '关闭常亮': 'Keep awake off',
   '重试': 'Retry',
-  '已保持屏幕常亮，可以把设备放在一旁。切换 App 或锁屏仍可能暂停传输。': 'Screen will stay awake; you can leave the device aside. Switching apps or locking may still pause transfers.',
-  '正在请求保持屏幕常亮…': 'Requesting screen wake lock…',
-  '此浏览器不支持防自动锁屏，请保持页面在前台并留意屏幕。': 'This browser cannot keep the screen awake. Keep this page visible and watch for screen locking.',
-  '已允许自动锁屏。切换 App 或锁屏后，传输可能暂停。': 'Automatic screen locking is allowed. Switching apps or locking may pause transfers.',
-  '暂未保持屏幕常亮，请保持页面在前台；返回后会尝试恢复传输。': 'Screen wake lock is unavailable. Keep this page visible; returning will attempt to resume the transfer.',
+  '已保持屏幕常亮': 'Screen stays awake',
+  '正在开启常亮…': 'Turning on…',
+  '此浏览器不支持常亮': 'Keep-awake unavailable in this browser',
+  '已允许自动锁屏': 'Automatic screen locking allowed',
+  '常亮暂不可用，请保持页面在前台。': 'Keep this page visible; screen wake lock is unavailable.',
   '对方已切到后台。若传输暂停，会保留进度等待返回（最多 10 分钟）。': 'The other device is in the background. If paused, progress is held while waiting for it to return (up to 10 minutes).',
   '对方已切到后台，等待返回': 'Other device is in the background; waiting for its return',
   '后台状态信息无效': 'Invalid background status',
