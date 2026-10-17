@@ -15,14 +15,19 @@ test('one selection entry appends files and a nested folder; Chromium also verif
   try {
     await mkdir(join(root, 'sub')); await writeFile(join(root, 'folder.txt'), contents.get('folder.txt')!); await writeFile(join(root, 'sub/nested.txt'), contents.get('nested.txt')!);
     await page.goto('./');
+    await page.evaluate(() => {
+      (window as any).__folderInputEvents = 0;
+      document.getElementById('folder-input')!.addEventListener('input', () => { (window as any).__folderInputEvents++; });
+    });
     await page.locator('#drop-zone').click();
     const first = page.waitForEvent('filechooser'); await page.locator('#choose-files').click();
     const picker = await first; expect(picker.isMultiple()).toBe(true);
     await picker.setFiles(['single.txt', 'second.txt'].map(name => ({ name, mimeType: 'text/plain', buffer: Buffer.from(contents.get(name)!) })));
     await expect(page.locator('#source-dialog')).toBeHidden(); await expect(page.locator('#files .file-row')).toHaveCount(2);
     await page.locator('#drop-zone').click();
-    const folder = page.waitForEvent('filechooser'); await page.locator('#choose-folder').click(); await (await folder).setFiles(root);
+    const folder = page.waitForEvent('filechooser'); await page.locator('#choose-folder').click(); await (await folder).setFiles(root, { timeout: 15000 });
     await expect(page.locator('#files .file-row')).toHaveCount(4);
+    expect(await page.evaluate(() => (window as any).__folderInputEvents)).toBe(1);
     await page.locator('#drop-zone').click();
     const last = page.waitForEvent('filechooser'); await page.locator('#choose-files').click();
     await (await last).setFiles({ name: 'last.txt', mimeType: 'text/plain', buffer: Buffer.from(contents.get('last.txt')!) });

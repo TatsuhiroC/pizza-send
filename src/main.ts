@@ -835,8 +835,13 @@ const outsideSource = (event: MouseEvent) => {
 sourceDialog.addEventListener('pointerdown', event => { sourceOutside = outsideSource(event); });
 sourceDialog.addEventListener('click', event => { if (sourceOutside && outsideSource(event)) sourceDialog.close(); sourceOutside = false; });
 sourceDialog.addEventListener('close', () => { sourceOutside = false; if (!busy && !$('send-view').hidden) $('drop-zone').focus({ preventScroll: true }); });
-$('choose-files').onclick = () => { sourceDialog.close(); $<HTMLInputElement>('file-input').click(); };
-$<HTMLInputElement>('file-input').onchange = event => { const input = event.target as HTMLInputElement; select(Array.from(input.files || [])); input.value = ''; };
+// Clear before opening, never inside change: WebKit can still be delivering
+// the native directory input event after change. Clearing there can swallow it.
+function chooseSource(id: 'file-input' | 'folder-input') {
+  sourceDialog.close(); const input = $<HTMLInputElement>(id); input.value = ''; input.click();
+}
+$('choose-files').onclick = () => chooseSource('file-input');
+$<HTMLInputElement>('file-input').onchange = event => { const input = event.target as HTMLInputElement; select(Array.from(input.files || [])); };
 $('files').onclick = event => { const button = (event.target as HTMLElement).closest<HTMLElement>('.remove-file'); if (button && !busy) { selectionRevision++; files.splice(Number(button.dataset.index), 1); renderFiles(); } };
 for (const event of ['dragenter', 'dragover']) $('drop-zone').addEventListener(event, e => { e.preventDefault(); if (!busy) $('drop-zone').classList.add('dragging'); });
 $('drop-zone').addEventListener('dragleave', () => $('drop-zone').classList.remove('dragging'));
@@ -853,11 +858,10 @@ $('drop-zone').addEventListener('drop', event => {
   });
 });
 $('choose-folder').hidden = !('webkitdirectory' in $<HTMLInputElement>('folder-input'));
-$('choose-folder').onclick = () => { sourceDialog.close(); $<HTMLInputElement>('folder-input').click(); };
+$('choose-folder').onclick = () => chooseSource('folder-input');
 $<HTMLInputElement>('folder-input').onchange = event => {
   const input = event.target as HTMLInputElement, imported = Array.from(input.files || []);
   if (imported.length) select(imported);
-  input.value = '';
 };
 window.addEventListener('dragover', event => event.preventDefault());
 window.addEventListener('drop', event => event.preventDefault());
