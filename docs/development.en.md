@@ -26,6 +26,8 @@ Enter `http://127.0.0.1:8787` in the webpage's connection settings. Leave it emp
 
 ## Run checks
 
+The full test suite also requires Python 3 to verify folder ZIP contents and checksums with an independent standard-library reader. The application and build do not require Python.
+
 ```sh
 npm run build
 npx playwright install --with-deps chromium webkit

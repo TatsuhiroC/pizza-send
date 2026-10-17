@@ -26,39 +26,59 @@ export async function checkSources(files: File[], active: () => boolean) {
   }
 }
 
-// A directory entry's own byte size is not the size of its contents. Enumerate
-// all readEntries batches; Chromium can return at most 100 entries per batch.
-export async function droppedFiles(data: DataTransfer): Promise<File[]> {
+export type FolderEntry = { path: string; file?: File };
+export type DroppedSource = { kind: 'file'; file: File } | { kind: 'folder'; name: string; entries: FolderEntry[] };
+export function validSourceSegment(name: string) {
+  return typeof name === 'string' && !!name && name !== '.' && name !== '..' && name.length <= 255 && !/[\\/:\u0000-\u001f\u007f]/.test(name);
+}
+
+// Capture native entries while the drop event is still readable. Keep explicit
+// directory entries (including empty directories) and the selected root name.
+export async function droppedSources(data: DataTransfer): Promise<DroppedSource[]> {
   const items = Array.from(data.items || []).filter(item => item.kind === 'file');
   const entries = items.map(item => item.webkitGetAsEntry?.());
   const fallbacks = items.map(item => item.getAsFile?.());
-  if (!entries.some(Boolean)) return Array.from(data.files);
-  const files: File[] = [];
-  let visited = 0;
-  const visit = async (entry: FileSystemEntry, depth = 0): Promise<void> => {
-    if (++visited > 1000 || depth > 32) throw Error('一次最多选择 100 个文件');
+  const plain = Array.from(data.files);
+  if (!entries.some(Boolean)) return plain.map(file => ({ kind: 'file', file }));
+  const sources: DroppedSource[] = [];
+  let visited = 0, files = 0;
+  const visit = async (entry: FileSystemEntry, output: FolderEntry[], parent = '', depth = 0): Promise<void> => {
+    if (++visited > 1000 || depth > 32) throw Error('文件夹层级或项目过多，请分批分享。');
+    if (!validSourceSegment(entry.name)) throw Error('文件夹中有不支持的名称，请重命名后重试。');
+    const path = parent + entry.name;
+    if (new TextEncoder().encode(path).length > 4096) throw Error('文件夹路径过长，请缩短后重试。');
     if (entry.isFile) {
-      if (files.length >= 100) throw Error('一次最多选择 100 个文件');
-      files.push(await new Promise<File>((resolve, reject) => (entry as FileSystemFileEntry).file(resolve, reject)));
+      if (++files > 100) throw Error('一次最多选择 100 个文件');
+      output.push({ path, file: await new Promise<File>((resolve, reject) => (entry as FileSystemFileEntry).file(resolve, reject)) });
     } else if (entry.isDirectory) {
+      output.push({ path: path + '/' });
       const reader = (entry as FileSystemDirectoryEntry).createReader();
       while (true) {
         const batch = await new Promise<FileSystemEntry[]>((resolve, reject) => reader.readEntries(resolve, reject));
         if (!batch.length) break;
-        for (const child of batch) await visit(child, depth + 1);
+        for (const child of batch) await visit(child, output, path + '/', depth + 1);
       }
-    }
+    } else throw Error('无法读取所选内容，请重新选择。');
   };
   for (let i = 0; i < entries.length; i++) {
     const entry = entries[i];
-    if (entry) await visit(entry);
+    if (entry?.isDirectory) {
+      const output: FolderEntry[] = [];
+      await visit(entry, output);
+      sources.push({ kind: 'folder', name: entry.name, entries: output });
+    }
+    else if (entry) {
+      const output: FolderEntry[] = [];
+      await visit(entry, output);
+      sources.push({ kind: 'file', file: output[0].file! });
+    }
     else {
       const file = fallbacks[i];
       if (file) {
-        if (files.length >= 100) throw Error('一次最多选择 100 个文件');
-        files.push(file);
+        if (++files > 100) throw Error('一次最多选择 100 个文件');
+        sources.push({ kind: 'file', file });
       }
     }
   }
-  return files;
+  return sources;
 }

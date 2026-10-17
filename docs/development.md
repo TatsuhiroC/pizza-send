@@ -26,6 +26,8 @@ npm run signal:dev
 
 ## 运行检查
 
+完整检查还需要 Python 3，用标准库独立核对文件夹 ZIP 的内容与校验值；应用运行和构建不依赖 Python。
+
 ```sh
 npm run build
 npx playwright install --with-deps chromium webkit
