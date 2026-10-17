@@ -1,3 +1,5 @@
+import { cameraConstraints } from './camera-choice';
+
 type Decoder = typeof import('jsqr').default;
 let decoder: Promise<Decoder> | undefined;
 const loadDecoder = () => decoder ||= import('jsqr').then(module => module.default);
@@ -12,29 +14,46 @@ export function cameraError(error: unknown): string {
 
 export class CameraScanner {
   private generation = 0;
+  private active = false;
+  private playback?: AbortController;
   private stream?: MediaStream;
   private timer?: ReturnType<typeof setTimeout>;
   private canvas = document.createElement('canvas');
   constructor(private video: HTMLVideoElement, private found: (text: string) => Promise<boolean>, private error: (text: string) => void) {}
   stop() {
-    this.generation++; clearTimeout(this.timer);
+    this.active = false; this.generation++; clearTimeout(this.timer);
+    this.playback?.abort(); this.playback = undefined;
     delete this.video.dataset.ready;
     this.stream?.getTracks().forEach(track => track.stop()); this.stream = undefined;
     this.video.pause(); this.video.srcObject = null;
   }
   async start() {
-    this.stop();
+    // A second click while permission/playback is pending must not reopen the camera.
+    if (this.active) return;
+    this.stop(); this.active = true;
     const generation = this.generation;
-    if (!navigator.mediaDevices?.getUserMedia) { this.error('这个浏览器无法使用相机，请从图片识别或粘贴链接。'); return; }
+    if (!navigator.mediaDevices?.getUserMedia) { this.stop(); this.error('这个浏览器无法使用相机，请从图片识别或粘贴链接。'); return; }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: {
-        facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }
-      } });
+      const video = await cameraConstraints(navigator.mediaDevices);
+      if (generation !== this.generation) return;
+      // Choose once, before capture. Do not open a default camera then replace
+      // it after permission: that produces the exact visible lens jump we avoid.
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video });
       // Permission may finish after the user has closed the dialog.
       if (generation !== this.generation) { stream.getTracks().forEach(track => track.stop()); return; }
-      this.stream = stream; this.video.srcObject = stream;
+      this.stream = stream;
       this.video.muted = true; this.video.playsInline = true;
-      await this.video.play();
+      const playback = this.playback = new AbortController();
+      const ready = () => {
+        if (generation === this.generation && this.video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) this.video.dataset.ready = 'true';
+      };
+      // Preview readiness is independent of downloading/initializing jsQR.
+      // Keep the original live video; no delayed reveal, still or canvas preview.
+      this.video.addEventListener('loadeddata', ready, { signal: playback.signal });
+      this.video.addEventListener('playing', ready, { signal: playback.signal });
+      this.video.srcObject = stream;
+      await this.video.play(); ready();
+      if (generation !== this.generation) return;
       const decode = await loadDecoder();
       const frame = async () => {
         if (generation !== this.generation) return;

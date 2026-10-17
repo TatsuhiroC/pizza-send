@@ -22,7 +22,7 @@ test('a late accepted QR result cannot stop a newer camera session', async () =>
   const firstDetected = new Promise<void>(resolve => { detected = resolve; });
   const canvas = { width: 0, height: 0, getContext: () => ({ drawImage() {}, getImageData: () => ({ data: pixels, width, height: width }) }) };
   const video = { dataset: {}, readyState: 2, videoWidth: width, videoHeight: width, muted: false, playsInline: false, srcObject: null,
-    play: async () => {}, pause() {} } as unknown as HTMLVideoElement;
+    play: async () => {}, pause() {}, addEventListener() {} } as unknown as HTMLVideoElement;
   Object.defineProperty(globalThis, 'document', { configurable: true, value: { createElement: () => canvas } });
   Object.defineProperty(globalThis, 'HTMLMediaElement', { configurable: true, value: { HAVE_CURRENT_DATA: 2 } });
   Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { mediaDevices: { getUserMedia: async () => {
