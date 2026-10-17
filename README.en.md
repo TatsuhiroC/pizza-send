@@ -23,11 +23,11 @@ PizzaSend is an open-source file transfer tool for your browser. Move photos, vi
   </tbody>
 </table>
 
-Share files or folders. Pair by QR. Recover after network changes. On slow links, compression is suggested when it should save time.
+Share files. Drop a folder on a computer to package it as a ZIP. Pair by QR. Recover after network changes. On slow links, compression is suggested when it should save time.
 
 ## Three steps
 
-1. **Pick your files.** Add files or folders, up to 100 files per share.
+1. **Pick your files.** Click to choose files, or drop a folder on a computer. Folders become ZIPs; extract them after receiving.
 2. **Pass it on.** Send the link or let the other person scan the QR code.
 3. **Save to the device.** They accept the transfer, then follow the save prompt.
 

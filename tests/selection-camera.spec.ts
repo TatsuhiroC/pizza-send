@@ -1,68 +1,60 @@
 import { test, expect } from './fixtures';
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 
-test('one selection entry appends files and a nested folder; Chromium also verifies transferred originals', async ({ page, context, browserName }) => {
+test('clicking the upload area opens the multiple-file picker directly and appends originals', async ({ page, context, browserName }) => {
   await context.addInitScript(() => {
     localStorage.setItem('pizza-send-signal', 'http://127.0.0.1:8787'); localStorage.setItem('pizza-send-stun', '');
     Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true });
     void navigator.mediaDevices.getUserMedia({ audio: true }).then(s => s.getTracks().forEach(t => t.stop()));
   });
-  const root = await mkdtemp(join(tmpdir(), 'pizza-selection-'));
-  const contents = new Map([['single.txt', 'first'], ['second.txt', 'second'], ['folder.txt', 'third'], ['nested.txt', 'fourth'], ['last.txt', 'fifth']]);
-  try {
-    await mkdir(join(root, 'sub')); await writeFile(join(root, 'folder.txt'), contents.get('folder.txt')!); await writeFile(join(root, 'sub/nested.txt'), contents.get('nested.txt')!);
-    await page.goto('./');
-    await page.evaluate(() => {
-      (window as any).__folderInputEvents = 0;
-      document.getElementById('folder-input')!.addEventListener('input', () => { (window as any).__folderInputEvents++; });
-    });
-    await page.locator('#drop-zone').click();
-    const first = page.waitForEvent('filechooser'); await page.locator('#choose-files').click();
-    const picker = await first; expect(picker.isMultiple()).toBe(true);
-    await picker.setFiles(['single.txt', 'second.txt'].map(name => ({ name, mimeType: 'text/plain', buffer: Buffer.from(contents.get(name)!) })));
-    await expect(page.locator('#source-dialog')).toBeHidden(); await expect(page.locator('#files .file-row')).toHaveCount(2);
-    await page.locator('#drop-zone').click();
-    const folder = page.waitForEvent('filechooser'); await page.locator('#choose-folder').click(); await (await folder).setFiles(root, { timeout: 15000 });
-    await expect(page.locator('#files .file-row')).toHaveCount(4);
-    expect(await page.evaluate(() => (window as any).__folderInputEvents)).toBe(1);
-    await page.locator('#drop-zone').click();
-    const last = page.waitForEvent('filechooser'); await page.locator('#choose-files').click();
-    await (await last).setFiles({ name: 'last.txt', mimeType: 'text/plain', buffer: Buffer.from(contents.get('last.txt')!) });
-    await expect(page.locator('#files .file-row')).toHaveCount(5);
-    // The native selection flow is checked in both engines; real WebRTC here is Chromium-only.
-    if (browserName === 'webkit') return;
-    await page.locator('#start-send').click(); await expect(page.locator('#share-box')).toBeVisible();
-    const receiver = await context.newPage(); await receiver.goto(await page.locator('#share-link').inputValue()); await receiver.locator('#accept-files').click();
-    await expect(receiver.locator('#status')).toHaveText('文件已收到，请保存到设备');
-    const saved = new Set<string>();
-    for (const button of await receiver.locator('.download-file').all()) {
-      const download = receiver.waitForEvent('download'); await button.click(); const file = await download, name = file.suggestedFilename();
-      expect(contents.has(name)).toBe(true); expect(saved.has(name)).toBe(false); saved.add(name);
-      const hash = (buffer: Buffer) => createHash('sha256').update(buffer).digest('hex');
-      expect(hash(await readFile((await file.path())!))).toBe(hash(Buffer.from(contents.get(name)!)));
-    }
-    expect(saved.size).toBe(5); await page.locator('#cancel').click();
-  } finally { await rm(root, { recursive: true, force: true }); }
+  await page.goto('./');
+  const contents = new Map([['single.txt', 'first'], ['second.txt', 'second'], ['last.txt', 'third']]);
+  const first = page.waitForEvent('filechooser'); await page.locator('#drop-zone').click();
+  const picker = await first; expect(picker.isMultiple()).toBe(true);
+  await picker.setFiles(['single.txt', 'second.txt'].map(name => ({ name, mimeType: 'text/plain', buffer: Buffer.from(contents.get(name)!) })));
+  await expect(page.locator('#files .file-row')).toHaveCount(2);
+  await expect(page.locator('#source-dialog, #folder-input, #choose-files, #choose-folder')).toHaveCount(0);
+  const last = page.waitForEvent('filechooser'); await page.locator('#drop-zone').click();
+  await (await last).setFiles({ name: 'last.txt', mimeType: 'text/plain', buffer: Buffer.from(contents.get('last.txt')!) });
+  await expect(page.locator('#files .file-row')).toHaveCount(3);
+  if (browserName === 'webkit') return;
+  await page.locator('#start-send').click(); await expect(page.locator('#share-box')).toBeVisible();
+  const receiver = await context.newPage(); await receiver.goto(await page.locator('#share-link').inputValue()); await receiver.locator('#accept-files').click();
+  await expect(receiver.locator('#status')).toHaveText('文件已收到，请保存到设备');
+  const saved = new Set<string>();
+  for (const button of await receiver.locator('.download-file').all()) {
+    const download = receiver.waitForEvent('download'); await button.click(); const file = await download, name = file.suggestedFilename();
+    expect(contents.has(name)).toBe(true); expect(saved.has(name)).toBe(false); saved.add(name);
+    const hash = (buffer: Buffer) => createHash('sha256').update(buffer).digest('hex');
+    expect(hash(await readFile((await file.path())!))).toBe(hash(Buffer.from(contents.get(name)!)));
+  }
+  expect(saved.size).toBe(3); await page.locator('#cancel').click();
 });
 
-test('selection sheet fits a narrow phone, translates, dismisses outside and preserves the selection', async ({ page }, info) => {
+test('direct file entry fits a narrow phone, translates and allows selecting the same file again', async ({ page }, info) => {
   await page.setViewportSize({ width: 320, height: 740 }); await page.goto('./');
-  await page.locator('#file-input').setInputFiles({ name: 'keep.txt', mimeType: 'text/plain', buffer: Buffer.from('keep') });
-  await page.locator('#drop-zone').click();
-  await expect(page.locator('#choose-files')).toBeVisible(); await expect(page.locator('#choose-folder')).toBeVisible();
-  const bounds = (await page.locator('#source-dialog').boundingBox())!;
-  expect(bounds.x).toBeGreaterThanOrEqual(0); expect(bounds.x + bounds.width).toBeLessThanOrEqual(320);
-  await page.screenshot({ path: info.outputPath('selection-mobile.png') });
-  await page.mouse.click(2, 2); await expect(page.locator('#source-dialog')).toBeHidden();
-  await expect(page.locator('#files strong')).toHaveText('keep.txt'); await expect(page.locator('#drop-zone')).toBeFocused();
-  await page.locator('#language-toggle').click(); await page.locator('#drop-zone').click();
-  await expect(page.locator('#source-heading')).toHaveText('Add something to share');
-  await expect(page.locator('#choose-files')).toContainText('Choose files'); await expect(page.locator('#choose-folder')).toContainText('Choose a folder');
+  const original = { name: 'keep.txt', mimeType: 'text/plain', buffer: Buffer.from('keep') };
+  for (let count = 1; count <= 2; count++) {
+    const choosing = page.waitForEvent('filechooser'); await page.locator('#drop-zone').click();
+    await (await choosing).setFiles(original);
+    await expect(page.locator('#files .file-row')).toHaveCount(count);
+  }
+  await expect(page.locator('#drop-zone')).not.toHaveAttribute('aria-haspopup', 'dialog');
+  await page.locator('#language-toggle').click();
+  await expect(page.locator('#drop-zone')).toContainText('click to choose');
+  await expect(page.locator('#folder-note')).toContainText('Extract it after receiving');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.keyboard.press('Escape'); await expect(page.locator('#source-dialog')).toBeHidden(); await expect(page.locator('#files strong')).toHaveText('keep.txt');
+  await page.screenshot({ path: info.outputPath('direct-selection-mobile.png') });
+  await expect(page.locator('#clear-files')).toHaveText('Clear selected files');
+  const bounds = (await page.locator('#clear-files').boundingBox())!;
+  expect(bounds.x).toBeGreaterThanOrEqual(0); expect(bounds.x + bounds.width).toBeLessThanOrEqual(320);
+  await page.locator('#clear-files').click();
+  await expect(page.locator('#files .file-row')).toHaveCount(0);
+  await expect(page.locator('#clear-files')).toBeHidden(); await expect(page.locator('#start-send')).toBeDisabled();
+  expect(await page.locator('#file-input').inputValue()).toBe('');
+  const again = page.waitForEvent('filechooser'); await page.locator('#drop-zone').click(); await (await again).setFiles(original);
+  await expect(page.locator('#files strong')).toHaveText('keep.txt');
 });
 
 test('camera position survives permission errors, retry controls, translation and viewport height changes', async ({ page }) => {
