@@ -12,6 +12,8 @@
 
 ## Good things, sent directly
 
+PizzaSend is an open-source file transfer tool for your browser. Move photos, videos and documents between a phone and a computer, or share the same files with friends. A link or QR code connects you, without uploading to cloud storage first.
+
 <table width="100%">
   <thead><tr><th align="left">Feature</th><th align="left">What you get</th></tr></thead>
   <tbody>
@@ -28,6 +30,12 @@ Share files or folders. Pair by QR. Recover after network changes. On slow links
 1. **Pick your files.** Add files or folders, up to 100 files per share.
 2. **Pass it on.** Send the link or let the other person scan the QR code.
 3. **Save to the device.** They accept the transfer, then follow the save prompt.
+
+## Behind the transfer
+
+- **Lightweight pairing, direct delivery.** Cloudflare helps peers connect, with connection information encrypted in the browser using AES-256-GCM. Files travel over a WebRTC DataChannel protected by DTLS, without being stored on a server.
+- **Write as you receive.** Browsers with disk support save chunks and verify them with incremental SHA-256, reducing memory pressure for large files. Receivers prefer WebAssembly for hashing, with an automatic JavaScript fallback.
+- **Adapt to the connection.** Receiver feedback adjusts the sending window; automatic pairing can resume from confirmed progress after a disconnect. Slow-link compression estimates include compression and decompression time. It is offered only when worthwhile and restores the original files on receipt.
 
 ## Before you send
 
