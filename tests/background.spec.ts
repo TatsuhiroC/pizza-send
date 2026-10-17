@@ -159,7 +159,7 @@ async function transferFixture(context: BrowserContext) {
     } as any;
     const read = Blob.prototype.arrayBuffer;
     Blob.prototype.arrayBuffer = async function() {
-      if (this.size <= 32768) { while (state.__hold) await new Promise(resolve => setTimeout(resolve, 20)); await new Promise(resolve => setTimeout(resolve, 2)); }
+      if (this.size <= 1048576) { while (state.__hold) await new Promise(resolve => setTimeout(resolve, 20)); await new Promise(resolve => setTimeout(resolve, 2 * Math.ceil(this.size / 32768))); }
       return read.call(this);
     };
     const timeout = window.setTimeout.bind(window), clear = window.clearTimeout.bind(window);

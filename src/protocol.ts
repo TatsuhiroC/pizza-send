@@ -1,7 +1,10 @@
 import { retryPairingRequest, ticketURL } from './security';
 import { readSource, SourceReadError } from './source-files';
 import { sha256 } from '@noble/hashes/sha2.js';
+import { createFileHash, type FileHash } from './file-hash';
 import { downloadType } from './download';
+import { TransferFlow } from './transfer-flow';
+import { COMPRESSION, BLOCK_BYTES, SAMPLE_BYTES, SlowLink, compressionEstimate, sampleCompression, supportsCompression, gzip, gunzip, type CompressionSample, type CompressionStatus } from './compression';
 import { createTemporarySession, beginTemporaryFile, writeTemporaryFile, finishTemporaryFile, completeTemporarySession, discardTemporaryPartial } from './received-storage';
 
 export type FileInfo = { id: number; name: string; size: number; type: string };
@@ -10,6 +13,7 @@ export type TransferEvent = { type: string; data?: any };
 type PickerWindow = Window & {
   showSaveFilePicker?: (options: any) => Promise<FileSystemFileHandle>;
 };
+const ACK_BYTES = 256 * 1024;
 const hex = (b: Uint8Array) => Array.from(b, n => n.toString(16).padStart(2, '0')).join('');
 export const randomToken = () => hex(crypto.getRandomValues(new Uint8Array(32)));
 export const bytes = (n: number) => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : n < 1073741824 ? (n / 1048576).toFixed(1) + ' MB' : (n / 1073741824).toFixed(2) + ' GB';
@@ -132,9 +136,11 @@ export class Transfer {
     this.localHidden = document.hidden;
     this.localBackgroundUntil = this.localHidden ? Date.now() + 10 * 60 * 1000 : 0;
     this.activityRevision++;
+    this.resetCompressionAdvice();
     this.reportVisibility();
     if (!this.localHidden) {
       this.lastSeen = Date.now();
+      if (this.role === 'sender') this.flow.reset(this.acknowledged);
       if (this.recovering) this.armRecoveryTimeout();
       if (this.connectTimer && this.channel?.readyState !== 'open') this.startTimeout();
       if (this.opened && (this.channel?.readyState !== 'open' || ['failed', 'disconnected', 'closed'].includes(this.pc.connectionState))) this.requestRecovery();
@@ -167,7 +173,7 @@ export class Transfer {
   private accepted = false;
   private accepting = false;
   private temporary?: string;
-  private incoming?: { info: FileInfo; received: number; hash: ReturnType<typeof sha256.create>; parts: Uint8Array<ArrayBuffer>[]; writer?: FileSystemWritableFileStream; ack: number };
+  private incoming?: { info: FileInfo; received: number; hash: FileHash; parts: Uint8Array<ArrayBuffer>[]; writer?: FileSystemWritableFileStream };
   private handles: FileSystemFileHandle[] = [];
   private receivedFiles = 0;
   private sent = 0;
@@ -179,6 +185,30 @@ export class Transfer {
   private queue = Promise.resolve();
   private receivingQueuedBytes = 0;
   private receivingQueuedMessages = 0;
+  private pendingBinary: ArrayBuffer[] = [];
+  private pendingBinaryBytes = 0;
+  private binaryTimer?: ReturnType<typeof setTimeout>;
+  private flow = new TransferFlow();
+  private compressionSupport = false;
+  private compressionFile = -1;
+  private compressionWireSpeed = 0;
+  private compressionDecodeBps = 0;
+  private sendingFile = -1;
+  private sendingOffset = 0;
+  private compressionStatus: CompressionStatus = { active: false };
+  private slowLink = new SlowLink();
+  private sampledFiles = new Set<number>();
+  private dismissedCompressionFiles = new Set<number>();
+  private probing = false;
+  private probeAt = -Infinity;
+  private receivedProbeAt = -Infinity;
+  private probeSequence = 0;
+  private probe?: { id: number; file: number; sample: CompressionSample; decompressBps?: number; basePerByte?: number; generation: number };
+  private encodedBlock?: { size: number; raw: number; received: number; chunks: Uint8Array<ArrayBuffer>[] };
+  private readBytes = 0;
+  private readMilliseconds = 0;
+  private writeBytes = 0;
+  private writeMilliseconds = 0;
   private connectTimer?: ReturnType<typeof setTimeout>;
   private disconnectedTimer?: ReturnType<typeof setTimeout>;
   private fileConfirmed = -1;
@@ -224,6 +254,7 @@ export class Transfer {
     if (this.stopped || this.completed) return;
     if (!this.recovering) {
       this.recovering = true;
+      this.resetCompressionAdvice();
       this.emit({ type: 'recovering' });
       this.armRecoveryTimeout();
     }
@@ -242,7 +273,10 @@ export class Transfer {
     this.pc.onconnectionstatechange = null; this.pc.ondatachannel = null; this.pc.onicecandidate = null;
     channel?.close(); this.pc.close(); this.channel = undefined; this.wake();
     // Finish writes already received on the old connection before reporting the offset.
+    this.flushBinary(this.generation - 1);
     await this.queue;
+    this.encodedBlock = undefined;
+    this.resetCompressionAdvice();
     if (this.stopped) throw new TransportInterrupted();
     this.pc = this.createPeer();
     if (this.role === 'sender') this.attach(this.pc.createDataChannel('pizza-send-v2', { ordered: true }));
@@ -274,7 +308,7 @@ export class Transfer {
       this.lastSeen = Date.now();
       if (!this.opened) this.emit({ type: 'connected' });
       this.opened = true;
-      if (this.role === 'sender') this.control({ type: 'manifest', files: this.manifest, version: 2, backgroundSupport: true });
+      if (this.role === 'sender') this.control({ type: 'manifest', files: this.manifest, version: 2, backgroundSupport: true, compression: supportsCompression() ? COMPRESSION : undefined });
       this.reportVisibility();
       clearInterval(this.heartbeat);
       this.heartbeat = setInterval(() => {
@@ -283,6 +317,7 @@ export class Transfer {
         try { this.control({ type: 'ping' }); } catch { this.requestRecovery(); }
       }, 2000);
     };
+    let queuedBinaryBytes = this.received, lastBinaryAt = 0;
     channel.onmessage = event => {
       if (this.stopped || generation !== this.generation) return;
       this.lastSeen = Date.now();
@@ -290,6 +325,21 @@ export class Transfer {
       const size = binary ? event.data.byteLength : event.data.length * 2;
       if ((binary ? size : event.data.length) > 65536 || this.receivingQueuedBytes + size > 8 * 1048576 || this.receivingQueuedMessages >= 4096) { this.fail('接收队列超出安全限制'); return; }
       this.receivingQueuedBytes += size; this.receivingQueuedMessages++;
+      if (binary) {
+        const now = performance.now(), sparse = now - lastBinaryAt >= 1;
+        lastBinaryAt = now;
+        if (this.pendingBinaryBytes + size > 256 * 1024) this.flushBinary(generation);
+        // Timed short writes must not push each next receipt farther away.
+        // Align batches with cumulative receipt boundaries; handle() still
+        // acknowledges only after the actual write succeeds.
+        const before = Math.floor(queuedBinaryBytes / ACK_BYTES);
+        queuedBinaryBytes += size;
+        this.pendingBinary.push(event.data); this.pendingBinaryBytes += size;
+        if (sparse || Math.floor(queuedBinaryBytes / ACK_BYTES) > before || this.pendingBinaryBytes >= 256 * 1024) this.flushBinary(generation);
+        else if (!this.binaryTimer) this.binaryTimer = setTimeout(() => this.flushBinary(generation), 4);
+        return;
+      }
+      this.flushBinary(generation);
       this.queue = this.queue.then(() => this.handle(event.data, generation)).catch(e => this.fail(e.message)).finally(() => {
         this.receivingQueuedBytes -= size; this.receivingQueuedMessages--;
       });
@@ -313,7 +363,24 @@ export class Transfer {
     }
   }
   private wake() { for (const resolve of this.waiters) resolve(); this.waiters.clear(); }
-  private async waitFor(predicate: () => boolean, generation: number, timeout = 60000) {
+  private flushBinary(generation: number) {
+    clearTimeout(this.binaryTimer); this.binaryTimer = undefined;
+    if (!this.pendingBinary.length) return;
+    const chunks = this.pendingBinary, size = this.pendingBinaryBytes;
+    this.pendingBinary = []; this.pendingBinaryBytes = 0;
+    this.queue = this.queue.then(() => {
+      if (this.stopped) return;
+      const buffer = chunks.length === 1 ? chunks[0] : new ArrayBuffer(size);
+      if (chunks.length > 1) {
+        const merged = new Uint8Array(buffer); let offset = 0;
+        for (const chunk of chunks) { merged.set(new Uint8Array(chunk), offset); offset += chunk.byteLength; }
+      }
+      return this.handle(buffer, generation);
+    }).catch(e => this.fail(e.message)).finally(() => {
+      this.receivingQueuedBytes -= size; this.receivingQueuedMessages -= chunks.length;
+    });
+  }
+  private async waitFor(predicate: () => boolean, generation: number, timeout = 60000, poll = () => 250) {
     let deadline = Date.now() + timeout;
     let activity = this.activityRevision;
     while (true) {
@@ -323,7 +390,7 @@ export class Transfer {
       if (this.recovering || this.waitingInBackground || activity !== this.activityRevision) { deadline = Date.now() + timeout; activity = this.activityRevision; }
       else if (Date.now() > deadline) throw Error('对方长时间没有响应，请重新传输');
       await new Promise<void>(resolve => {
-        const timer = setTimeout(() => { this.waiters.delete(done); resolve(); }, 250);
+        const timer = setTimeout(() => { this.waiters.delete(done); resolve(); }, this.recovering ? 250 : poll());
         const done = () => { clearTimeout(timer); resolve(); };
         this.waiters.add(done);
       });
@@ -338,23 +405,97 @@ export class Transfer {
     const elapsed = Math.max((now - this.started) / 1000, .001);
     this.emit({ type: 'progress', data: { transferred, total, seconds: elapsed, speed: transferred / elapsed } });
   }
+  private setCompressionStatus(status: CompressionStatus, repeat = false) {
+    const changed = JSON.stringify(status) !== JSON.stringify(this.compressionStatus);
+    if (!changed && !repeat) return;
+    if (changed) { this.compressionStatus = status; this.emit({ type: 'compression', data: status }); }
+    if (this.role === 'sender' && this.compressionSupport) this.reply({ type: 'compression-advice', ...status }, this.generation);
+  }
+  private resetCompressionAdvice() {
+    this.slowLink.reset(this.acknowledged);
+    // An interrupted assessment must not suppress this file forever. A user's
+    // explicit refusal, however, survives recovery and visibility changes.
+    if (this.role === 'sender' && this.sendingFile >= 0 && this.compressionFile !== this.sendingFile && !this.dismissedCompressionFiles.has(this.sendingFile)) this.sampledFiles.delete(this.sendingFile);
+    this.probe = undefined;
+    this.setCompressionStatus({ active: this.role === 'receiver' ? this.compressionStatus.active : this.compressionFile === this.sendingFile && this.compressionFile >= 0 });
+  }
+  private compressionSpeed() {
+    return !this.recovering && !this.localHidden && !this.peerHidden && this.accepted && !this.stopped && !this.completed ? this.slowLink.speed() : undefined;
+  }
+  private adviseCompression() {
+    const speed = this.compressionSpeed(), file = this.files[this.sendingFile];
+    if (this.compressionFile === this.sendingFile && this.compressionFile >= 0) return;
+    const remaining = file ? file.size - this.sendingOffset : 0;
+    if (!this.compressionSupport || this.dismissedCompressionFiles.has(this.sendingFile) || !speed || remaining < 8 * 1048576) { this.setCompressionStatus({ active: false }); return; }
+    if (this.probe?.file === this.sendingFile && this.probe.decompressBps) {
+      const sample = this.probe.sample, estimate = compressionEstimate(remaining, speed, sample.ratio, sample.compressBps, this.probe.decompressBps, this.probe.basePerByte);
+      this.setCompressionStatus(estimate ? { active: false, offer: { file: this.sendingFile, savedSeconds: Math.floor(estimate.savedSeconds), percent: estimate.percent } } : { active: false });
+    } else if (!this.probing && !this.sampledFiles.has(this.sendingFile) && performance.now() - this.probeAt >= 15000) {
+      this.probing = true; this.probeAt = performance.now();
+      const id = this.sendingFile, generation = this.generation;
+      this.sampledFiles.add(id);
+      void sampleCompression(file, this.sendingOffset).then(sample => {
+        if (!sample || this.stopped || this.completed || generation !== this.generation || id !== this.sendingFile || !this.compressionSpeed()) return;
+        // Source I/O or receiver writes, rather than the wire, can be the bottleneck.
+        if (this.readBytes * 1000 / Math.max(1, this.readMilliseconds) < speed * 2) return;
+        const probe = this.probe = { id: ++this.probeSequence, file: id, sample, generation };
+        this.reply({ type: 'compression-probe', id: probe.id, data: toBase64(new Uint8Array(sample.encoded)) }, generation);
+      }).catch(() => { /* Optional sampling must not interrupt the original transfer. */ }).finally(() => { this.probing = false; });
+    }
+  }
+  enableCompression() {
+    const offer = this.compressionStatus.offer;
+    if (!offer || this.stopped || this.completed || this.recovering || this.localHidden || this.peerHidden) return false;
+    if (this.role === 'receiver') { this.reply({ type: 'compression-enable', file: offer.file }, this.generation); return true; }
+    this.adviseCompression();
+    if (!this.compressionStatus.offer || offer.file !== this.sendingFile) return false;
+    this.compressionFile = offer.file;
+    this.compressionWireSpeed = 1 / (1 / this.compressionSpeed()! - this.probe!.basePerByte!);
+    this.compressionDecodeBps = this.probe!.decompressBps!;
+    this.setCompressionStatus({ active: true });
+    return true;
+  }
+  dismissCompression() {
+    const offer = this.compressionStatus.offer;
+    if (!offer) return;
+    this.dismissedCompressionFiles.add(offer.file);
+    if (this.role === 'receiver') this.reply({ type: 'compression-dismiss', file: offer.file }, this.generation);
+    else this.probe = undefined;
+    this.setCompressionStatus({ active: false });
+  }
+  private async writeIncoming(data: ArrayBuffer, generation: number, block = false) {
+    const incoming = this.incoming;
+    if (this.role !== 'receiver' || !this.accepted || !incoming || !data.byteLength || incoming.received + data.byteLength > incoming.info.size) throw Error('接收到不符合文件信息的数据');
+    const chunk = new Uint8Array(data), size = data.byteLength;
+    const at = performance.now();
+    incoming.hash.update(chunk);
+    if (incoming.writer) await incoming.writer.write(data);
+    else if (this.temporary) await writeTemporaryFile(this.temporary, incoming.received, data);
+    else incoming.parts.push(chunk);
+    this.writeBytes += size; this.writeMilliseconds += performance.now() - at;
+    if (this.stopped) return;
+    const before = Math.floor(this.received / ACK_BYTES);
+    incoming.received += size; this.received += size;
+    if (block || Math.floor(this.received / ACK_BYTES) > before || incoming.received === incoming.info.size) this.reply({ type: 'ack', bytes: this.received }, generation);
+    this.progress();
+  }
   private async handle(data: string | ArrayBuffer, generation: number) {
     if (this.stopped) return;
     if (typeof data !== 'string') {
-      const incoming = this.incoming;
-      if (this.role !== 'receiver' || !this.accepted || !incoming || !data.byteLength || incoming.received + data.byteLength > incoming.info.size) throw Error('接收到不符合文件信息的数据');
-      const chunk = new Uint8Array(data);
-      const size = data.byteLength; // Worker transfer detaches this buffer after hashing.
-      incoming.hash.update(chunk);
-      if (incoming.writer) await incoming.writer.write(data);
-      else if (this.temporary) await writeTemporaryFile(this.temporary, incoming.received, data);
-      else incoming.parts.push(chunk);
-      if (this.stopped) return;
-      incoming.received += size; this.received += size; incoming.ack += size;
-      if (incoming.ack >= 256 * 1024 || incoming.received === incoming.info.size) {
-        this.reply({ type: 'ack', bytes: this.received }, generation); incoming.ack = 0;
-      }
-      this.progress(); return;
+      if (this.encodedBlock) {
+        const block = this.encodedBlock;
+        if (!data.byteLength || block.received + data.byteLength > block.size || block.chunks.length >= 512) throw Error('压缩数据长度不一致');
+        block.chunks.push(new Uint8Array(data)); block.received += data.byteLength;
+        if (block.received === block.size) {
+          const encoded = new Uint8Array(block.size); let at = 0;
+          for (const part of block.chunks) { encoded.set(part, at); at += part.byteLength; }
+          const decoded = await gunzip(encoded.buffer, block.raw);
+          if (this.stopped) return;
+          await this.writeIncoming(decoded, generation, true);
+          this.encodedBlock = undefined;
+        }
+      } else await this.writeIncoming(data, generation);
+      return;
     }
     if (data.length > 65536) throw Error('控制信息过大');
     const message = JSON.parse(data);
@@ -368,19 +509,64 @@ export class Transfer {
         this.peerHidden = message.hidden;
         this.peerBackgroundUntil = message.hidden ? Date.now() + 10 * 60 * 1000 : 0;
         this.activityRevision++;
+        this.resetCompressionAdvice();
+        if (!message.hidden && this.role === 'sender') this.flow.reset(this.acknowledged);
         if (!message.hidden && this.recovering) this.armRecoveryTimeout();
         this.emit({ type: 'background', data: message.hidden }); this.wake();
       }
       if (first) this.reportVisibility();
       return;
     }
+    if (message.type === 'compression-probe' && this.role === 'receiver' && this.compressionSupport) {
+      if (!this.accepted || this.completed || !Number.isSafeInteger(message.id) || message.id < 1 || typeof message.data !== 'string' || message.data.length > 44000 || performance.now() - this.receivedProbeAt < 5000) throw Error('压缩探测信息无效');
+      this.receivedProbeAt = performance.now();
+      const encoded = fromBase64(message.data);
+      if (encoded.byteLength > SAMPLE_BYTES) throw Error('压缩探测信息无效');
+      const at = performance.now(); await gunzip(encoded.buffer, SAMPLE_BYTES);
+      const decompressBps = SAMPLE_BYTES * 1000 / Math.max(1, performance.now() - at);
+      this.reply({ type: 'compression-probed', id: message.id, decompressBps, writeBps: Math.min(1e12, this.writeBytes * 1000 / Math.max(1, this.writeMilliseconds)) }, generation);
+      return;
+    }
+    if (message.type === 'compression-probed' && this.role === 'sender' && this.compressionSupport) {
+      const probe = this.probe;
+      if (!probe || message.id !== probe.id || generation !== probe.generation || probe.file !== this.sendingFile) return;
+      if (![message.decompressBps, message.writeBps].every(n => Number.isFinite(n) && n > 0 && n <= 1e12)) throw Error('压缩探测信息无效');
+      const speed = this.compressionSpeed();
+      if (!speed || message.writeBps < speed * 2) return;
+      probe.decompressBps = message.decompressBps;
+      probe.basePerByte = this.readMilliseconds / Math.max(1, this.readBytes) / 1000 + 1 / message.writeBps;
+      this.adviseCompression(); return;
+    }
+    if (message.type === 'compression-advice' && this.role === 'receiver' && this.compressionSupport) {
+      const offer = message.offer;
+      if (typeof message.active !== 'boolean' || (offer && (message.active || offer.file !== this.receivedFiles || !Number.isFinite(offer.savedSeconds) || offer.savedSeconds < 5 || !Number.isInteger(offer.percent) || offer.percent < 20 || offer.percent > 100))) throw Error('压缩建议无效');
+      if (offer && this.dismissedCompressionFiles.has(offer.file)) { this.setCompressionStatus({ active: false }); return; }
+      this.setCompressionStatus({ active: message.active, ...(offer ? { offer: { file: offer.file, savedSeconds: offer.savedSeconds, percent: offer.percent } } : {}) }); return;
+    }
+    if ((message.type === 'compression-enable' || message.type === 'compression-dismiss') && this.role === 'sender' && this.compressionSupport) {
+      // A refusal can arrive after a speed change withdrew the visible offer.
+      // Keep that choice for the current file, but ignore unrelated/stale files
+      // and a refusal overtaken by the other device's activation.
+      if (message.type === 'compression-dismiss' && message.file === this.sendingFile && this.compressionFile !== this.sendingFile) {
+        this.dismissedCompressionFiles.add(message.file); this.probe = undefined; this.setCompressionStatus({ active: false });
+      } else if (message.type === 'compression-enable' && message.file === this.compressionStatus.offer?.file) this.enableCompression();
+      return;
+    }
+    if (message.type === 'compressed-block' && this.role === 'receiver') {
+      const incoming = this.incoming;
+      if (!this.compressionSupport || !this.compressionStatus.active || !incoming || !this.accepted || this.encodedBlock ||
+          message.id !== incoming.info.id || message.offset !== incoming.received || !Number.isInteger(message.raw) || message.raw < 1 || message.raw > BLOCK_BYTES || incoming.received + message.raw > incoming.info.size ||
+          !Number.isInteger(message.size) || message.size < 1 || message.size > BLOCK_BYTES) throw Error('压缩数据无效');
+      this.encodedBlock = { size: message.size, raw: message.raw, received: 0, chunks: [] }; return;
+    }
     if (message.type === 'manifest' && this.role === 'receiver') {
       const manifest = validateManifest(message.files);
+      this.compressionSupport = message.compression === COMPRESSION && supportsCompression();
       this.backgroundSupport = message.backgroundSupport === true;
       this.reportVisibility();
       if (this.manifest.length) {
         if (JSON.stringify(manifest) !== JSON.stringify(this.manifest)) throw Error('续传文件列表不一致');
-        this.reply({ type: 'resume', file: this.receivedFiles, offset: this.incoming?.received || 0, bytes: this.received, accepted: this.accepted, complete: this.completed }, generation);
+        this.reply({ type: 'resume', file: this.receivedFiles, offset: this.incoming?.received || 0, bytes: this.received, accepted: this.accepted, complete: this.completed, compression: this.compressionSupport ? COMPRESSION : undefined }, generation);
         this.restored();
       } else { this.manifest = manifest; this.restored(); this.emit({ type: 'manifest', data: this.manifest }); }
     } else if (message.type === 'resume' && this.role === 'sender') {
@@ -392,6 +578,8 @@ export class Transfer {
           typeof accepted !== 'boolean' || typeof complete !== 'boolean' || (this.accepted && !accepted) ||
           (complete && (file !== this.files.length || offset !== 0))) throw Error('续传位置无效');
       this.sent = this.acknowledged = received; this.fileConfirmed = file - 1; this.accepted = accepted;
+      this.compressionSupport = message.compression === COMPRESSION && supportsCompression();
+      if (!this.compressionSupport) this.compressionFile = -1;
       this.resumedGeneration = generation;
       this.restored(); this.progress(true);
       if (complete) { this.completed = true; clearInterval(this.heartbeat); this.emit({ type: 'done' }); }
@@ -399,24 +587,28 @@ export class Transfer {
     } else if (message.type === 'accept' && this.role === 'sender') {
       if (this.accepted) throw Error('重复的下载请求');
       this.accepted = true;
+      this.compressionSupport = message.compression === COMPRESSION && supportsCompression();
       this.startSending(0, 0);
     } else if (message.type === 'ack' && this.role === 'sender') {
       if (!Number.isSafeInteger(message.bytes) || message.bytes < this.acknowledged || message.bytes > this.sent) throw Error('接收确认信息无效');
+      this.flow.confirm(message.bytes);
       this.acknowledged = message.bytes; this.wake(); this.progress();
+      this.slowLink.observe(message.bytes); this.adviseCompression();
     } else if (message.type === 'file-start' && this.role === 'receiver') {
       const info = this.manifest[this.receivedFiles];
       const offset = message.offset ?? 0;
-      if (!this.accepted || !info || message.id !== info.id || offset !== (this.incoming?.received || 0)) throw Error('文件顺序无效');
+      if (!this.accepted || !info || this.encodedBlock || message.id !== info.id || offset !== (this.incoming?.received || 0)) throw Error('文件顺序无效');
       if (!this.incoming) {
         const writer = this.handles[info.id] ? await this.handles[info.id].createWritable() : undefined;
         if (this.temporary) await beginTemporaryFile(this.temporary, info);
+        const hash = await createFileHash();
         if (this.stopped) { await writer?.abort().catch(() => {}); return; }
-        this.incoming = { info, writer, received: 0, parts: [], hash: sha256.create(), ack: 0 };
+        this.incoming = { info, writer, received: 0, parts: [], hash };
       }
       this.emit({ type: 'file', data: info.name });
     } else if (message.type === 'file-end' && this.role === 'receiver') {
       const current = this.incoming;
-      if (!current || message.id !== current.info.id || current.received !== current.info.size || hex(current.hash.digest()) !== message.hash) throw Error('文件完整性校验失败，请重新传输');
+      if (!current || this.encodedBlock || message.id !== current.info.id || current.received !== current.info.size || hex(current.hash.digest()) !== message.hash) throw Error('文件完整性校验失败，请重新传输');
       if (current.writer) await current.writer.close();
       else if (this.temporary) await finishTemporaryFile(this.temporary, message.hash);
       else {
@@ -462,11 +654,13 @@ export class Transfer {
       if (this.stopped) return;
       this.handles = handles;
       this.accepted = true; this.started = performance.now();
-      this.emit({ type: 'started' }); this.control({ type: 'accept' });
+      this.emit({ type: 'started' }); this.control({ type: 'accept', compression: this.compressionSupport ? COMPRESSION : undefined });
     } finally { this.accepting = false; }
   }
   private startSending(file: number, offset: number) {
     const generation = this.generation;
+    this.flow.reset(this.acknowledged);
+    this.slowLink.reset(this.acknowledged);
     void this.sendFiles(file, offset, generation).catch(e => {
       if (this.stopped || generation !== this.generation) return;
       if (e instanceof TransportInterrupted) this.requestRecovery();
@@ -480,6 +674,11 @@ export class Transfer {
     if (chunkSize < 1024) throw Error('对方浏览器的数据通道限制过小');
     for (let id = firstFile; id < this.files.length; id++) {
       const file = this.files[id], start = id === firstFile ? firstOffset : 0;
+      this.sendingFile = id; this.sendingOffset = start;
+      let unhelpfulBlocks = 0;
+      // Repeat on every file/resume, even when local state did not change:
+      // activation may have been lost on the previous data channel.
+      this.setCompressionStatus({ active: this.compressionFile === id }, true);
       let hash = this.hashes.get(id + ':' + start)?.clone();
       if (!hash) {
         hash = sha256.create();
@@ -491,19 +690,51 @@ export class Transfer {
       }
       await this.waitFor(() => true, generation);
       this.control({ type: 'file-start', id, offset: start }); this.emit({ type: 'file', data: file.name });
-      for (let offset = start; offset < file.size; offset += chunkSize) {
-        await this.waitFor(() => this.channel!.bufferedAmount < 1048576 && this.sent - this.acknowledged < 4 * 1048576, generation);
-        const buffer = await readSource(file, offset, Math.min(offset + chunkSize, file.size));
+      for (let offset = start; offset < file.size;) {
+        const compressing = this.compressionFile === id;
+        const length = Math.min(compressing ? BLOCK_BYTES : chunkSize, file.size - offset);
+        let bufferBlocked = false;
+        await this.waitFor(() => {
+          bufferBlocked = this.channel!.bufferedAmount + length > 1048576;
+          return this.flow.allows(this.sent - this.acknowledged, length) && !bufferBlocked;
+        }, generation, 60000, () => bufferBlocked ? 8 : 250);
+        const readAt = performance.now();
+        const buffer = await readSource(file, offset, offset + length);
         if (this.stopped || generation !== this.generation) throw new TransportInterrupted();
         hash.update(new Uint8Array(buffer));
-        try { this.channel!.send(buffer); } catch { throw new TransportInterrupted('连接已关闭'); }
-        this.sent += buffer.byteLength;
-        this.hashes.set(id + ':' + (offset + buffer.byteLength), hash.clone());
+        this.readBytes += length; this.readMilliseconds += performance.now() - readAt;
+        let payload = buffer, compressed = false;
+        if (compressing) {
+          const at = performance.now();
+          try {
+            const encoded = await gzip(buffer);
+            const cost = (performance.now() - at) / 1000 + length / this.compressionDecodeBps;
+            if (encoded.byteLength < length * .95 && cost * 1.25 < (length - encoded.byteLength) / this.compressionWireSpeed) {
+              payload = encoded; compressed = true; unhelpfulBlocks = 0;
+            } else unhelpfulBlocks++;
+          } catch { unhelpfulBlocks = 3; }
+          if (this.stopped || generation !== this.generation) throw new TransportInterrupted();
+          await this.waitFor(() => true, generation);
+          if (compressed) this.control({ type: 'compressed-block', id, offset, raw: length, size: payload.byteLength });
+        }
+        for (let at = 0; at < payload.byteLength; at += chunkSize) {
+          const part = payload.byteLength <= chunkSize ? payload : payload.slice(at, at + chunkSize);
+          if (compressing) await this.waitFor(() => this.channel!.bufferedAmount + part.byteLength <= 1048576, generation, 60000, () => 8);
+          try { this.channel!.send(part); } catch { throw new TransportInterrupted('连接已关闭'); }
+          if (!compressed) { this.sent += part.byteLength; this.flow.sent(this.sent); }
+        }
+        if (compressed) { this.sent += length; this.flow.sent(this.sent); }
+        offset += length; this.sendingOffset = offset;
+        this.hashes.set(id + ':' + offset, hash.clone());
         if (this.hashes.size > 160) this.hashes.delete(this.hashes.keys().next().value!);
+        if (unhelpfulBlocks >= 3) { this.compressionFile = -1; this.probe = undefined; this.setCompressionStatus({ active: false }); }
       }
+      if (this.stopped || generation !== this.generation) throw new TransportInterrupted();
       this.control({ type: 'file-end', id, hash: hex(hash.digest()) });
       await this.waitFor(() => this.fileConfirmed >= id, generation);
+      this.probe = undefined; this.compressionFile = -1; this.setCompressionStatus({ active: false });
     }
+    this.sendingFile = -1;
     this.control({ type: 'done' });
   }
   async offer(trickle = false): Promise<RTCSessionDescriptionInit> {
@@ -558,6 +789,13 @@ export class Transfer {
       try { this.control({ type: 'cancel' }); } catch {}
     }
     this.stopped = true; clearTimeout(this.failureTimer); this.sourceFailure = undefined; clearTimeout(this.connectTimer); clearTimeout(this.disconnectedTimer); clearTimeout(this.recoveryTimer); clearInterval(this.heartbeat);
+    clearTimeout(this.binaryTimer); this.binaryTimer = undefined;
+    this.receivingQueuedBytes -= this.pendingBinaryBytes; this.receivingQueuedMessages -= this.pendingBinary.length;
+    this.pendingBinary = []; this.pendingBinaryBytes = 0;
+    this.encodedBlock = undefined; this.probe = undefined;
+    this.setCompressionStatus({ active: false });
+    this.flow.reset(this.acknowledged);
+
     window.removeEventListener('online', this.networkChanged); window.removeEventListener('offline', this.networkChanged);
     document.removeEventListener('visibilitychange', this.visibilityChanged);
     this.hashes.clear();

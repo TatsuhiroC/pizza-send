@@ -19,6 +19,20 @@ test.beforeEach(async ({ context }) => {
 test('built page loads under CSP while inline and untrusted external scripts are blocked', async ({ page }) => {
   let externalRequests = 0;
   await page.route('https://csp-probe.invalid/**', route => { externalRequests++; return route.abort(); });
+  const probe = new URL('__csp_execution_probe.js', site).toString();
+  // Script loaded by the page has normal CSP privileges. DevTools evaluation
+  // itself may bypass string-execution restrictions, even with bypassCSP off.
+  await page.route(probe, route => route.fulfill({ contentType: 'text/javascript', body: `
+    (async () => {
+      try {
+        const module = await WebAssembly.compile(new Uint8Array([0,97,115,109,1,0,0,0]));
+        window.__wasmAllowed = (await WebAssembly.instantiate(module)) instanceof WebAssembly.Instance;
+      } catch { window.__wasmAllowed = false; }
+      try { new Function('window.__injectedEvalRan = true')(); }
+      catch { window.__evalBlocked = true; }
+      window.__executionProbeDone = true;
+    })();
+  ` }));
   const response = await page.goto(site);
   expect(response!.headers()['x-frame-options']).toBe('DENY');
   expect(response!.headers()['referrer-policy']).toBe('no-referrer');
@@ -26,12 +40,19 @@ test('built page loads under CSP while inline and untrusted external scripts are
   if (new URL(site).hostname === 'pizzasend.dpdns.org') expect(response!.headers()['strict-transport-security']).toBe('max-age=86400');
   await expect(page.locator('#send-tab')).toBeVisible();
   expect(await page.evaluate(() => (window as any).__policyViolations)).toEqual([]);
+  await page.evaluate(probe => {
+    const script = document.createElement('script'); script.src = probe; document.head.append(script);
+  }, probe);
+  await expect.poll(() => page.evaluate(() => (window as any).__executionProbeDone)).toBe(true);
+  expect(await page.evaluate(() => (window as any).__wasmAllowed)).toBe(true);
+  expect(await page.evaluate(() => (window as any).__evalBlocked)).toBe(true);
   await page.evaluate(() => {
     const inline = document.createElement('script'); inline.textContent = 'window.__injectedScriptRan = true'; document.head.append(inline);
     const external = document.createElement('script'); external.src = 'https://csp-probe.invalid/blocked.js'; document.head.append(external);
   });
   await expect.poll(() => page.evaluate(() => (window as any).__policyViolations.length)).toBeGreaterThanOrEqual(2);
   expect(await page.evaluate(() => (window as any).__injectedScriptRan)).toBeUndefined();
+  expect(await page.evaluate(() => (window as any).__injectedEvalRan)).toBeUndefined();
   expect(externalRequests).toBe(0);
 });
 
@@ -53,6 +74,12 @@ test('disk worker, pairing, blob preparation and original downloads work with th
   await context.addInitScript(() => {
     localStorage.setItem('pizza-send-stun', '');
     Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true });
+    (window as any).__wasmInstances = 0;
+    const instantiate = WebAssembly.instantiate;
+    WebAssembly.instantiate = (async (...args: any[]) => {
+      const instance = await (instantiate as any)(...args);
+      (window as any).__wasmInstances++; return instance;
+    }) as typeof WebAssembly.instantiate;
     void navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => stream.getTracks().forEach(track => track.stop()));
   });
   const network: unknown[] = [];
@@ -81,7 +108,10 @@ test('disk worker, pairing, blob preparation and original downloads work with th
     const digest = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
     expect(digest(await readFile((await saved.path())!))).toBe(digest(original.buffer));
   }
-  for (const p of [page, receiver]) expect(await p.evaluate(() => (window as any).__policyViolations)).toEqual([]);
+  for (const p of [page, receiver]) {
+    expect(await p.evaluate(() => (window as any).__policyViolations)).toEqual([]);
+    expect(await p.evaluate(() => (window as any).__wasmInstances)).toBe(p === receiver ? payload.length : 0);
+  }
   await page.locator('#cancel').click();
 });
 

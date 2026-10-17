@@ -2,7 +2,7 @@
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
   X-Frame-Options: DENY
-  Content-Security-Policy: default-src 'none'; script-src 'self' https://challenges.cloudflare.com; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; media-src 'self' blob:; worker-src 'self'; connect-src 'self' https: wss: blob: http://127.0.0.1:* ws://127.0.0.1:* http://localhost:* ws://localhost:*; frame-src https://challenges.cloudflare.com; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval' https://challenges.cloudflare.com; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; media-src 'self' blob:; worker-src 'self'; connect-src 'self' https: wss: blob: http://127.0.0.1:* ws://127.0.0.1:* http://localhost:* ws://localhost:*; frame-src https://challenges.cloudflare.com; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
 
 https://pizzasend.dpdns.org/*
   Strict-Transport-Security: max-age=86400
