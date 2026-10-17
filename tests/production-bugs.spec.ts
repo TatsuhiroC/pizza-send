@@ -108,6 +108,7 @@ test('camera frame keeps its size before permission and through video aspect-rat
   });
   await page.goto('./'); await page.locator('#receive-tab').click(); await page.locator('#open-scanner').click();
   const before = (await page.locator('.scan-frame').boundingBox())!;
+  await expect.poll(() => page.evaluate(() => typeof (window as any).__cameraReady)).toBe('function');
   await page.evaluate(() => {
     const canvas = document.createElement('canvas'); canvas.width = 1280; canvas.height = 720;
     const context = canvas.getContext('2d')!; context.fillRect(0, 0, canvas.width, canvas.height);
