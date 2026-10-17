@@ -23,7 +23,7 @@ async function setup(context: BrowserContext) {
     // Slow only fixture reads, leaving enough time to interrupt a real transfer.
     const arrayBuffer = Blob.prototype.arrayBuffer;
     Blob.prototype.arrayBuffer = async function() {
-      if (this.size <= 32768) await new Promise(resolve => setTimeout(resolve, 2));
+      if (this.size <= 1048576) await new Promise(resolve => setTimeout(resolve, 2 * Math.ceil(this.size / 32768)));
       return arrayBuffer.call(this);
     };
     void navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => stream.getTracks().forEach(track => track.stop()));

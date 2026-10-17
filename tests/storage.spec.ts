@@ -144,12 +144,22 @@ test('quota refusal can be retried without leaking a session or falsely starting
 
 test('disk write failure rejects unsaved bytes and cleans the incomplete temporary file', async ({ page, context }) => {
   await setup(context); const receiver = await context.newPage();
+  await receiver.addInitScript(() => {
+    const state = window as any; state.__failedDiskAcks = [];
+    const send = RTCDataChannel.prototype.send;
+    RTCDataChannel.prototype.send = function(data: any) {
+      if (typeof data === 'string' && JSON.parse(data).type === 'ack') state.__failedDiskAcks.push(JSON.parse(data).bytes);
+      return send.call(this, data);
+    } as any;
+  });
   await receiver.route('**/src/storage-worker.ts*', async route => {
-    const response = await route.fetch(); await route.fulfill({ response, body: 'const write = FileSystemSyncAccessHandle.prototype.write; FileSystemSyncAccessHandle.prototype.write = function(data, options) { if (data.byteLength === 32768 && options.at === 32768) throw new DOMException("fixture disk full", "QuotaExceededError"); return write.call(this, data, options); };\n' + await response.text() });
+    // Fail after 32 KiB regardless of batching, including a partial OS write.
+    const response = await route.fetch(); await route.fulfill({ response, body: 'const write = FileSystemSyncAccessHandle.prototype.write; FileSystemSyncAccessHandle.prototype.write = function(data, options) { if (options.at >= 32768) throw new DOMException("fixture disk full", "QuotaExceededError"); return write.call(this, data.subarray(0, 32768 - options.at), options); };\n' + await response.text() });
   });
   await begin(page, receiver, { name: 'disk-full.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(1048576, 8) });
   await expect(receiver.locator('#status')).toHaveText('传输未完成'); await expect(receiver.locator('#notice')).toContainText('暂存空间不足');
   await expect(receiver.locator('.download-file')).toHaveCount(0);
+  expect(await receiver.evaluate(() => (window as any).__failedDiskAcks)).toEqual([]);
   await expect.poll(() => receiver.evaluate(async () => {
     const root = await navigator.storage.getDirectory(), dir = await root.getDirectoryHandle('pizzasend-received-v1');
     let count = 0; for await (const [, entry] of dir.entries()) if (entry.kind === 'directory') count++; return count;

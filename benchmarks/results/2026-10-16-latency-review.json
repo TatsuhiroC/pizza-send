@@ -1,0 +1,1886 @@
+{
+  "productionBaseline": "b25e218",
+  "localCandidate": "10fe0d7",
+  "successfulTransfers": 42,
+  "timing": "receiver accept to receiver complete; extra delay only on application receipts",
+  "summary": [
+    {
+      "variant": "baseline-A",
+      "ackDelay": 150,
+      "mib": 32,
+      "runs": 3,
+      "median": 1.3337000000476837,
+      "range": [
+        1.3313999998569488,
+        3.893200000047684
+      ]
+    },
+    {
+      "variant": "baseline-A",
+      "ackDelay": 0,
+      "mib": 32,
+      "runs": 3,
+      "median": 3.3565,
+      "range": [
+        2.5694000000953676,
+        3.7638999998569487
+      ]
+    },
+    {
+      "variant": "baseline-A",
+      "ackDelay": 300,
+      "mib": 32,
+      "runs": 3,
+      "median": 2.5122000000476836,
+      "range": [
+        2.4066999998092653,
+        5.294399999856949
+      ]
+    },
+    {
+      "variant": "candidate-A",
+      "ackDelay": 150,
+      "mib": 32,
+      "runs": 3,
+      "median": 1.674899999856949,
+      "range": [
+        1.6302000000476837,
+        1.7074000000953675
+      ]
+    },
+    {
+      "variant": "candidate-A",
+      "ackDelay": 0,
+      "mib": 32,
+      "runs": 3,
+      "median": 1.503,
+      "range": [
+        1.4897000000476837,
+        1.5307000000476838
+      ]
+    },
+    {
+      "variant": "candidate-A",
+      "ackDelay": 300,
+      "mib": 32,
+      "runs": 3,
+      "median": 2.8087000000476836,
+      "range": [
+        2.7343000001907347,
+        2.836300000190735
+      ]
+    },
+    {
+      "variant": "diagnostic-unpaced",
+      "ackDelay": 150,
+      "mib": 32,
+      "runs": 3,
+      "median": 1.5117999999523162,
+      "range": [
+        1.5002000000476836,
+        1.520600000143051
+      ]
+    },
+    {
+      "variant": "diagnostic-unpaced",
+      "ackDelay": 0,
+      "mib": 32,
+      "runs": 3,
+      "median": 4.1995,
+      "range": [
+        2.8722000000476835,
+        4.604700000047684
+      ]
+    },
+    {
+      "variant": "diagnostic-unpaced",
+      "ackDelay": 300,
+      "mib": 32,
+      "runs": 3,
+      "median": 2.7242999999523163,
+      "range": [
+        2.713,
+        2.7254000000953673
+      ]
+    },
+    {
+      "variant": "diagnostic-burst256",
+      "ackDelay": 150,
+      "mib": 32,
+      "runs": 3,
+      "median": 1.5334000000953674,
+      "range": [
+        1.519,
+        1.5337000000476837
+      ]
+    },
+    {
+      "variant": "diagnostic-burst256",
+      "ackDelay": 0,
+      "mib": 32,
+      "runs": 3,
+      "median": 5.4345,
+      "range": [
+        5.054899999856949,
+        5.6117000000476835
+      ]
+    },
+    {
+      "variant": "diagnostic-fixed",
+      "ackDelay": 150,
+      "mib": 32,
+      "runs": 3,
+      "median": 4.365100000143051,
+      "range": [
+        4.347299999952316,
+        4.785400000095367
+      ]
+    },
+    {
+      "variant": "candidate-128",
+      "ackDelay": 150,
+      "mib": 128,
+      "runs": 3,
+      "median": 6.327600000143051,
+      "range": [
+        6.299099999904633,
+        6.418299999952317
+      ]
+    },
+    {
+      "variant": "baseline-128",
+      "ackDelay": 150,
+      "mib": 128,
+      "runs": 3,
+      "median": 5.373200000047683,
+      "range": [
+        5.359399999856949,
+        5.458700000047684
+      ]
+    }
+  ],
+  "runs": [
+    {
+      "variant": "baseline-A",
+      "repeat": 1,
+      "ackDelay": 150,
+      "mib": 32,
+      "transferSeconds": 3.893200000047684,
+      "sendSeconds": 3.8784000000953673,
+      "receiverWrites": 1024,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 29622272,
+        "peakFlight": 4194304,
+        "reads": 1024,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 0,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "other": {
+            "scheduled": 2,
+            "fired": 2,
+            "elapsed": 3004.5
+          },
+          "250ms": {
+            "scheduled": 120,
+            "fired": 7,
+            "elapsed": 1769.3000001907349
+          }
+        },
+        "wait": {
+          "checks": 0,
+          "flight": 0,
+          "buffered": 0,
+          "pacing": 0
+        },
+        "firstBinaryAt": 3915.0999999046326,
+        "lastBinaryAt": 7793.5
+      }
+    },
+    {
+      "variant": "baseline-A",
+      "repeat": 1,
+      "ackDelay": 0,
+      "mib": 32,
+      "transferSeconds": 2.5694000000953676,
+      "sendSeconds": 2.4795,
+      "receiverWrites": 1024,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 33554432,
+        "peakFlight": 2850816,
+        "reads": 1024,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 0,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "other": {
+            "scheduled": 1,
+            "fired": 1,
+            "elapsed": 1500.3000001907349
+          },
+          "250ms": {
+            "scheduled": 36,
+            "fired": 4,
+            "elapsed": 1004.1999998092651
+          }
+        },
+        "wait": {
+          "checks": 0,
+          "flight": 0,
+          "buffered": 0,
+          "pacing": 0
+        },
+        "firstBinaryAt": 3589.5999999046326,
+        "lastBinaryAt": 6069.099999904633
+      }
+    },
+    {
+      "variant": "baseline-A",
+      "repeat": 1,
+      "ackDelay": 300,
+      "mib": 32,
+      "transferSeconds": 2.5122000000476836,
+      "sendSeconds": 2.4940999999046327,
+      "receiverWrites": 1024,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 29360128,
+        "peakFlight": 4194304,
+        "reads": 1024,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 0,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "other": {
+            "scheduled": 1,
+            "fired": 1,
+            "elapsed": 1502.8999998569489
+          },
+          "250ms": {
+            "scheduled": 108,
+            "fired": 0,
+            "elapsed": 0
+          }
+        },
+        "wait": {
+          "checks": 0,
+          "flight": 0,
+          "buffered": 0,
+          "pacing": 0
+        },
+        "firstBinaryAt": 3405.9000000953674,
+        "lastBinaryAt": 5900
+      }
+    },
+    {
+      "variant": "baseline-A",
+      "repeat": 2,
+      "ackDelay": 300,
+      "mib": 32,
+      "transferSeconds": 5.294399999856949,
+      "sendSeconds": 5.279799999952316,
+      "receiverWrites": 1024,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 29884416,
+        "peakFlight": 4194304,
+        "reads": 1024,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 0,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "other": {
+            "scheduled": 3,
+            "fired": 3,
+            "elapsed": 4503.700000047684
+          },
+          "250ms": {
+            "scheduled": 113,
+            "fired": 10,
+            "elapsed": 2520.3999996185303
+          }
+        },
+        "wait": {
+          "checks": 0,
+          "flight": 0,
+          "buffered": 0,
+          "pacing": 0
+        },
+        "firstBinaryAt": 3854.5999999046326,
+        "lastBinaryAt": 9134.399999856949
+      }
+    },
+    {
+      "variant": "baseline-A",
+      "repeat": 2,
+      "ackDelay": 0,
+      "mib": 32,
+      "transferSeconds": 3.3565,
+      "sendSeconds": 3.2345,
+      "receiverWrites": 1024,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 33554432,
+        "peakFlight": 4194304,
+        "reads": 1024,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 0,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "other": {
+            "scheduled": 2,
+            "fired": 1,
+            "elapsed": 1500.5999999046326
+          },
+          "250ms": {
+            "scheduled": 90,
+            "fired": 6,
+            "elapsed": 1511.4000000953674
+          }
+        },
+        "wait": {
+          "checks": 0,
+          "flight": 0,
+          "buffered": 0,
+          "pacing": 0
+        },
+        "firstBinaryAt": 3349.7999999523163,
+        "lastBinaryAt": 6584.299999952316
+      }
+    },
+    {
+      "variant": "baseline-A",
+      "repeat": 2,
+      "ackDelay": 150,
+      "mib": 32,
+      "transferSeconds": 1.3313999998569488,
+      "sendSeconds": 1.3206000001430511,
+      "receiverWrites": 1024,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 29622272,
+        "peakFlight": 4194304,
+        "reads": 1024,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 0,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "other": {
+            "scheduled": 1,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "250ms": {
+            "scheduled": 112,
+            "fired": 0,
+            "elapsed": 0
+          }
+        },
+        "wait": {
+          "checks": 0,
+          "flight": 0,
+          "buffered": 0,
+          "pacing": 0
+        },
+        "firstBinaryAt": 3453.7999999523163,
+        "lastBinaryAt": 4774.400000095367
+      }
+    },
+    {
+      "variant": "baseline-A",
+      "repeat": 3,
+      "ackDelay": 150,
+      "mib": 32,
+      "transferSeconds": 1.3337000000476837,
+      "sendSeconds": 1.3207000000476836,
+      "receiverWrites": 1024,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 29884416,
+        "peakFlight": 4194304,
+        "reads": 1024,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 0,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "other": {
+            "scheduled": 1,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "250ms": {
+            "scheduled": 111,
+            "fired": 0,
+            "elapsed": 0
+          }
+        },
+        "wait": {
+          "checks": 0,
+          "flight": 0,
+          "buffered": 0,
+          "pacing": 0
+        },
+        "firstBinaryAt": 3331.5999999046326,
+        "lastBinaryAt": 4652.299999952316
+      }
+    },
+    {
+      "variant": "baseline-A",
+      "repeat": 3,
+      "ackDelay": 0,
+      "mib": 32,
+      "transferSeconds": 3.7638999998569487,
+      "sendSeconds": 3.6445,
+      "receiverWrites": 1024,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 33554432,
+        "peakFlight": 4194304,
+        "reads": 1024,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 0,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "other": {
+            "scheduled": 2,
+            "fired": 1,
+            "elapsed": 1502.5999999046326
+          },
+          "250ms": {
+            "scheduled": 101,
+            "fired": 7,
+            "elapsed": 1766.3999998569489
+          }
+        },
+        "wait": {
+          "checks": 0,
+          "flight": 0,
+          "buffered": 0,
+          "pacing": 0
+        },
+        "firstBinaryAt": 3415,
+        "lastBinaryAt": 7059.5
+      }
+    },
+    {
+      "variant": "baseline-A",
+      "repeat": 3,
+      "ackDelay": 300,
+      "mib": 32,
+      "transferSeconds": 2.4066999998092653,
+      "sendSeconds": 2.3945999999046323,
+      "receiverWrites": 1024,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 29360128,
+        "peakFlight": 4194304,
+        "reads": 1024,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 0,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "other": {
+            "scheduled": 1,
+            "fired": 1,
+            "elapsed": 1502.3000001907349
+          },
+          "250ms": {
+            "scheduled": 100,
+            "fired": 0,
+            "elapsed": 0
+          }
+        },
+        "wait": {
+          "checks": 0,
+          "flight": 0,
+          "buffered": 0,
+          "pacing": 0
+        },
+        "firstBinaryAt": 3462.4000000953674,
+        "lastBinaryAt": 5857
+      }
+    },
+    {
+      "variant": "candidate-A",
+      "repeat": 1,
+      "ackDelay": 150,
+      "mib": 32,
+      "transferSeconds": 1.7074000000953675,
+      "sendSeconds": 1.691,
+      "receiverWrites": 213,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 29949952,
+        "peakFlight": 4096000,
+        "reads": 32,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 523,
+            "fired": 446,
+            "elapsed": 887.4999997615814
+          },
+          "other": {
+            "scheduled": 1,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "250ms": {
+            "scheduled": 1,
+            "fired": 0,
+            "elapsed": 0
+          }
+        },
+        "wait": {
+          "checks": 526,
+          "flight": 1,
+          "buffered": 0,
+          "pacing": 525
+        },
+        "firstBinaryAt": 4126.5,
+        "lastBinaryAt": 5817.5
+      }
+    },
+    {
+      "variant": "candidate-A",
+      "repeat": 1,
+      "ackDelay": 0,
+      "mib": 32,
+      "transferSeconds": 1.5307000000476838,
+      "sendSeconds": 1.518600000143051,
+      "receiverWrites": 190,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 33554432,
+        "peakFlight": 688128,
+        "reads": 32,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 469,
+            "fired": 396,
+            "elapsed": 750.7999985218048
+          },
+          "other": {
+            "scheduled": 1,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "250ms": {
+            "scheduled": 0,
+            "fired": 0,
+            "elapsed": 0
+          }
+        },
+        "wait": {
+          "checks": 471,
+          "flight": 0,
+          "buffered": 0,
+          "pacing": 471
+        },
+        "firstBinaryAt": 3608.7999999523163,
+        "lastBinaryAt": 5127.400000095367
+      }
+    },
+    {
+      "variant": "candidate-A",
+      "repeat": 1,
+      "ackDelay": 300,
+      "mib": 32,
+      "transferSeconds": 2.7343000001907347,
+      "sendSeconds": 2.722,
+      "receiverWrites": 242,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 29884416,
+        "peakFlight": 4194304,
+        "reads": 32,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 521,
+            "fired": 472,
+            "elapsed": 948.8999996185303
+          },
+          "other": {
+            "scheduled": 2,
+            "fired": 1,
+            "elapsed": 1503.3999998569489
+          },
+          "250ms": {
+            "scheduled": 42,
+            "fired": 0,
+            "elapsed": 0
+          }
+        },
+        "wait": {
+          "checks": 564,
+          "flight": 71,
+          "buffered": 0,
+          "pacing": 493
+        },
+        "firstBinaryAt": 3824.2999999523163,
+        "lastBinaryAt": 6546.299999952316
+      }
+    },
+    {
+      "variant": "candidate-A",
+      "repeat": 2,
+      "ackDelay": 300,
+      "mib": 32,
+      "transferSeconds": 2.836300000190735,
+      "sendSeconds": 2.8226999998092652,
+      "receiverWrites": 315,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 29786112,
+        "peakFlight": 4194304,
+        "reads": 32,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 519,
+            "fired": 490,
+            "elapsed": 1278.5999982357025
+          },
+          "other": {
+            "scheduled": 2,
+            "fired": 1,
+            "elapsed": 1503.0999999046326
+          },
+          "250ms": {
+            "scheduled": 69,
+            "fired": 0,
+            "elapsed": 0
+          }
+        },
+        "wait": {
+          "checks": 589,
+          "flight": 114,
+          "buffered": 0,
+          "pacing": 475
+        },
+        "firstBinaryAt": 3895.300000190735,
+        "lastBinaryAt": 6718
+      }
+    },
+    {
+      "variant": "candidate-A",
+      "repeat": 2,
+      "ackDelay": 0,
+      "mib": 32,
+      "transferSeconds": 1.4897000000476837,
+      "sendSeconds": 1.4775999999046325,
+      "receiverWrites": 181,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 33554432,
+        "peakFlight": 655360,
+        "reads": 32,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 455,
+            "fired": 382,
+            "elapsed": 709.0999994277954
+          },
+          "other": {
+            "scheduled": 1,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "250ms": {
+            "scheduled": 0,
+            "fired": 0,
+            "elapsed": 0
+          }
+        },
+        "wait": {
+          "checks": 457,
+          "flight": 0,
+          "buffered": 0,
+          "pacing": 457
+        },
+        "firstBinaryAt": 3419.300000190735,
+        "lastBinaryAt": 4896.900000095367
+      }
+    },
+    {
+      "variant": "candidate-A",
+      "repeat": 2,
+      "ackDelay": 150,
+      "mib": 32,
+      "transferSeconds": 1.674899999856949,
+      "sendSeconds": 1.6622999999523163,
+      "receiverWrites": 203,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 30081024,
+        "peakFlight": 4096000,
+        "reads": 32,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 511,
+            "fired": 438,
+            "elapsed": 867.5999984741211
+          },
+          "other": {
+            "scheduled": 1,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "250ms": {
+            "scheduled": 1,
+            "fired": 0,
+            "elapsed": 0
+          }
+        },
+        "wait": {
+          "checks": 514,
+          "flight": 1,
+          "buffered": 0,
+          "pacing": 513
+        },
+        "firstBinaryAt": 3335.4000000953674,
+        "lastBinaryAt": 4997.700000047684
+      }
+    },
+    {
+      "variant": "candidate-A",
+      "repeat": 3,
+      "ackDelay": 150,
+      "mib": 32,
+      "transferSeconds": 1.6302000000476837,
+      "sendSeconds": 1.614,
+      "receiverWrites": 195,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 29884416,
+        "peakFlight": 4194304,
+        "reads": 32,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 487,
+            "fired": 423,
+            "elapsed": 802.7000005245209
+          },
+          "other": {
+            "scheduled": 1,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "250ms": {
+            "scheduled": 3,
+            "fired": 0,
+            "elapsed": 0
+          }
+        },
+        "wait": {
+          "checks": 491,
+          "flight": 4,
+          "buffered": 0,
+          "pacing": 487
+        },
+        "firstBinaryAt": 3956.2000000476837,
+        "lastBinaryAt": 5570.200000047684
+      }
+    },
+    {
+      "variant": "candidate-A",
+      "repeat": 3,
+      "ackDelay": 0,
+      "mib": 32,
+      "transferSeconds": 1.503,
+      "sendSeconds": 1.4879000000953675,
+      "receiverWrites": 181,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 33554432,
+        "peakFlight": 720896,
+        "reads": 32,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 451,
+            "fired": 385,
+            "elapsed": 724.200003862381
+          },
+          "other": {
+            "scheduled": 1,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "250ms": {
+            "scheduled": 0,
+            "fired": 0,
+            "elapsed": 0
+          }
+        },
+        "wait": {
+          "checks": 453,
+          "flight": 0,
+          "buffered": 0,
+          "pacing": 453
+        },
+        "firstBinaryAt": 3336.899999856949,
+        "lastBinaryAt": 4824.799999952316
+      }
+    },
+    {
+      "variant": "candidate-A",
+      "repeat": 3,
+      "ackDelay": 300,
+      "mib": 32,
+      "transferSeconds": 2.8087000000476836,
+      "sendSeconds": 2.797800000190735,
+      "receiverWrites": 309,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 29720576,
+        "peakFlight": 4194304,
+        "reads": 32,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 511,
+            "fired": 479,
+            "elapsed": 1232.4999992847443
+          },
+          "other": {
+            "scheduled": 2,
+            "fired": 1,
+            "elapsed": 1501.6000001430511
+          },
+          "250ms": {
+            "scheduled": 66,
+            "fired": 0,
+            "elapsed": 0
+          }
+        },
+        "wait": {
+          "checks": 578,
+          "flight": 113,
+          "buffered": 0,
+          "pacing": 465
+        },
+        "firstBinaryAt": 3533.699999809265,
+        "lastBinaryAt": 6331.5
+      }
+    },
+    {
+      "variant": "diagnostic-unpaced",
+      "repeat": 1,
+      "ackDelay": 150,
+      "mib": 32,
+      "transferSeconds": 1.5117999999523162,
+      "sendSeconds": 1.4937999999523164,
+      "receiverWrites": 152,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 29884416,
+        "peakFlight": 4194304,
+        "reads": 32,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 0,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "other": {
+            "scheduled": 1,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "250ms": {
+            "scheduled": 93,
+            "fired": 0,
+            "elapsed": 0
+          }
+        },
+        "wait": {
+          "checks": 95,
+          "flight": 89,
+          "buffered": 4,
+          "pacing": 2
+        },
+        "firstBinaryAt": 3652,
+        "lastBinaryAt": 5145.799999952316
+      }
+    },
+    {
+      "variant": "diagnostic-unpaced",
+      "repeat": 1,
+      "ackDelay": 0,
+      "mib": 32,
+      "transferSeconds": 4.1995,
+      "sendSeconds": 4.154200000047684,
+      "receiverWrites": 146,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 33554432,
+        "peakFlight": 1802240,
+        "reads": 32,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 0,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "other": {
+            "scheduled": 3,
+            "fired": 2,
+            "elapsed": 3002.5
+          },
+          "250ms": {
+            "scheduled": 94,
+            "fired": 10,
+            "elapsed": 2520.9999997615814
+          }
+        },
+        "wait": {
+          "checks": 101,
+          "flight": 1,
+          "buffered": 93,
+          "pacing": 7
+        },
+        "firstBinaryAt": 4175.899999856949,
+        "lastBinaryAt": 8330.099999904633
+      }
+    },
+    {
+      "variant": "diagnostic-unpaced",
+      "repeat": 1,
+      "ackDelay": 300,
+      "mib": 32,
+      "transferSeconds": 2.7254000000953673,
+      "sendSeconds": 2.7050999999046326,
+      "receiverWrites": 159,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 30081024,
+        "peakFlight": 4194304,
+        "reads": 32,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 0,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "other": {
+            "scheduled": 2,
+            "fired": 1,
+            "elapsed": 1502.7000000476837
+          },
+          "250ms": {
+            "scheduled": 87,
+            "fired": 1,
+            "elapsed": 251.39999985694885
+          }
+        },
+        "wait": {
+          "checks": 90,
+          "flight": 85,
+          "buffered": 2,
+          "pacing": 3
+        },
+        "firstBinaryAt": 3434.100000143051,
+        "lastBinaryAt": 6139.200000047684
+      }
+    },
+    {
+      "variant": "diagnostic-unpaced",
+      "repeat": 2,
+      "ackDelay": 300,
+      "mib": 32,
+      "transferSeconds": 2.713,
+      "sendSeconds": 2.691699999809265,
+      "receiverWrites": 168,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 29655040,
+        "peakFlight": 4194304,
+        "reads": 32,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 0,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "other": {
+            "scheduled": 2,
+            "fired": 1,
+            "elapsed": 1501
+          },
+          "250ms": {
+            "scheduled": 90,
+            "fired": 1,
+            "elapsed": 250.89999985694885
+          }
+        },
+        "wait": {
+          "checks": 92,
+          "flight": 88,
+          "buffered": 2,
+          "pacing": 2
+        },
+        "firstBinaryAt": 3738.2000000476837,
+        "lastBinaryAt": 6429.899999856949
+      }
+    },
+    {
+      "variant": "diagnostic-unpaced",
+      "repeat": 2,
+      "ackDelay": 0,
+      "mib": 32,
+      "transferSeconds": 4.604700000047684,
+      "sendSeconds": 4.548700000047684,
+      "receiverWrites": 145,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 33554432,
+        "peakFlight": 1966080,
+        "reads": 32,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 0,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "other": {
+            "scheduled": 3,
+            "fired": 2,
+            "elapsed": 3002.899999856949
+          },
+          "250ms": {
+            "scheduled": 99,
+            "fired": 12,
+            "elapsed": 3015.9000000953674
+          }
+        },
+        "wait": {
+          "checks": 104,
+          "flight": 1,
+          "buffered": 98,
+          "pacing": 5
+        },
+        "firstBinaryAt": 3887.699999809265,
+        "lastBinaryAt": 8436.399999856949
+      }
+    },
+    {
+      "variant": "diagnostic-unpaced",
+      "repeat": 2,
+      "ackDelay": 150,
+      "mib": 32,
+      "transferSeconds": 1.5002000000476836,
+      "sendSeconds": 1.4787999999523163,
+      "receiverWrites": 157,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 30081024,
+        "peakFlight": 4194304,
+        "reads": 32,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 0,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "other": {
+            "scheduled": 1,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "250ms": {
+            "scheduled": 88,
+            "fired": 0,
+            "elapsed": 0
+          }
+        },
+        "wait": {
+          "checks": 90,
+          "flight": 84,
+          "buffered": 4,
+          "pacing": 2
+        },
+        "firstBinaryAt": 3443.2999999523163,
+        "lastBinaryAt": 4922.099999904633
+      }
+    },
+    {
+      "variant": "diagnostic-unpaced",
+      "repeat": 3,
+      "ackDelay": 150,
+      "mib": 32,
+      "transferSeconds": 1.520600000143051,
+      "sendSeconds": 1.5000999999046325,
+      "receiverWrites": 154,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 29818880,
+        "peakFlight": 4194304,
+        "reads": 32,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 0,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "other": {
+            "scheduled": 1,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "250ms": {
+            "scheduled": 91,
+            "fired": 0,
+            "elapsed": 0
+          }
+        },
+        "wait": {
+          "checks": 93,
+          "flight": 88,
+          "buffered": 3,
+          "pacing": 2
+        },
+        "firstBinaryAt": 3864,
+        "lastBinaryAt": 5364.099999904633
+      }
+    },
+    {
+      "variant": "diagnostic-unpaced",
+      "repeat": 3,
+      "ackDelay": 0,
+      "mib": 32,
+      "transferSeconds": 2.8722000000476835,
+      "sendSeconds": 2.8254000000953674,
+      "receiverWrites": 139,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 33554432,
+        "peakFlight": 1966080,
+        "reads": 32,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 0,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "other": {
+            "scheduled": 2,
+            "fired": 1,
+            "elapsed": 1504.7000000476837
+          },
+          "250ms": {
+            "scheduled": 104,
+            "fired": 6,
+            "elapsed": 1513.6000001430511
+          }
+        },
+        "wait": {
+          "checks": 111,
+          "flight": 1,
+          "buffered": 103,
+          "pacing": 7
+        },
+        "firstBinaryAt": 3526.5,
+        "lastBinaryAt": 6351.900000095367
+      }
+    },
+    {
+      "variant": "diagnostic-unpaced",
+      "repeat": 3,
+      "ackDelay": 300,
+      "mib": 32,
+      "transferSeconds": 2.7242999999523163,
+      "sendSeconds": 2.7041000001430513,
+      "receiverWrites": 157,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 30113792,
+        "peakFlight": 4194304,
+        "reads": 32,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 0,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "other": {
+            "scheduled": 2,
+            "fired": 1,
+            "elapsed": 1504.3999998569489
+          },
+          "250ms": {
+            "scheduled": 103,
+            "fired": 1,
+            "elapsed": 251.40000009536743
+          }
+        },
+        "wait": {
+          "checks": 105,
+          "flight": 93,
+          "buffered": 10,
+          "pacing": 2
+        },
+        "firstBinaryAt": 3606.5999999046326,
+        "lastBinaryAt": 6310.700000047684
+      }
+    },
+    {
+      "variant": "diagnostic-burst256",
+      "repeat": 1,
+      "ackDelay": 150,
+      "mib": 32,
+      "transferSeconds": 1.5337000000476837,
+      "sendSeconds": 1.5147999999523163,
+      "receiverWrites": 162,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 29687808,
+        "peakFlight": 4194304,
+        "reads": 32,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 25,
+            "fired": 12,
+            "elapsed": 138.5
+          },
+          "other": {
+            "scheduled": 1,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "250ms": {
+            "scheduled": 70,
+            "fired": 0,
+            "elapsed": 0
+          }
+        },
+        "wait": {
+          "checks": 97,
+          "flight": 71,
+          "buffered": 0,
+          "pacing": 26
+        },
+        "firstBinaryAt": 4155,
+        "lastBinaryAt": 5669.799999952316
+      }
+    },
+    {
+      "variant": "diagnostic-burst256",
+      "repeat": 1,
+      "ackDelay": 0,
+      "mib": 32,
+      "transferSeconds": 5.6117000000476835,
+      "sendSeconds": 5.564599999904632,
+      "receiverWrites": 157,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 33554432,
+        "peakFlight": 2097152,
+        "reads": 32,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 39,
+            "fired": 2,
+            "elapsed": 28.299999952316284
+          },
+          "other": {
+            "scheduled": 4,
+            "fired": 3,
+            "elapsed": 4503.299999952316
+          },
+          "250ms": {
+            "scheduled": 61,
+            "fired": 14,
+            "elapsed": 3527.4000000953674
+          }
+        },
+        "wait": {
+          "checks": 107,
+          "flight": 21,
+          "buffered": 40,
+          "pacing": 46
+        },
+        "firstBinaryAt": 3511.7999999523163,
+        "lastBinaryAt": 9076.399999856949
+      }
+    },
+    {
+      "variant": "diagnostic-burst256",
+      "repeat": 2,
+      "ackDelay": 0,
+      "mib": 32,
+      "transferSeconds": 5.4345,
+      "sendSeconds": 5.384100000143051,
+      "receiverWrites": 156,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 33554432,
+        "peakFlight": 2097152,
+        "reads": 32,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 37,
+            "fired": 8,
+            "elapsed": 79.29999995231628
+          },
+          "other": {
+            "scheduled": 3,
+            "fired": 3,
+            "elapsed": 4511.000000238419
+          },
+          "250ms": {
+            "scheduled": 67,
+            "fired": 15,
+            "elapsed": 3779.2999999523163
+          }
+        },
+        "wait": {
+          "checks": 111,
+          "flight": 15,
+          "buffered": 52,
+          "pacing": 44
+        },
+        "firstBinaryAt": 3419.899999856949,
+        "lastBinaryAt": 8804
+      }
+    },
+    {
+      "variant": "diagnostic-burst256",
+      "repeat": 2,
+      "ackDelay": 150,
+      "mib": 32,
+      "transferSeconds": 1.519,
+      "sendSeconds": 1.5026999998092652,
+      "receiverWrites": 163,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 29949952,
+        "peakFlight": 4194304,
+        "reads": 32,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 25,
+            "fired": 13,
+            "elapsed": 145.4000005722046
+          },
+          "other": {
+            "scheduled": 1,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "250ms": {
+            "scheduled": 66,
+            "fired": 0,
+            "elapsed": 0
+          }
+        },
+        "wait": {
+          "checks": 94,
+          "flight": 66,
+          "buffered": 0,
+          "pacing": 28
+        },
+        "firstBinaryAt": 4013.7000000476837,
+        "lastBinaryAt": 5516.399999856949
+      }
+    },
+    {
+      "variant": "diagnostic-burst256",
+      "repeat": 3,
+      "ackDelay": 150,
+      "mib": 32,
+      "transferSeconds": 1.5334000000953674,
+      "sendSeconds": 1.517,
+      "receiverWrites": 161,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 30081024,
+        "peakFlight": 4194304,
+        "reads": 32,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 24,
+            "fired": 12,
+            "elapsed": 133.2000002861023
+          },
+          "other": {
+            "scheduled": 1,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "250ms": {
+            "scheduled": 64,
+            "fired": 0,
+            "elapsed": 0
+          }
+        },
+        "wait": {
+          "checks": 89,
+          "flight": 64,
+          "buffered": 0,
+          "pacing": 25
+        },
+        "firstBinaryAt": 3829.0999999046326,
+        "lastBinaryAt": 5346.099999904633
+      }
+    },
+    {
+      "variant": "diagnostic-burst256",
+      "repeat": 3,
+      "ackDelay": 0,
+      "mib": 32,
+      "transferSeconds": 5.054899999856949,
+      "sendSeconds": 5.003399999856949,
+      "receiverWrites": 154,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 33554432,
+        "peakFlight": 2097152,
+        "reads": 32,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 40,
+            "fired": 5,
+            "elapsed": 44.39999985694885
+          },
+          "other": {
+            "scheduled": 3,
+            "fired": 2,
+            "elapsed": 3009.5999999046326
+          },
+          "250ms": {
+            "scheduled": 66,
+            "fired": 13,
+            "elapsed": 3277.499999523163
+          }
+        },
+        "wait": {
+          "checks": 114,
+          "flight": 15,
+          "buffered": 51,
+          "pacing": 48
+        },
+        "firstBinaryAt": 3512.4000000953674,
+        "lastBinaryAt": 8515.799999952316
+      }
+    },
+    {
+      "variant": "diagnostic-fixed",
+      "repeat": 1,
+      "ackDelay": 150,
+      "mib": 32,
+      "transferSeconds": 4.347299999952316,
+      "sendSeconds": 4.330099999904633,
+      "receiverWrites": 167,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 29720576,
+        "peakFlight": 4194304,
+        "reads": 32,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 0,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "other": {
+            "scheduled": 3,
+            "fired": 2,
+            "elapsed": 3006.699999809265
+          },
+          "250ms": {
+            "scheduled": 100,
+            "fired": 9,
+            "elapsed": 2268.300000190735
+          }
+        },
+        "wait": {
+          "checks": 102,
+          "flight": 80,
+          "buffered": 20,
+          "pacing": 2
+        },
+        "firstBinaryAt": 4056.100000143051,
+        "lastBinaryAt": 8386.200000047684
+      }
+    },
+    {
+      "variant": "diagnostic-fixed",
+      "repeat": 2,
+      "ackDelay": 150,
+      "mib": 32,
+      "transferSeconds": 4.785400000095367,
+      "sendSeconds": 4.768900000095368,
+      "receiverWrites": 170,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 29818880,
+        "peakFlight": 4194304,
+        "reads": 32,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 0,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "other": {
+            "scheduled": 3,
+            "fired": 2,
+            "elapsed": 3003.7999999523163
+          },
+          "250ms": {
+            "scheduled": 101,
+            "fired": 11,
+            "elapsed": 2778.599999666214
+          }
+        },
+        "wait": {
+          "checks": 103,
+          "flight": 79,
+          "buffered": 22,
+          "pacing": 2
+        },
+        "firstBinaryAt": 3562.5,
+        "lastBinaryAt": 8331.400000095367
+      }
+    },
+    {
+      "variant": "diagnostic-fixed",
+      "repeat": 3,
+      "ackDelay": 150,
+      "mib": 32,
+      "transferSeconds": 4.365100000143051,
+      "sendSeconds": 4.349200000047683,
+      "receiverWrites": 170,
+      "sender": {
+        "sent": 33554432,
+        "confirmed": 29982720,
+        "peakFlight": 4194304,
+        "reads": 32,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 0,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "other": {
+            "scheduled": 3,
+            "fired": 2,
+            "elapsed": 3007.300000190735
+          },
+          "250ms": {
+            "scheduled": 95,
+            "fired": 8,
+            "elapsed": 2025.2999997138977
+          }
+        },
+        "wait": {
+          "checks": 96,
+          "flight": 76,
+          "buffered": 19,
+          "pacing": 1
+        },
+        "firstBinaryAt": 3802.199999809265,
+        "lastBinaryAt": 8151.399999856949
+      }
+    },
+    {
+      "variant": "candidate-128",
+      "repeat": 1,
+      "ackDelay": 150,
+      "mib": 128,
+      "transferSeconds": 6.327600000143051,
+      "sendSeconds": 6.309599999904632,
+      "receiverWrites": 774,
+      "sender": {
+        "sent": 134217728,
+        "confirmed": 130908160,
+        "peakFlight": 4161536,
+        "reads": 128,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 1880,
+            "fired": 1569,
+            "elapsed": 3220.500004053116
+          },
+          "other": {
+            "scheduled": 4,
+            "fired": 3,
+            "elapsed": 4506.199999809265
+          },
+          "250ms": {
+            "scheduled": 1,
+            "fired": 0,
+            "elapsed": 0
+          }
+        },
+        "wait": {
+          "checks": 1882,
+          "flight": 1,
+          "buffered": 0,
+          "pacing": 1881
+        },
+        "firstBinaryAt": 978,
+        "lastBinaryAt": 7287.599999904633
+      }
+    },
+    {
+      "variant": "candidate-128",
+      "repeat": 2,
+      "ackDelay": 150,
+      "mib": 128,
+      "transferSeconds": 6.418299999952317,
+      "sendSeconds": 6.3990999999046325,
+      "receiverWrites": 787,
+      "sender": {
+        "sent": 134217728,
+        "confirmed": 130940928,
+        "peakFlight": 4161536,
+        "reads": 128,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 1906,
+            "fired": 1594,
+            "elapsed": 3291.3000025749207
+          },
+          "other": {
+            "scheduled": 4,
+            "fired": 3,
+            "elapsed": 4508.299999713898
+          },
+          "250ms": {
+            "scheduled": 1,
+            "fired": 0,
+            "elapsed": 0
+          }
+        },
+        "wait": {
+          "checks": 1909,
+          "flight": 2,
+          "buffered": 0,
+          "pacing": 1907
+        },
+        "firstBinaryAt": 868,
+        "lastBinaryAt": 7267.099999904633
+      }
+    },
+    {
+      "variant": "candidate-128",
+      "repeat": 3,
+      "ackDelay": 150,
+      "mib": 128,
+      "transferSeconds": 6.299099999904633,
+      "sendSeconds": 6.282299999952317,
+      "receiverWrites": 764,
+      "sender": {
+        "sent": 134217728,
+        "confirmed": 130744320,
+        "peakFlight": 4194304,
+        "reads": 128,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 1873,
+            "fired": 1555,
+            "elapsed": 3172.900006055832
+          },
+          "other": {
+            "scheduled": 4,
+            "fired": 3,
+            "elapsed": 4509.099999666214
+          },
+          "250ms": {
+            "scheduled": 2,
+            "fired": 0,
+            "elapsed": 0
+          }
+        },
+        "wait": {
+          "checks": 1876,
+          "flight": 4,
+          "buffered": 0,
+          "pacing": 1872
+        },
+        "firstBinaryAt": 1030.2999999523163,
+        "lastBinaryAt": 7312.599999904633
+      }
+    },
+    {
+      "variant": "baseline-128",
+      "repeat": 1,
+      "ackDelay": 150,
+      "mib": 128,
+      "transferSeconds": 5.373200000047683,
+      "sendSeconds": 5.3605999999046325,
+      "receiverWrites": 4096,
+      "sender": {
+        "sent": 134217728,
+        "confirmed": 130285568,
+        "peakFlight": 4194304,
+        "reads": 4096,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 0,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "other": {
+            "scheduled": 3,
+            "fired": 3,
+            "elapsed": 4504.5
+          },
+          "250ms": {
+            "scheduled": 139,
+            "fired": 0,
+            "elapsed": 0
+          }
+        },
+        "wait": {
+          "checks": 0,
+          "flight": 0,
+          "buffered": 0,
+          "pacing": 0
+        },
+        "firstBinaryAt": 1277.2000000476837,
+        "lastBinaryAt": 6637.799999952316
+      }
+    },
+    {
+      "variant": "baseline-128",
+      "repeat": 2,
+      "ackDelay": 150,
+      "mib": 128,
+      "transferSeconds": 5.458700000047684,
+      "sendSeconds": 5.448300000190735,
+      "receiverWrites": 4096,
+      "sender": {
+        "sent": 134217728,
+        "confirmed": 130285568,
+        "peakFlight": 4194304,
+        "reads": 4096,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 0,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "other": {
+            "scheduled": 3,
+            "fired": 3,
+            "elapsed": 4505.200000047684
+          },
+          "250ms": {
+            "scheduled": 142,
+            "fired": 0,
+            "elapsed": 0
+          }
+        },
+        "wait": {
+          "checks": 0,
+          "flight": 0,
+          "buffered": 0,
+          "pacing": 0
+        },
+        "firstBinaryAt": 866.2999999523163,
+        "lastBinaryAt": 6314.600000143051
+      }
+    },
+    {
+      "variant": "baseline-128",
+      "repeat": 3,
+      "ackDelay": 150,
+      "mib": 128,
+      "transferSeconds": 5.359399999856949,
+      "sendSeconds": 5.348400000095367,
+      "receiverWrites": 4096,
+      "sender": {
+        "sent": 134217728,
+        "confirmed": 130285568,
+        "peakFlight": 4194304,
+        "reads": 4096,
+        "writes": 0,
+        "timers": {
+          "short": {
+            "scheduled": 0,
+            "fired": 0,
+            "elapsed": 0
+          },
+          "other": {
+            "scheduled": 3,
+            "fired": 3,
+            "elapsed": 4504.099999904633
+          },
+          "250ms": {
+            "scheduled": 100,
+            "fired": 0,
+            "elapsed": 0
+          }
+        },
+        "wait": {
+          "checks": 0,
+          "flight": 0,
+          "buffered": 0,
+          "pacing": 0
+        },
+        "firstBinaryAt": 799.2000000476837,
+        "lastBinaryAt": 6147.600000143051
+      }
+    }
+  ]
+}

@@ -8,6 +8,8 @@ Cloudflare Pages 通过 `public/_headers` 给正式静态网页及资源附加�
 - `Referrer-Policy: no-referrer` 禁止向其他站点发送来源页面信息；`nosniff` 防止按其他类型解释响应。
 - 样式保留内联能力，用于画布尺寸等界面行为；这不允许执行内联脚本。
 
+2026-10-17 的本地性能候选额外允许 `wasm-unsafe-eval`，供随本站构建分发的 SHA-256 模块编译与执行；没有允许通用的 `unsafe-eval`，`eval`／`new Function` 字符串代码仍受阻止。模块随已锁定依赖打包，不从外部 CDN 下载。不支持此能力的浏览器回退到原有流式 JS 校验。WASM 仍属于需要信任的本站代码，新增依赖也属于供应链审查范围；这不是新的文件加密层。[MDN 的策略说明](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/script-src#unsafe_webassembly_execution)区分了两种权限。构建策略测试同时检查 WASM 实际启用、字符串执行被拦截及完整下载。
+
 为保留用户主动配置 HTTPS 配对服务的能力，`connect-src` 允许 HTTPS、WSS、本站、Blob 和本地开发地址，并非只允许一个固定配对域名。这个策略主要限制执行脚本及资源类别，不能阻止已获得本站脚本执行权的攻击者通过 HTTPS 外传。域名、托管与源码账号保护仍然重要。
 
 ## HSTS：先使用 24 小时、仅正式主域

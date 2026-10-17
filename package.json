@@ -9,6 +9,8 @@
     "preview": "vite preview --host 127.0.0.1",
     "test": "playwright test",
     "test:webkit": "playwright test --config playwright.webkit.config.ts",
+    "bench:transfer": "playwright test --config playwright.benchmark.config.ts",
+    "bench:latency": "playwright test --config playwright.latency.config.ts",
     "signal:dev": "wrangler dev --config signal/wrangler.jsonc --port 8787",
     "signal:deploy": "wrangler deploy --config signal/wrangler.jsonc",
     "signal:check": "wrangler deploy --dry-run --config signal/wrangler.jsonc",
@@ -23,6 +25,7 @@
   },
   "dependencies": {
     "@noble/hashes": "^2.4.0",
+    "hash-wasm": "4.12.0",
     "jsqr": "^1.4.0",
     "qrcode": "^1.5.4"
   },

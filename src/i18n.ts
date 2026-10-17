@@ -1,6 +1,15 @@
 export type Language = 'zh' | 'en';
 type Params = Record<string, string | number>;
 const messages: Record<string, string> = {
+  '压缩传输中，接收后自动还原为原文件。': 'Transferring with compression. Originals are restored automatically.',
+  '连接持续较慢。压缩当前文件预计少用 {seconds} 秒（约 {percent}%），接收后自动还原。': 'This connection has stayed slow. Compressing this file may save {seconds} seconds (about {percent}%). Originals are restored automatically.',
+  '改用压缩传输': 'Use compression',
+  '保持原样传输': 'Keep current transfer',
+  '压缩数据无效': 'Invalid compressed data',
+  '压缩数据超出安全限制': 'Compressed data exceeds safety limits',
+  '压缩数据长度不一致': 'Compressed data length mismatch',
+  '压缩探测信息无效': 'Invalid compression probe',
+  '压缩建议无效': 'Invalid compression suggestion',
   '选择文件夹': 'Choose a folder',
   '检查文件…': 'Checking files…',
   '配对连接已中断，请检查网络后重新连接。': 'Pairing connection interrupted. Check your network and reconnect.',
@@ -15,6 +24,7 @@ const messages: Record<string, string> = {
   '保持屏幕常亮': 'Keep screen awake',
   '保持常亮': 'Keep awake',
   '关闭常亮': 'Keep awake off',
+
   '重试': 'Retry',
   '已保持屏幕常亮': 'Screen stays awake',
   '正在开启常亮…': 'Turning on…',

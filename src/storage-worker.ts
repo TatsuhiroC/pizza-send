@@ -155,9 +155,10 @@ async function handle(type: string, data: any): Promise<unknown> {
   if (type === 'write') {
     const entry = s.index.files.find(f => f.info.id === s.active);
     const bytes = new Uint8Array(data.buffer);
-    if (!s.access || !entry || data.offset !== s.written || !bytes.length || bytes.length > 65536 || s.written + bytes.length > entry.info.size) throw Error('Invalid write offset');
+    if (!s.access || !entry || data.offset !== s.written || !bytes.length || bytes.length > 256 * 1024 || s.written + bytes.length > entry.info.size) throw Error('Invalid write offset');
+    const previous = s.written;
     writeAll(s.access, bytes, s.written); s.written += bytes.length;
-    if (s.written % 1048576 === 0 || s.written === entry.info.size) s.access.flush();
+    if (Math.floor(s.written / 1048576) > Math.floor(previous / 1048576) || s.written === entry.info.size) s.access.flush();
     return s.written;
   }
   if (type === 'finish') {
