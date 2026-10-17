@@ -1,6 +1,6 @@
 # 传输优化与慢网压缩：审查及线上基线整合
 
-日期：2026-10-17（上海时间）。本次仅准备本地候选，未推送或部署。
+日期：2026-10-17（上海时间）。以下保存发布前的审查和验证记录；审查完成后，用户已批准合并发布。
 
 ## 核对当前线上版本
 
@@ -66,4 +66,4 @@
 
 本轮未新增真实手机/VPN 开关的速度实测，未完成 10/20 GiB 压缩网络传输测试。之前的实机成功记录不能替代本轮对照。
 
-尚未更新公开网站。[结构化验证记录](../benchmarks/results/2026-10-17-transfer-upgrade-review.json)包含源码摘要、线上基线证据、逐次耗时和检查状态。完整本机输出在项目旁 `pizza-send-throughput-verification/review-integration-2026-10-17/`。
+审查完成时尚未更新公开网站。[结构化验证记录](../benchmarks/results/2026-10-17-transfer-upgrade-review.json)包含源码摘要、线上基线证据、逐次耗时和检查状态。完整本机输出在项目旁 `pizza-send-throughput-verification/review-integration-2026-10-17/`。
