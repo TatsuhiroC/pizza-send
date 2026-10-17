@@ -1,111 +1,47 @@
-# 🍕 PizzaSend · File transfer
+<p align="right">
+  <a href="README.md"><img src="docs/assets/language-chinese.svg" alt="简体中文" width="86" height="26" /></a> &nbsp; English
+</p>
 
-[![阅读简体中文版](docs/assets/language-chinese.svg)](README.md) · **English**
+<div align="center">
+  <img src="docs/assets/readme-cover.svg" alt="PizzaSend — Good things, sent directly." width="960" />
+  <h3>Fresh files. Straight to you.</h3>
+  <p>No installs. No accounts. Open a page and send files to another device.</p>
+  <p><a href="https://pizzasend.dpdns.org/"><img src="docs/assets/open-pizzasend-en.svg" alt="Open PizzaSend" width="174" height="40" /></a></p>
+  <p><sub>WebRTC · DTLS · SHA-256 · Open source</sub></p>
+</div>
 
-Open a webpage and send files directly to another device. An independent implementation inspired by [FilePizza](https://github.com/kern/filepizza).
+## Good things, sent directly
 
-**Try it: [pizzasend.dpdns.org](https://pizzasend.dpdns.org/)**
+<table width="100%">
+  <thead><tr><th align="left">Feature</th><th align="left">What you get</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Direct</strong></td><td>DTLS over WebRTC. Files stay off the pairing server.</td></tr>
+    <tr><td><strong>Original</strong></td><td>Names and bytes stay intact, checked with SHA-256.</td></tr>
+    <tr><td><strong>Together</strong></td><td>One link, up to 10 people, each with their own progress.</td></tr>
+  </tbody>
+</table>
 
-Choose files → Create a transfer (the QR code appears automatically) → Share the same link or QR code with several recipients → Each recipient confirms reception → Click “Save to device” when prompted. Keep the sending page and all receiving pages open.
+Share files or folders. Pair by QR. Recover after network changes. On slow links, compression is suggested when it should save time.
 
-Up to ten recipients can receive concurrently, with independent progress, verification, and recovery. Later recipients can join the same invitation after others finish. They share the sender’s upload bandwidth, so each connection may become slower as more people join. “End share” closes every connection. Manual pairing remains one-to-one.
+## Three steps
 
-## Features
+1. **Pick your files.** Add files or folders, up to 100 files per share.
+2. **Pass it on.** Send the link or let the other person scan the QR code.
+3. **Save to the device.** They accept the transfer, then follow the save prompt.
 
-- Multiple files, shareable links, and QR codes; up to 100 files per transfer.
-- Compact share links carry one 43-character secret instead of three random fields. The complete URL on the production domain is about 74 characters. Older protocol formats still parse; the former GitHub Pages site is retired, so create new invitations from the new site.
-- The receiving page scans QR codes using the rear camera or an image. Decoding stays on this device. The camera stops after recognition, when the dialog closes, or when the page goes into the background. No microphone access is requested.
-- Long filenames use ellipses to fit the screen. Click a name to see it in full; separate Save buttons preserve the complete download name.
-- Direct file transfer over an ordered, reliable WebRTC DataChannel with DTLS encryption.
-- Network messages stay at or below 32 KiB, with disk-write batches up to 256 KiB. Receiver-confirmed throughput and acknowledgement latency automatically adjust the flight window; the browser handles network congestion. Receipts follow cumulative write boundaries, and progress reflects successful receiver writes. Gains depend on the device and network. See [implementation and measurements](docs/transfer-performance.md).
-- Slow-link compression suggestions: no compression switch appears during ordinary use. A suggestion appears only after sustained slow progress, compressible samples and an estimated saving of at least five seconds and 20%, including both devices’ processing costs. Either side may enable it. Independent blocks restore original files automatically, retaining byte-offset resume and original-file SHA-256 checks without ZIP packaging. See [conditions and formula](docs/transfer-compression.md). [Integrated review and version compatibility](docs/transfer-upgrade-review.md).
-- Incremental SHA-256 verification; a file is marked complete only after its integrity has been verified. Receivers prefer bundled WebAssembly acceleration and fall back to the existing JS implementation when unavailable. Sender hashing and resume checkpoints retain their established path. See [receiver optimization and comparative validation](docs/transfer-receive-hash.md) for measured benefits and limits.
-- Save a single file directly to disk after choosing its location in desktop Chrome / Edge. Multiple-file reception and Safari use a Worker to write chunks into local disk storage, then offer individual Save buttons or Download all. Capacity depends on device space and browser quota; there is no application-wide 20 GiB cap. Browsers without disk storage retain the 256 MiB total memory limit.
-- Unexpired verified temporary files can be saved again after reopening or refreshing the site. Temporary files appear newest first by completion time; older records use batch time. A prominent “Clear all temporary files” button at the top clears all received temporary files after confirming their count and total size, while keeping downloaded copies. Saving can require space for two copies. Complete temporary files expire 10 minutes after the batch ends. Clicking Save gives that file another 10 minutes; refreshing does not renew it. If the page is closed or paused, expired files are removed on the next visit or return. Legacy files without deadlines receive 10 minutes on their first visit after upgrading. Existing one-hour deadlines are shortened to at most 10 more minutes; earlier deadlines are kept. Browsers may reclaim storage earlier, so this is not a guaranteed minimum retention period.
-- Cancellation and failures clear unfinished temporary files while keeping earlier verified files. Abandoned partial files are cleared on the next visit. Cross-page locks protect another page’s active files. Unfinished transfers still cannot resume after a refresh.
-- Multiple-file reception does not require choosing a folder. Desktop Chrome / Edge use Download all for individual original-file downloads. On iPhone / iPad, both individual Save to device actions and Save all open the system panel when supported, offering Save to Files, image saving and sharing to other apps. If system batch saving is unavailable or files are large, Safari offers Save one by one, requiring an explicit click for each file. Names and contents stay intact, without ZIP packaging.
-- Automatic pairing incrementally exchanges connection addresses (Trickle ICE), including late candidates, and distinguishes sender availability, direct-path discovery, occupied links, and expired sessions.
-- Automatic pairing reconnects after network changes and resumes from the receiver’s confirmed position, preserving verification and the save location. Both pages must stay open.
-- Sharing and receiving try to keep the screen awake by default, with an opt-out switch and feedback when unsupported, denied, or released by the system. The lock is released in the background and requested again on return, and released on cancellation, failure, or completion of all recipients. Updated peers exchange background state and allow up to 10 minutes of background grace before ordinary connection timeouts apply. The OS can still suspend or discard a page; continuous locked-screen transfers and resume after refresh/closure are not guaranteed. See [background sharing](docs/background-sharing.md).
-- Manual pairing by copying connection codes, without a signaling service. Automatic reconnection is not supported in manual mode.
-- Instant Chinese / English switching with a saved language preference; desktop and mobile layouts, with no third-party fonts or analytics scripts.
+## Before you send
 
-## Deployment architecture
+- **Keep both pages open.** Automatic pairing can reconnect; refreshing or closing loses unfinished transfers. Phone locking may interrupt them.
+- **Save what you receive.** Browser copies have a ten-minute expiry and may be reclaimed sooner. Your downloaded copies stay.
+- **Size depends on the receiver.** Space and browser quota set the limit. Without disk storage, total reception is capped at 256 MiB.
+- **Some networks cannot connect.** There is no relay fallback. Links grant access: share them only with people you trust.
 
-The frontend is a static Vite + TypeScript website hosted on Cloudflare Pages at `https://pizzasend.dpdns.org/`. GitHub retains the source and automated checks; the former GitHub Pages deployment is disabled. A Cloudflare Worker with Durable Objects forwards pairing messages only, while STUN helps discover connection addresses. **File contents are never transferred through or stored by the signaling service. There is no TURN file relay.**
+## A little more
 
-The production signaling endpoint is `https://signal.pizzasend.dpdns.org`. The domain is registered with DigitalPlat and managed through Cloudflare's free DNS plan, and points to the existing Worker. The website uses the new endpoint automatically, including browsers that saved the previous default. Custom endpoints and an empty setting for manual pairing are preserved. Accessibility still needs to be tested on each network.
+[Develop & deploy](docs/development.en.md) &nbsp; · &nbsp; [Security design](docs/security-hardening.md) &nbsp; · &nbsp; [Engineering notes](docs/README.md) &nbsp; · &nbsp; [MIT License](LICENSE)
 
-Automatic pairing encrypts SDP information with an AES-256-GCM key generated in the browser. The key is stored in the share URL's `#` fragment and is not sent to the static website or signaling service in HTTP requests. The receiving page clears the fragment from the address bar after reading it. The signaling service can see the room, roles, connection times, network addresses, and encrypted message sizes. Room role tokens are stored as SHA-256 digests. Initial pairing invitations expire after 30 minutes and allow up to ten concurrent recipients. Each recipient has an independent connection room, credentials, and encryption key. Only the authenticated sender can list members and obtain connection sender credentials. Explicitly ending the share closes the invitation and all its connections. Unexpected signaling disconnections preserve the room so the same browser session can reconnect until it expires.
+<sub>Most engineering notes are in Chinese.</sub>
 
-In v0.2, initial pairing invitations still expire after 30 minutes. Once both browser sessions are bound, authenticated heartbeats renew recovery access for roughly 30 minutes after the latest renewal, capped at 24 hours from room creation. Renewal never admits a new recipient through an expired invitation or reopens an ended room.
+---
 
-Compact links use `#2.<43 characters>`. The fragment retains a full 256-bit random secret. Distinct HKDF-SHA-256 labels derive the room ID and receiver credential in the browser; room creation sends only the room ID and the SHA-256 digest of that credential. The secret is not submitted or stored on the server, and no URL-shortening redirect service is needed.
-
-Anyone with the share link can receive the files, so share it through a trusted channel. Manual pairing codes contain network connection information and should also be kept private. Users still need to trust the website's code and publisher; this product has not undergone an independent security audit.
-
-Security controls rate-limit creation, reads, writes, handshakes, and authentication failures before room lookups. Each IP is limited to ten creation requests per minute; the fourth request onward requires server-validated Turnstile verification, and verification retries also count. Global admission defaults to 1,000 creation reservations per UTC day, 60 per minute, and 128 active share reservations. Each share still supports ten concurrent recipients. These admission caps pause new shares without canceling existing transfers or recovery sessions.
-
-New HTTP signaling requests carry credentials in authorization headers. WebSocket connections use single-use, role/client-bound tickets valid for 30 seconds. The server temporarily accepts legacy URL credentials for old pages. Automatic request URL logs are disabled; custom logs aggregate anomaly categories without secrets, raw IPs, URLs, or message contents. See [security controls and validation](docs/security-hardening.md).
-
-The initial release cannot guarantee a direct connection between every pair of networks. Symmetric NAT, UDP restrictions, corporate networks, VPN routing, and regional access restrictions can affect connectivity. Try the same Wi-Fi network first. Failed connections show an error; there is no relay fallback. With automatic pairing, network changes or temporary disconnections trigger address discovery and a new encrypted direct connection, then resume from the byte position already written by the receiver. Foreground recovery waits up to two minutes; a known background peer receives up to 10 minutes of background grace. Completed files are skipped, and the current file’s disk stream or memory data and SHA-256 state are preserved. The whole file is still verified on completion. Recovery requires an accessible signaling service, an unexpired room, and a direct path through the new networks; recovery time and route speed are not guaranteed. Closing or refreshing a page, or having the browser discard it, loses the session. Locking a phone may cause this. Manual pairing does not reconnect automatically.
-
-For troubleshooting, refresh both pages and create a new link. Keep the sending page visible and the phone unlocked. Sharing Wi-Fi does not guarantee connectivity with a VPN; the VPN must permit local networking and WebRTC / UDP. First test with both VPNs off, then compare. Leaving or completing reception releases only that recipient’s slot. Unexpected network loss retains the slot for the original session to recover. Other recipients can join through the same link until the invitation expires; one person leaving does not interrupt the others.
-
-## Local development
-
-Requires Node.js 22.12 or later.
-
-```sh
-npm ci
-npm run dev
-# Start the signaling service in another terminal
-npm run signal:dev
-```
-
-Enter `http://127.0.0.1:8787` in the webpage's connection settings. Leave it empty to use manual pairing. Edit `public/app.config.json` to set deployment defaults. The default STUN server is `stun:stun.cloudflare.com:3478`; it does not relay files.
-
-## Deploy your own instance
-
-1. Fork the repository and import it into Cloudflare Pages. Use production branch `main`, build command `npm run build`, output directory `dist`, and Node.js 22.12 or a newer 22.x release. Connect your custom domain and verify HTTPS. Cloudflare builds and publishes updates to `main`; GitHub Actions runs the checks separately and no longer publishes GitHub Pages. Complete local verification before pushing to the production branch.
-2. Edit the Worker name and `ALLOWED_ORIGINS` in `signal/wrangler.jsonc`, using your frontend's origin. The default deployment allows only the production custom origin and two local development origins; Cloudflare preview hostnames cannot use the production signaling service by default. Replace the custom domain in `routes` with your own active Cloudflare domain, or remove `routes` to use only `workers.dev`.
-3. Run `npx wrangler login`. Create a free Turnstile widget restricted to your frontend hostname, replace `TURNSTILE_SITE_KEY`, and store its server secret using `npx wrangler secret put TURNSTILE_SECRET_KEY --config signal/wrangler.jsonc`. Never commit the secret. Then run `npm run signal:deploy`. Durable Objects use SQLite storage, which your account must support. Usage limits and charges depend on your Cloudflare account.
-4. Set `signalUrl` in `public/app.config.json` to the Worker's returned HTTPS URL, then commit and publish. Worker updates must be deployed separately. Access tokens are not stored in the repository.
-
-## Verification
-
-```sh
-npm run build
-npx playwright install --with-deps chromium webkit
-npm test
-npm run test:webkit
-npm run signal:check
-```
-
-Browser tests cover automatic and manual pairing over real DataChannels, 20 MiB multi-file downloads with independent SHA-256 verification, empty files, Chinese filenames, rejection of corrupted files, cancellation, origin restrictions, encrypted-message tampering, and responsive layouts. Large-file tests write 200 MiB and 1 GiB files to real browser OPFS disk streams, then read them back and independently verify them. This replaces the native save dialog in tests; it does not automate the system save dialog.
-
-Tests use virtual media devices only in isolated browsers to expose local ICE interfaces and verify video scanning. The application requests camera access only after the user clicks the scan button and does not access the microphone. Transfer times measured by automated tests on one machine do not represent cross-device or internet performance and do not demonstrate a speed improvement over FilePizza.
-
-Recovery tests cover repeated connection interruptions, simultaneous signaling disconnections, retained disk streams, a lost completion receipt, invalid resume positions, corruption after recovery, and cancellation during recovery. These force real connections to close in isolated browsers. After the custom signaling domain went live, the user reported successful transfers without a VPN and successful resumption after turning a VPN off mid-transfer. This describes that user’s devices and network, rather than validation of all VPNs or cross-network combinations.
-
-See the [initial release validation record](docs/validation.md) (in Chinese) for detailed results.
-
-The original v0.2 44-test suite also covers 512 MiB reception through the production OPFS Worker and actual export, reopening verified files, duplicate names, empty files, confirmation-based cleanup, preserved downloads, cross-page protection, abandoned partials, quota retry, write failures, and preservation of earlier verified files when a later file fails. Full-file ArrayBuffer conversion is forbidden in the 512 MiB receiving page; exported content is independently hashed.
-
-Actual macOS Safari 27.0.1 received 512 MiB through the production flow using the deployed Cloudflare signaling service. The file remained available after refreshing; its downloaded SHA-256 matched, and clearing temporary storage kept the download. The production storage module also passed 10 GiB / 20 GiB write and actual export checks in isolated WebKit; those capacity tests do not use WebRTC. Earlier standalone Mac Safari 2 GiB / 20 GiB results remain documented separately. **Large-file reception and export on an actual iPhone have not yet been verified; 20 GiB reception is not promised for every phone.** See the [v0.2 validation record](docs/safari-storage.md) (in Chinese).
-
-## Future work
-
-Speed tests across real devices and different networks, actual VPN switching, connection-failure diagnostics, persistent resumption after page refreshes, a PWA offline shell, and performance optimizations guided by measurements. Keep file transfers direct; never silently upload files when a connection fails.
-
-MIT License.
-
-Multi-recipient tests cover three concurrent real DataChannel transfers, one recipient recovering while the others finish, later joins, original filenames and independent SHA-256 download checks, recipient cancellation, the ten-slot limit, credential isolation, invitation expiry, and cancellation races during room creation. These run in isolated Chrome pages on one machine; ten-device concurrency has not been tested.
-
-Receiving into browser storage now shows “Files received. Save to your device.” with prominent save buttons above the progress summary. Completion scrolls to the save area, waiting if a dialog is open or the page is hidden. Each file has a separate action; “Save requested” asks you to confirm the browser download prompt and does not claim it succeeded. Direct disk reception shows “Saved to your device” only after the writers close. Disk temporary files keep their existing ten-minute retention; the memory fallback is lost on refresh or close.
-
-See the [2026-10-14 code review](docs/review-2026-10-14.md) (in Chinese) for stale scanner and rate-limit cleanup isolation, dependency and unused-code checks, validation scope and maintenance recommendations. The [2026-10-13 review](docs/review-2026-10-13.md) retains the earlier connection and saving fixes.
-
-See the [Cloudflare migration record](docs/cloudflare-migration.md) for production build settings and the effects of retiring the old site.
-
-The production site enforces CSP script restrictions, blocks framing, and sends no referrer information. HSTS initially lasts 24 hours on the production hostname only, without subdomain inclusion or preload; change the hostname in `public/_headers` when self-hosting. Custom HTTPS signaling endpoints remain supported. See [web security headers](docs/web-security-headers.md) for policy and validation limits.
+<p align="center"><sub>Inspired by <a href="https://github.com/kern/filepizza">FilePizza</a>. Independently built.<br>A little pizza spirit. A direct connection.</sub></p>
