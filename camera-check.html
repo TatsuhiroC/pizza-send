@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="robots" content="noindex,nofollow"/><meta name="theme-color" content="#f8f5ed"/>
+  <link rel="icon" type="image/svg+xml" href="./pizza.svg"/><title>PizzaSend · 相机对照测试</title>
+</head>
+<body><main>
+  <header>PizzaSend · 相机诊断</header><h1>左右画面对照</h1>
+  <p>这是独立测试页。左边是“浏览器画面”，右边是“原始帧对照”，两边来自同一个镜头。画面只在本机处理，不会传输文件。</p>
+  <div class="controls"><button id="open-scanner" disabled>打开相机对照</button><button id="close-scanner" disabled>停止相机</button></div>
+  <section class="scan-frame" aria-label="同一相机的两幅对照画面"><video id="scan-video" muted playsinline aria-label="浏览器相机画面"></video></section>
+  <p id="camera-status" role="status">点击“打开相机对照”，允许相机后观察最初 10 秒。</p>
+  <details class="camera-debug" open><summary>诊断文字（仅本机）</summary><button id="copy-report" disabled>复制诊断文字</button><pre id="camera-report">等待相机启动。</pre></details>
+</main><script type="module" src="/src/camera-check.ts"></script></body>
+</html>

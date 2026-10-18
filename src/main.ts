@@ -6,7 +6,9 @@ import { downloadType } from './download';
 import { registerStatic, setText, t, toggleLanguage } from './i18n';
 import QRCode from 'qrcode';
 import { deriveShare, deriveRecipientShare, receiverDigest, shareFragment, parseShare, isSharingURL } from './share';
-import { CameraScanner } from './scanner';
+import { CameraScanner, type CameraInfo } from './scanner';
+import { CameraPreview, needsFramePreview } from './camera-preview';
+import { fitCameraFrame } from './camera-frame';
 import { supportsTemporaryStorage, listTemporaryFiles, temporaryURL, retainTemporaryFile, deleteTemporaryFile, storedKey, temporaryBusyCount, suspendTemporaryStorage, type StoredFile } from './received-storage';
 import { Transfer, AutoPair, bytes, randomToken, packDescription, unpackDescription, signalKey, type Config, type FileInfo, type TransferEvent } from './protocol';
 import { GroupSender, groupURL, groupRequest, type Recipient } from './group';
@@ -54,7 +56,7 @@ app.innerHTML = [
   '<details class="settings"><summary>连接设置</summary><div class="settings-body"><label for="signal-url">配对服务地址</label><input id="signal-url" placeholder="https://pizza-send-signal.…workers.dev"/><label for="stun-url">STUN 服务地址</label><input id="stun-url" placeholder="stun:stun.cloudflare.com:3478"/><button id="save-settings" class="secondary">保存设置</button><p class="subtle">没有配对服务时，可用手动配对码连接。STUN 只帮助建立连接，不中转文件。</p></div></details>',
   '</main><footer><span>🍕 一点披萨精神，一份直接的分享。</span><span>受 <a href="https://github.com/kern/filepizza" target="_blank" rel="noopener">FilePizza</a> 启发 · 开源制作</span></footer>',
   '<dialog id="pair-dialog"><div class="dialog-heading"><h2>手动配对</h2><button id="close-dialog" class="icon-button" aria-label="关闭配对窗口">'+icon('close')+'</button></div><p id="pair-instructions"></p><label id="outgoing-label" for="outgoing-code">配对码</label><textarea id="outgoing-code" rows="4" readonly></textarea><div class="dialog-actions"><button id="copy-code" class="secondary">'+icon('copy')+'复制配对码</button><button id="pair-qr-button" class="secondary">'+icon('qr')+'二维码</button></div><canvas id="pair-qr" hidden></canvas><div id="answer-section"><label for="answer-code">对方返回的应答码</label><textarea id="answer-code" rows="3" placeholder="粘贴接收方返回的 PS1. 应答码"></textarea><button id="apply-answer" class="primary wide">完成配对 '+icon('arrow')+'</button></div><p class="subtle">仅交换连接信息，文件仍通过加密直连发送。请只向预期接收者提供配对码。</p></dialog>',
-  '<dialog id="scan-dialog" class="scan-dialog"><div class="dialog-heading"><h2>扫描分享二维码</h2><button id="close-scanner" class="icon-button" aria-label="关闭相机">'+icon('close')+'</button></div><div class="scan-frame"><video id="scan-video" muted playsinline aria-label="相机画面"></video><canvas id="scan-freeze" hidden aria-hidden="true"></canvas><div class="scan-guide" aria-hidden="true"></div><div id="scan-success" class="scan-success" hidden aria-hidden="true"><span class="scan-check"><svg viewBox="0 0 32 32" fill="none"><path d="m8 16 5 5 11-12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span><strong>扫描成功</strong><span>正在连接发送方…</span></div></div><p id="scan-status" role="status">请允许相机权限，将对方的二维码放入画面。</p><p class="subtle">画面仅在本机识别，关闭后相机会停止。</p><div class="dialog-actions"><button id="scan-again" class="secondary" hidden>重试相机</button><button id="choose-qr-image" class="secondary">'+icon('file')+'从图片识别</button></div><input id="qr-image-input" type="file" accept="image/*" hidden/></dialog>',
+  '<dialog id="scan-dialog" class="scan-dialog"><div class="dialog-heading"><h2>扫描分享二维码</h2><button id="close-scanner" class="icon-button" aria-label="关闭相机">'+icon('close')+'</button></div><div class="scan-frame"><video id="scan-video" muted playsinline aria-label="相机画面"></video><canvas id="scan-preview" hidden aria-label="相机画面"></canvas><canvas id="scan-freeze" hidden aria-hidden="true"></canvas><div class="scan-guide" aria-hidden="true"></div><div id="scan-success" class="scan-success" hidden aria-hidden="true"><span class="scan-check"><svg viewBox="0 0 32 32" fill="none"><path d="m8 16 5 5 11-12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span><strong>扫描成功</strong><span>正在连接发送方…</span></div></div><p id="scan-status" role="status">请允许相机权限，将对方的二维码放入画面。</p><p class="subtle">画面仅在本机识别，关闭后相机会停止。</p><div class="dialog-actions"><button id="scan-again" class="secondary" hidden>重试相机</button><button id="choose-qr-image" class="secondary">'+icon('file')+'从图片识别</button></div><input id="qr-image-input" type="file" accept="image/*" hidden/></dialog>',
   '<dialog id="cleanup-dialog"><div class="dialog-heading"><h2>清理全部暂存？</h2></div><p id="cleanup-name"></p><p>请确认所有文件已保存，并且浏览器下载已经完成。清理后无法再从本站保存这些暂存；本地下载的副本会保留。</p><div class="dialog-actions"><button id="keep-stored" class="secondary">保留暂存</button><button id="confirm-cleanup" class="primary">确认清理</button></div><p id="cleanup-error" class="subtle" role="alert" hidden></p></dialog>',
   '<dialog id="batch-save-dialog" aria-labelledby="batch-save-heading"><div class="dialog-heading"><h2 id="batch-save-heading">逐个保存文件</h2><button id="close-batch-save" class="icon-button" type="button" aria-label="关闭保存窗口">'+icon('close')+'</button></div><p>每次点击保存一个文件，确认浏览器下载提示后，再保存下一个。</p><p id="batch-save-progress" class="subtle" role="status"></p><p id="batch-save-filename" class="batch-save-filename"></p><a id="batch-save-next" class="primary wide"></a></dialog>',
   '<dialog id="filename-dialog" aria-labelledby="filename-heading"><div class="filename-surface"><div class="dialog-heading"><h2 id="filename-heading">完整文件名</h2><button id="close-filename" class="icon-button" type="button" aria-label="关闭文件名窗口">'+icon('close')+'</button></div><p id="full-filename"></p></div></dialog>',
@@ -247,7 +249,35 @@ $('confirm-cleanup').onclick = () => run(async () => {
   }
 });
 $<HTMLDialogElement>('cleanup-dialog').addEventListener('cancel', event => { if (clearingStored) event.preventDefault(); });
-const scanner = new CameraScanner($<HTMLVideoElement>('scan-video'), scannedCode, message => scanMessage(message, true));
+// Opt-in, local-only diagnostics for checking a physical phone. No identifiers,
+// frames or reports leave the device; the normal interface has no extra panel.
+let cameraReport: HTMLPreElement | undefined;
+const cameraDebug = new URLSearchParams(location.search).get('camera-debug');
+if (cameraDebug === '1' || cameraDebug === '2') {
+  const details = document.createElement('details'); details.className = 'camera-debug';
+  const summary = document.createElement('summary'); setText(summary, '相机诊断（仅本机）');
+  cameraReport = document.createElement('pre');
+  details.append(summary, cameraReport); $('scan-dialog').append(details);
+}
+let updateProbe: ((info: CameraInfo) => void) | undefined;
+let latestCameraInfo: CameraInfo | undefined;
+let probeReady: Promise<void> | undefined;
+function loadCameraProbe() {
+  if (cameraDebug !== '2' || !cameraReport) return;
+  const report = cameraReport;
+  return probeReady ||= import('./camera-probe').then(({ cameraProbe }) => {
+    updateProbe = cameraProbe($<HTMLVideoElement>('scan-video'), report);
+    if (latestCameraInfo) updateProbe(latestCameraInfo);
+  }).catch(() => { setText(report, '相机对照暂不可用，请刷新后重试。'); });
+}
+function cameraInfo(info: CameraInfo) {
+  latestCameraInfo = info;
+  if (updateProbe) updateProbe(info);
+  else if (cameraReport) cameraReport.textContent = JSON.stringify(info, null, 2);
+}
+const livePreview = needsFramePreview() && cameraDebug !== '2' ? new CameraPreview($<HTMLVideoElement>('scan-video'), $<HTMLCanvasElement>('scan-preview')) : undefined;
+fitCameraFrame($<HTMLVideoElement>('scan-video'));
+const scanner = new CameraScanner($<HTMLVideoElement>('scan-video'), scannedCode, message => scanMessage(message, true), cameraReport ? cameraInfo : undefined, livePreview);
 function scanMessage(message: string, retry = false) {
   setText($('scan-status'), message); $('scan-again').hidden = !retry;
 }
@@ -268,6 +298,9 @@ async function openScanner() {
   const dialog = $<HTMLDialogElement>('scan-dialog');
   if (!dialog.open) { scannerSession++; dialog.showModal(); }
   scanMessage('请允许相机权限，将对方的二维码放入画面。');
+  const session = scannerSession;
+  if (cameraDebug === '2') await loadCameraProbe();
+  if (session !== scannerSession || !dialog.open) return;
   await scanner.start();
 }
 async function connectValue(input: string) {

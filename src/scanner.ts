@@ -1,8 +1,10 @@
-import { cameraConstraints } from './camera-choice';
+import type { CameraPreview } from './camera-preview';
+import { cameraConstraints, fixedRearCamera, rearConstraints } from './camera-choice';
 
 type Decoder = typeof import('jsqr').default;
 let decoder: Promise<Decoder> | undefined;
 const loadDecoder = () => decoder ||= import('jsqr').then(module => module.default);
+export type CameraInfo = { renderer: 'video' | 'canvas'; requests: number; namedRearSelected: boolean; requestedDeviceMatched: boolean | null; label: string; previews: number; frames: { width: number; height: number; milliseconds: number }[] };
 
 export function cameraError(error: unknown): string {
   const name = error instanceof DOMException ? error.name : '';
@@ -17,12 +19,14 @@ export class CameraScanner {
   private active = false;
   private playback?: AbortController;
   private stream?: MediaStream;
+  private rearCamera?: string;
   private timer?: ReturnType<typeof setTimeout>;
   private canvas = document.createElement('canvas');
-  constructor(private video: HTMLVideoElement, private found: (text: string) => Promise<boolean>, private error: (text: string) => void) {}
+  constructor(private video: HTMLVideoElement, private found: (text: string) => Promise<boolean>, private error: (text: string) => void, private cameraInfo?: (info: CameraInfo) => void, private livePreview?: CameraPreview) {}
   stop() {
     this.active = false; this.generation++; clearTimeout(this.timer);
     this.playback?.abort(); this.playback = undefined;
+    this.livePreview?.stop();
     delete this.video.dataset.ready;
     this.stream?.getTracks().forEach(track => track.stop()); this.stream = undefined;
     this.video.pause(); this.video.srcObject = null;
@@ -32,28 +36,77 @@ export class CameraScanner {
     if (this.active) return;
     this.stop(); this.active = true;
     const generation = this.generation;
+    const started = performance.now();
+    const info: CameraInfo = { renderer: this.livePreview ? 'canvas' : 'video', requests: 0, namedRearSelected: false, requestedDeviceMatched: null, label: '', previews: 0, frames: [] };
+    const report = () => { if (generation === this.generation) this.cameraInfo?.({ ...info, frames: [...info.frames] }); };
     if (!navigator.mediaDevices?.getUserMedia) { this.stop(); this.error('这个浏览器无法使用相机，请从图片识别或粘贴链接。'); return; }
     try {
-      const video = await cameraConstraints(navigator.mediaDevices);
+      const devices = navigator.mediaDevices;
+      const video = await cameraConstraints(devices, this.rearCamera);
       if (generation !== this.generation) return;
-      // Choose once, before capture. Do not open a default camera then replace
-      // it after permission: that produces the exact visible lens jump we avoid.
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video });
+      info.requests++; report();
+      let stream = await devices.getUserMedia({ audio: false, video });
       // Permission may finish after the user has closed the dialog.
       if (generation !== this.generation) { stream.getTracks().forEach(track => track.stop()); return; }
       this.stream = stream;
+      const pinned = typeof video.deviceId === 'object' && !Array.isArray(video.deviceId) ? video.deviceId.exact : undefined;
+      let selectedId = typeof pinned === 'string' ? pinned : undefined;
+      if (typeof pinned === 'string') { this.rearCamera = pinned; info.namedRearSelected = true; }
+      else if (devices.enumerateDevices) {
+        // Safari may expose no labels until capture is authorized. The old
+        // pre-permission-only lookup left its virtual/macro camera in use.
+        // Resolve a named ordinary rear camera BEFORE attaching any preview.
+        let rear: string | undefined;
+        try { rear = fixedRearCamera(await devices.enumerateDevices()); } catch { /* Keep the only available camera. */ }
+        if (generation !== this.generation) return;
+        if (rear) {
+          const current = stream.getVideoTracks?.()[0]?.getSettings?.().deviceId;
+          if (current !== rear) {
+            stream.getTracks().forEach(track => track.stop()); this.stream = undefined;
+            info.requests++; report();
+            stream = await devices.getUserMedia({ audio: false, video: rearConstraints(devices, rear) });
+            if (generation !== this.generation) { stream.getTracks().forEach(track => track.stop()); return; }
+            this.stream = stream;
+          }
+          selectedId = rear;
+          this.rearCamera = rear;
+          info.namedRearSelected = true;
+        }
+      }
+      if (generation !== this.generation) return;
+      const selectedTrack = stream.getVideoTracks?.()[0];
+      info.label = selectedTrack?.label || '';
+      const actualId = selectedTrack?.getSettings?.().deviceId;
+      info.requestedDeviceMatched = selectedId && actualId ? selectedId === actualId : null;
       this.video.muted = true; this.video.playsInline = true;
       const playback = this.playback = new AbortController();
+      const dimensions = () => {
+        if (generation !== this.generation || !this.video.videoWidth || !this.video.videoHeight) return;
+        const { videoWidth: width, videoHeight: height } = this.video;
+        const last = info.frames.at(-1);
+        if (info.frames.length < 16 && (last?.width !== width || last?.height !== height)) {
+          info.frames.push({ width, height, milliseconds: Math.round(performance.now() - started) }); report();
+        }
+      };
       const ready = () => {
         if (generation === this.generation && this.video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) this.video.dataset.ready = 'true';
       };
-      // Preview readiness is independent of downloading/initializing jsQR.
-      // Keep the original live video; no delayed reveal, still or canvas preview.
+      // Both display paths start before downloading/initializing jsQR.
+      // Frame rendering reads this same stream, without a settling delay.
       this.video.addEventListener('loadeddata', ready, { signal: playback.signal });
       this.video.addEventListener('playing', ready, { signal: playback.signal });
-      this.video.srcObject = stream;
+      if (this.cameraInfo) {
+        this.video.addEventListener('resize', dimensions, { signal: playback.signal });
+        this.video.addEventListener('loadedmetadata', dimensions, { signal: playback.signal });
+      }
+      this.video.srcObject = stream; this.livePreview?.start(); info.previews++; report();
       await this.video.play(); ready();
       if (generation !== this.generation) return;
+      if (this.cameraInfo) {
+        const actual = selectedTrack?.getSettings?.().deviceId;
+        info.requestedDeviceMatched = selectedId && actual ? selectedId === actual : null;
+        dimensions(); report();
+      }
       const decode = await loadDecoder();
       const frame = async () => {
         if (generation !== this.generation) return;

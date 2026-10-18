@@ -7,7 +7,7 @@
 #filename-dialog #full-filename{font-size:18px;font-weight:500;line-height:1.75;margin:20px 0 0}
 #filename-dialog.is-closing .filename-surface{animation:filename-disappear 160ms ease both}
 #filename-dialog.is-closing::backdrop{animation:overlay-disappear 160ms ease both}
-.scan-frame #scan-freeze{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;margin:0;border-radius:0;max-width:none}
+.scan-frame #scan-freeze{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;margin:0;border-radius:0;max-width:none}
 .scan-success{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:12px;color:#fffaf1;background:#20321e9c;-webkit-backdrop-filter:blur(7px);backdrop-filter:blur(7px)}
 .scan-success strong{font-size:20px}.scan-success>span:last-child{font-size:12px;color:#e8f2e2}
 .scan-check{width:58px;height:58px;border-radius:50%;display:grid;place-items:center;background:#f2faec;color:#63874f;box-shadow:0 8px 26px #17241433}
