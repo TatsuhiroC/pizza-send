@@ -161,6 +161,41 @@ test('diagnostics are opt-in, local and leave normal scanner uncluttered', async
   await page.locator('#close-scanner').click();
 });
 
+test('camera proportions fit the viewport in both languages and persist after capture stops', async ({ page }) => {
+  await page.addInitScript(() => { navigator.mediaDevices.getUserMedia = () => new Promise(() => {}); });
+  await page.goto('./'); await page.locator('#receive-tab').click(); await page.locator('#open-scanner').click();
+  for (const [width, height] of [[480, 640], [1280, 720]]) {
+    await page.locator('#scan-video').evaluate((node, [width, height]) => {
+      Object.defineProperties(node, { videoWidth: { configurable: true, value: width }, videoHeight: { configurable: true, value: height } });
+      node.dispatchEvent(new Event('resize'));
+    }, [width, height]);
+    for (const viewport of [{ width: 320, height: 740 }, { width: 390, height: 640 }, { width: 844, height: 390 }, { width: 1280, height: 900 }]) {
+      await page.setViewportSize(viewport);
+      for (let language = 0; language < 2; language++) {
+        await page.evaluate(() => document.getElementById('language-toggle')!.click());
+        await expect.poll(async () => {
+          const frame = (await page.locator('.scan-frame').boundingBox())!;
+          const dialog = (await page.locator('#scan-dialog').boundingBox())!;
+          return Math.abs(frame.width / frame.height - width / height) < .005
+            && Math.abs(dialog.x + dialog.width / 2 - viewport.width / 2) < 2
+            && Math.abs(dialog.y + dialog.height / 2 - viewport.height / 2) < 2
+            && dialog.y >= 15 && dialog.y + dialog.height <= viewport.height - 15;
+        }).toBe(true);
+      }
+    }
+  }
+  const before = (await page.locator('.scan-frame').boundingBox())!;
+  await page.locator('#scan-video').evaluate(node => {
+    Object.defineProperties(node, { videoWidth: { configurable: true, value: 0 }, videoHeight: { configurable: true, value: 0 } });
+    node.dispatchEvent(new Event('resize'));
+  });
+  await expect.poll(async () => {
+    const after = (await page.locator('.scan-frame').boundingBox())!;
+    return Math.abs(after.height - before.height) + Math.abs(after.width - before.width);
+  }).toBeLessThan(1);
+  await page.locator('#close-scanner').click();
+});
+
 test('portrait and landscape previews retain all four corners and the success still uses the same framing', async ({ page, browserName }, info) => {
   test.skip(browserName === 'webkit', 'Canvas captureStream is exercised in Chromium; WebKit covers layout separately.');
   await page.setViewportSize({ width: 390, height: 844 });
@@ -188,20 +223,25 @@ test('portrait and landscape previews retain all four corners and the success st
     if (mode === 'success') await page.evaluate(() => {
       const video = document.getElementById('scan-video') as HTMLVideoElement, still = document.getElementById('scan-freeze') as HTMLCanvasElement;
       still.width = video.videoWidth; still.height = video.videoHeight; still.getContext('2d')!.drawImage(video, 0, 0); still.hidden = false;
+      (video.srcObject as MediaStream).getTracks().forEach(track => track.stop()); video.pause(); video.srcObject = null;
     });
-    await expect.poll(() => page.locator('#scan-video').evaluate(el => (el as HTMLVideoElement).videoWidth)).toBe(mode === 'portrait' ? 720 : 1280);
+    if (mode !== 'success') await expect.poll(() => page.locator('#scan-video').evaluate(el => (el as HTMLVideoElement).videoWidth)).toBe(mode === 'portrait' ? 720 : 1280);
+    await expect.poll(async () => {
+      const box = (await page.locator('.scan-frame').boundingBox())!;
+      return Math.abs(box.width / box.height - (mode === 'portrait' ? 720 / 1280 : 1280 / 720));
+    }).toBeLessThan(.005);
     const screenshot = await page.locator('.scan-frame').screenshot({ path: info.outputPath(`camera-${mode}.png`) });
     const colors = await page.evaluate(async ({ screenshot, portrait }) => {
       const image = new Image(); image.src = 'data:image/png;base64,' + screenshot; await image.decode();
       const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
       const ctx = canvas.getContext('2d')!; ctx.drawImage(image, 0, 0);
       const ratio = portrait ? 720 / 1280 : 1280 / 720;
-      const w = Math.min(image.width, image.height * ratio), h = w / ratio, x = (image.width - w) / 2, y = (image.height - h) / 2;
-      return [[.1, .1], [.9, .1], [.1, .9], [.9, .9]].map(([u, v]) => [...ctx.getImageData(Math.round(x + u * w), Math.round(y + v * h), 1, 1).data].slice(0, 3));
+      if (Math.abs(image.width - image.height * ratio) > 1 + ratio) throw Error('Preview does not match camera proportions');
+      return [[.1, .1], [.9, .1], [.1, .9], [.9, .9]].map(([u, v]) => [...ctx.getImageData(Math.round(u * image.width), Math.round(v * image.height), 1, 1).data].slice(0, 3));
     }, { screenshot: screenshot.toString('base64'), portrait: mode === 'portrait' });
     const expected = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 0]];
     colors.forEach((color, index) => color.forEach((channel, component) => expect(Math.abs(channel - expected[index][component]), mode + ' visible corner').toBeLessThan(12)));
   }
-  await page.locator('#scan-video').evaluate(el => ((el as HTMLVideoElement).srcObject as MediaStream).getTracks().forEach(t => t.stop()));
+  await page.locator('#scan-video').evaluate(el => ((el as HTMLVideoElement).srcObject as MediaStream | null)?.getTracks().forEach(t => t.stop()));
   await page.locator('#close-scanner').click();
 });

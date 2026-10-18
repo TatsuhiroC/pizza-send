@@ -53,6 +53,24 @@ for (const slowDecoder of [false, true]) test(`iPhone frame preview preserves pi
     originalPixels.forEach((color, index) => color.forEach((channel, component) => expect(Math.abs(channel - expected[index][component])).toBeLessThanOrEqual(2)));
     await page.locator('#scan-video').evaluate(node => { (node as HTMLElement).style.transform = 'scale(1.8)'; });
     expect(await pixels()).toEqual(originalPixels);
+    await expect.poll(async () => {
+      const box = (await page.locator('.scan-frame').boundingBox())!;
+      return Math.abs(box.width / box.height - .75);
+    }).toBeLessThan(.005);
+    // Inspect the displayed frame edges, not just the canvas backing bitmap:
+    // all four corner markers must fill the view despite native video scaling.
+    const screenshot = await page.locator('.scan-frame').screenshot();
+    const displayed = await page.evaluate(async png => {
+      const image = new Image(); image.src = 'data:image/png;base64,' + png; await image.decode();
+      const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
+      const ctx = canvas.getContext('2d')!; ctx.drawImage(image, 0, 0);
+      return [[.1, .1], [.9, .1], [.1, .9], [.9, .9]].map(([x, y]) => [...ctx.getImageData(Math.round(x * image.width), Math.round(y * image.height), 1, 1).data].slice(0, 3));
+    }, screenshot.toString('base64'));
+    displayed.forEach((color, index) => color.forEach((channel, component) => expect(Math.abs(channel - expected[index][component])).toBeLessThan(12)));
+    expect(await page.locator('.scan-frame').evaluate(frame => new Promise<number>(resolve => {
+      let changes = 0; const observer = new ResizeObserver(() => changes++); observer.observe(frame);
+      setTimeout(() => { observer.disconnect(); resolve(changes); }, 300);
+    }))).toBeLessThanOrEqual(2);
     expect(await preview.evaluate(node => {
       const box = node.getBoundingClientRect(); return document.elementFromPoint(box.x + 5, box.y + box.height / 2)?.id;
     })).toBe('scan-preview');

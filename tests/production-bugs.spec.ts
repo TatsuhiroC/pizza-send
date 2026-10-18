@@ -101,13 +101,12 @@ test('one interrupted pairing request retries the same session and connects with
   await page.locator('#cancel').click();
 });
 
-test('camera frame keeps its size before permission and through video aspect-ratio changes', async ({ page }) => {
+test('camera frame follows actual source proportions and stays centered within the viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.addInitScript(() => {
     navigator.mediaDevices.getUserMedia = () => new Promise(resolve => { (window as any).__cameraReady = resolve; });
   });
   await page.goto('./'); await page.locator('#receive-tab').click(); await page.locator('#open-scanner').click();
-  const before = (await page.locator('.scan-frame').boundingBox())!;
   await expect.poll(() => page.evaluate(() => typeof (window as any).__cameraReady)).toBe('function');
   await page.evaluate(() => {
     const canvas = document.createElement('canvas'); canvas.width = 1280; canvas.height = 720;
@@ -130,8 +129,23 @@ test('camera frame keeps its size before permission and through video aspect-rat
       await video.play();
     }, [width, height]);
     await expect.poll(() => page.locator('#scan-video').evaluate(v => (v as HTMLVideoElement).videoWidth)).toBe(width);
-    const after = (await page.locator('.scan-frame').boundingBox())!;
-    expect(Math.abs(before.width - after.width)).toBeLessThan(1); expect(Math.abs(before.height - after.height)).toBeLessThan(1); expect(Math.abs(before.y - after.y)).toBeLessThan(1);
+    await expect.poll(async () => {
+      const box = (await page.locator('.scan-frame').boundingBox())!;
+      return Math.abs(box.width / box.height - width / height);
+    }).toBeLessThan(.005);
+    for (const viewport of [{ width: 390, height: 844 }, { width: 390, height: 640 }, { width: 844, height: 390 }]) {
+      await page.setViewportSize(viewport);
+      await expect.poll(async () => {
+        const box = (await page.locator('#scan-dialog').boundingBox())!;
+        return Math.abs(box.y + box.height / 2 - viewport.height / 2);
+      }).toBeLessThan(2);
+      const box = (await page.locator('.scan-frame').boundingBox())!;
+      const dialog = (await page.locator('#scan-dialog').boundingBox())!;
+      expect(Math.abs(box.width / box.height - width / height)).toBeLessThan(.005);
+      expect(Math.abs(box.x + box.width / 2 - viewport.width / 2)).toBeLessThan(2);
+      expect(dialog.y).toBeGreaterThanOrEqual(15);
+      expect(dialog.y + dialog.height).toBeLessThanOrEqual(viewport.height - 15);
+    }
   }
   await page.locator('#scan-video').evaluate(node => ((node as HTMLVideoElement).srcObject as MediaStream).getTracks().forEach(track => track.stop()));
   await page.locator('#close-scanner').click();

@@ -8,6 +8,7 @@ import QRCode from 'qrcode';
 import { deriveShare, deriveRecipientShare, receiverDigest, shareFragment, parseShare, isSharingURL } from './share';
 import { CameraScanner, type CameraInfo } from './scanner';
 import { CameraPreview, needsFramePreview } from './camera-preview';
+import { fitCameraFrame } from './camera-frame';
 import { supportsTemporaryStorage, listTemporaryFiles, temporaryURL, retainTemporaryFile, deleteTemporaryFile, storedKey, temporaryBusyCount, suspendTemporaryStorage, type StoredFile } from './received-storage';
 import { Transfer, AutoPair, bytes, randomToken, packDescription, unpackDescription, signalKey, type Config, type FileInfo, type TransferEvent } from './protocol';
 import { GroupSender, groupURL, groupRequest, type Recipient } from './group';
@@ -275,6 +276,7 @@ function cameraInfo(info: CameraInfo) {
   else if (cameraReport) cameraReport.textContent = JSON.stringify(info, null, 2);
 }
 const livePreview = needsFramePreview() && cameraDebug !== '2' ? new CameraPreview($<HTMLVideoElement>('scan-video'), $<HTMLCanvasElement>('scan-preview')) : undefined;
+fitCameraFrame($<HTMLVideoElement>('scan-video'));
 const scanner = new CameraScanner($<HTMLVideoElement>('scan-video'), scannedCode, message => scanMessage(message, true), cameraReport ? cameraInfo : undefined, livePreview);
 function scanMessage(message: string, retry = false) {
   setText($('scan-status'), message); $('scan-again').hidden = !retry;
