@@ -27,3 +27,18 @@
 自动化 WebKit 与模拟视频不能替代 iPhone 13 Pro Safari 的光学行为。需要实机首次授权与重复打开各检查一次，观察前几秒是否仍有放大、缩小或镜头切换；若仍异常，读取本机诊断再定位，不能把固定外框当成内部画面问题已解决。
 
 本地验证结果：构建通过；Chromium 38 项相机及相关回归通过；WebKit 完整回归 71 项通过、9 项按浏览器能力跳过。四角截图按像素验证，覆盖纵向实时画面、横向实时画面与成功定格；初轮定格测试因旧样式失败，修正后通过，没有放宽像素判断。
+
+
+## iPhone 实机反馈与第二轮定位
+
+用户在 iPhone 13 Pro Safari 确认浮层已居中，但 `0863562` 预览仍连续放大两次。诊断为采集请求 2 次、预览绑定 1 次、镜头名称“后置相机”，只观察到一次 480×640 尺寸。结论：首次授权后按名称选后摄、保持单次预览绑定和固定尺寸，仍不足以解决这台手机的实际画面跳变。不得将上述自动测试或 `fixedRear: true` 当作光学镜头锁定的证明。
+
+诊断字段改为 `namedRearSelected`（按名称选后摄），新增 `requestedDeviceMatched`（实际设备标识是否与请求一致，仅报告布尔值或 null）。
+
+新增仅在 `?camera-debug=2` 加载的同源视频流对照：左侧原生 video，右侧直接复制该 video 的原始帧（约每秒 15 帧，保持全画幅、最长边不超过 640 像素，无裁切、平滑、稳定等待或相机重开）。对照用于判断问题发生在采集画面中，还是 video 播放／合成路径中。两边同时变化仍不能区分光学变焦与设备内部处理；只有左侧变化才支持进一步检查浏览器显示路径。没有新增正式版传输功能。
+
+对照仅列出镜头名称、允许清单中的能力与设置，以及最多 40 次设置／显示几何变化；不记录 deviceId、groupId、图片、二维码内容或 UA。不上传、不持久化；关闭时停止绘制并清空 canvas。保留自动对焦，不盲目设置或锁定变焦。WebKit 当前源码包含格式与变焦初始化，但无法证明用户安装版本有同样行为；网页也不应假设 Safari 提供了对焦控制。参考 [WebKit AVVideoCaptureSource](https://github.com/WebKit/WebKit/blob/main/Source/WebCore/platform/mediastream/cocoa/AVVideoCaptureSource.mm) 与 [MediaStream Image Capture](https://w3c.github.io/mediacapture-image/)。
+
+进一步检索发现 [WebKit 259364](https://bugs.webkit.org/show_bug.cgi?id=259364) 及 [260195](https://bugs.webkit.org/show_bug.cgi?id=260195) 有开启相机时短暂错幅／缩放的报告；259364 的近期评论还报告 iOS 27.0.1，2023 年修复涉及 GPU 视频显示层边界同步。这支持检查显示路径，但仍不能认定用户当前问题与其相同。参考 [原始帧绘制标准](https://html.spec.whatwg.org/multipage/canvas.html#dom-context-2d-drawimage)。
+
+第二轮检查：构建通过；Chromium 相机与扫码相关 29 项通过；WebKit 相关 20 项通过、3 项按能力跳过。增加的对照检查验证原始帧像素、变焦变化记录、标识脱敏、关闭清空、重开及模块加载期间取消。WebKit 检查曾因测试替身与资源加载等待方式失败，修正测试替身、改为点击时加载对照后通过；不作为实机跳变已解决的证据。

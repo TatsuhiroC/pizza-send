@@ -250,14 +250,28 @@ $<HTMLDialogElement>('cleanup-dialog').addEventListener('cancel', event => { if 
 // Opt-in, local-only diagnostics for checking a physical phone. No identifiers,
 // frames or reports leave the device; the normal interface has no extra panel.
 let cameraReport: HTMLPreElement | undefined;
-if (new URLSearchParams(location.search).get('camera-debug') === '1') {
+const cameraDebug = new URLSearchParams(location.search).get('camera-debug');
+if (cameraDebug === '1' || cameraDebug === '2') {
   const details = document.createElement('details'); details.className = 'camera-debug';
   const summary = document.createElement('summary'); setText(summary, '相机诊断（仅本机）');
   cameraReport = document.createElement('pre');
   details.append(summary, cameraReport); $('scan-dialog').append(details);
 }
+let updateProbe: ((info: CameraInfo) => void) | undefined;
+let latestCameraInfo: CameraInfo | undefined;
+let probeReady: Promise<void> | undefined;
+function loadCameraProbe() {
+  if (cameraDebug !== '2' || !cameraReport) return;
+  const report = cameraReport;
+  return probeReady ||= import('./camera-probe').then(({ cameraProbe }) => {
+    updateProbe = cameraProbe($<HTMLVideoElement>('scan-video'), report);
+    if (latestCameraInfo) updateProbe(latestCameraInfo);
+  }).catch(() => { setText(report, '相机对照暂不可用，请刷新后重试。'); });
+}
 function cameraInfo(info: CameraInfo) {
-  if (cameraReport) cameraReport.textContent = JSON.stringify(info, null, 2);
+  latestCameraInfo = info;
+  if (updateProbe) updateProbe(info);
+  else if (cameraReport) cameraReport.textContent = JSON.stringify(info, null, 2);
 }
 const scanner = new CameraScanner($<HTMLVideoElement>('scan-video'), scannedCode, message => scanMessage(message, true), cameraReport ? cameraInfo : undefined);
 function scanMessage(message: string, retry = false) {
@@ -280,6 +294,9 @@ async function openScanner() {
   const dialog = $<HTMLDialogElement>('scan-dialog');
   if (!dialog.open) { scannerSession++; dialog.showModal(); }
   scanMessage('请允许相机权限，将对方的二维码放入画面。');
+  const session = scannerSession;
+  if (cameraDebug === '2') await loadCameraProbe();
+  if (session !== scannerSession || !dialog.open) return;
   await scanner.start();
 }
 async function connectValue(input: string) {

@@ -3,7 +3,7 @@ import { cameraConstraints, fixedRearCamera, rearConstraints } from './camera-ch
 type Decoder = typeof import('jsqr').default;
 let decoder: Promise<Decoder> | undefined;
 const loadDecoder = () => decoder ||= import('jsqr').then(module => module.default);
-export type CameraInfo = { requests: number; fixedRear: boolean; label: string; previews: number; frames: { width: number; height: number; milliseconds: number }[] };
+export type CameraInfo = { requests: number; namedRearSelected: boolean; requestedDeviceMatched: boolean | null; label: string; previews: number; frames: { width: number; height: number; milliseconds: number }[] };
 
 export function cameraError(error: unknown): string {
   const name = error instanceof DOMException ? error.name : '';
@@ -35,7 +35,7 @@ export class CameraScanner {
     this.stop(); this.active = true;
     const generation = this.generation;
     const started = performance.now();
-    const info: CameraInfo = { requests: 0, fixedRear: false, label: '', previews: 0, frames: [] };
+    const info: CameraInfo = { requests: 0, namedRearSelected: false, requestedDeviceMatched: null, label: '', previews: 0, frames: [] };
     const report = () => { if (generation === this.generation) this.cameraInfo?.({ ...info, frames: [...info.frames] }); };
     if (!navigator.mediaDevices?.getUserMedia) { this.stop(); this.error('这个浏览器无法使用相机，请从图片识别或粘贴链接。'); return; }
     try {
@@ -48,11 +48,12 @@ export class CameraScanner {
       if (generation !== this.generation) { stream.getTracks().forEach(track => track.stop()); return; }
       this.stream = stream;
       const pinned = typeof video.deviceId === 'object' && !Array.isArray(video.deviceId) ? video.deviceId.exact : undefined;
-      if (typeof pinned === 'string') { this.rearCamera = pinned; info.fixedRear = true; }
+      let selectedId = typeof pinned === 'string' ? pinned : undefined;
+      if (typeof pinned === 'string') { this.rearCamera = pinned; info.namedRearSelected = true; }
       else if (devices.enumerateDevices) {
         // Safari may expose no labels until capture is authorized. The old
         // pre-permission-only lookup left its virtual/macro camera in use.
-        // Resolve a physical wide camera now, BEFORE attaching any preview.
+        // Resolve a named ordinary rear camera BEFORE attaching any preview.
         let rear: string | undefined;
         try { rear = fixedRearCamera(await devices.enumerateDevices()); } catch { /* Keep the only available camera. */ }
         if (generation !== this.generation) return;
@@ -65,12 +66,16 @@ export class CameraScanner {
             if (generation !== this.generation) { stream.getTracks().forEach(track => track.stop()); return; }
             this.stream = stream;
           }
+          selectedId = rear;
           this.rearCamera = rear;
-          info.fixedRear = true;
+          info.namedRearSelected = true;
         }
       }
       if (generation !== this.generation) return;
-      info.label = stream.getVideoTracks?.()[0]?.label || '';
+      const selectedTrack = stream.getVideoTracks?.()[0];
+      info.label = selectedTrack?.label || '';
+      const actualId = selectedTrack?.getSettings?.().deviceId;
+      info.requestedDeviceMatched = selectedId && actualId ? selectedId === actualId : null;
       this.video.muted = true; this.video.playsInline = true;
       const playback = this.playback = new AbortController();
       const dimensions = () => {
@@ -95,7 +100,11 @@ export class CameraScanner {
       this.video.srcObject = stream; info.previews++; report();
       await this.video.play(); ready();
       if (generation !== this.generation) return;
-      if (this.cameraInfo) dimensions();
+      if (this.cameraInfo) {
+        const actual = selectedTrack?.getSettings?.().deviceId;
+        info.requestedDeviceMatched = selectedId && actual ? selectedId === actual : null;
+        dimensions(); report();
+      }
       const decode = await loadDecoder();
       const frame = async () => {
         if (generation !== this.generation) return;
