@@ -13,7 +13,7 @@ test('physical rear camera is selected by explicit identity rather than virtual-
   expect(fixedRearCamera([device('Back Camera', '', 'videoinput'), device('Back Camera', 'audio', 'audioinput')])).toBeUndefined();
 });
 
-test('constraints pin a recognized rear device and never impose capture dimensions or reopen to discover labels', async () => {
+test('constraints pin a recognized rear device and do not impose capture dimensions before permission', async () => {
   const pinned = await cameraConstraints({ enumerateDevices: async () => [device('Front Camera'), device('Back Camera', 'rear')] } as unknown as MediaDevices);
   expect(pinned).toEqual({ deviceId: { exact: 'rear' } });
   for (const devices of [
@@ -21,4 +21,20 @@ test('constraints pin a recognized rear device and never impose capture dimensio
     { enumerateDevices: async () => { throw new DOMException('Not allowed', 'NotAllowedError'); } },
     {}
   ]) expect(await cameraConstraints(devices as unknown as MediaDevices)).toEqual({ facingMode: { ideal: 'environment' } });
+});
+
+
+test('remembered physical identity is reused only while present and not relabeled as another lens', async () => {
+  const constraints = async (available: MediaDeviceInfo[]) => cameraConstraints({ enumerateDevices: async () => available } as unknown as MediaDevices, 'rear');
+  expect(await constraints([device('', 'rear')])).toEqual({ deviceId: { exact: 'rear' } });
+  for (const available of [[device('', 'other')], [device('Front Camera', 'rear')], [device('Back Triple Camera', 'rear')]]) {
+    expect(await constraints(available)).toEqual({ facingMode: { ideal: 'environment' } });
+  }
+});
+
+test('native uncropped capture is requested only when advertised without size or zoom constraints', async () => {
+  for (const supported of [false, true]) {
+    const result = await cameraConstraints({ getSupportedConstraints: () => ({ resizeMode: supported }) } as unknown as MediaDevices);
+    expect(result).toEqual({ facingMode: { ideal: 'environment' }, ...(supported ? { resizeMode: { ideal: 'none' } } : {}) });
+  }
 });

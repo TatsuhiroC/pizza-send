@@ -6,14 +6,23 @@ export function fixedRearCamera(devices: readonly MediaDeviceInfo[]): string | u
   return devices.find(device => device.kind === 'videoinput' && !!device.deviceId && ordinaryRear.test(device.label.trim()))?.deviceId;
 }
 
-export async function cameraConstraints(devices: MediaDevices): Promise<MediaTrackConstraints> {
+export function rearConstraints(devices: MediaDevices, id?: string): MediaTrackConstraints {
+  const constraints: MediaTrackConstraints = id ? { deviceId: { exact: id } } : { facingMode: { ideal: 'environment' } };
+  // Ask for native frames instead of browser crop/scale, only when supported.
+  const supported = devices.getSupportedConstraints?.() as (MediaTrackSupportedConstraints & { resizeMode?: boolean }) | undefined;
+  if (supported?.resizeMode) Object.assign(constraints, { resizeMode: { ideal: 'none' } });
+  return constraints;
+}
+
+export async function cameraConstraints(devices: MediaDevices, remembered?: string): Promise<MediaTrackConstraints> {
   try {
     if (devices.enumerateDevices) {
-      const id = fixedRearCamera(await devices.enumerateDevices());
-      if (id) return { deviceId: { exact: id } };
+      const available = await devices.enumerateDevices();
+      const id = fixedRearCamera(available) || (remembered && available.some(device => device.kind === 'videoinput' && device.deviceId === remembered && !device.label) ? remembered : undefined);
+      if (id) return rearConstraints(devices, id);
     }
   } catch { /* Enumeration can be unavailable until permission is granted. */ }
   // Leave capture resolution/aspect ratio to the selected device. Imposing a
   // landscape format on a portrait camera can change its crop during startup.
-  return { facingMode: { ideal: 'environment' } };
+  return rearConstraints(devices);
 }

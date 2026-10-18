@@ -124,6 +124,7 @@ const messages: Record<string, string> = {
   '扫描分享二维码': 'Scan a share QR code',
   '关闭相机': 'Close camera',
   '相机画面': 'Camera preview',
+  '相机诊断（仅本机）': 'Camera diagnostics (on this device only)',
   '请允许相机权限，将对方的二维码放入画面。': 'Allow camera access and point it at the sender’s QR code.',
   '画面仅在本机识别，关闭后相机会停止。': 'Images are processed on this device. Closing this window stops the camera.',
   '重试相机': 'Retry camera',

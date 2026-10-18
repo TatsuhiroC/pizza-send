@@ -1,8 +1,9 @@
-import { cameraConstraints } from './camera-choice';
+import { cameraConstraints, fixedRearCamera, rearConstraints } from './camera-choice';
 
 type Decoder = typeof import('jsqr').default;
 let decoder: Promise<Decoder> | undefined;
 const loadDecoder = () => decoder ||= import('jsqr').then(module => module.default);
+export type CameraInfo = { requests: number; fixedRear: boolean; label: string; previews: number; frames: { width: number; height: number; milliseconds: number }[] };
 
 export function cameraError(error: unknown): string {
   const name = error instanceof DOMException ? error.name : '';
@@ -17,9 +18,10 @@ export class CameraScanner {
   private active = false;
   private playback?: AbortController;
   private stream?: MediaStream;
+  private rearCamera?: string;
   private timer?: ReturnType<typeof setTimeout>;
   private canvas = document.createElement('canvas');
-  constructor(private video: HTMLVideoElement, private found: (text: string) => Promise<boolean>, private error: (text: string) => void) {}
+  constructor(private video: HTMLVideoElement, private found: (text: string) => Promise<boolean>, private error: (text: string) => void, private cameraInfo?: (info: CameraInfo) => void) {}
   stop() {
     this.active = false; this.generation++; clearTimeout(this.timer);
     this.playback?.abort(); this.playback = undefined;
@@ -32,18 +34,53 @@ export class CameraScanner {
     if (this.active) return;
     this.stop(); this.active = true;
     const generation = this.generation;
+    const started = performance.now();
+    const info: CameraInfo = { requests: 0, fixedRear: false, label: '', previews: 0, frames: [] };
+    const report = () => { if (generation === this.generation) this.cameraInfo?.({ ...info, frames: [...info.frames] }); };
     if (!navigator.mediaDevices?.getUserMedia) { this.stop(); this.error('这个浏览器无法使用相机，请从图片识别或粘贴链接。'); return; }
     try {
-      const video = await cameraConstraints(navigator.mediaDevices);
+      const devices = navigator.mediaDevices;
+      const video = await cameraConstraints(devices, this.rearCamera);
       if (generation !== this.generation) return;
-      // Choose once, before capture. Do not open a default camera then replace
-      // it after permission: that produces the exact visible lens jump we avoid.
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video });
+      info.requests++; report();
+      let stream = await devices.getUserMedia({ audio: false, video });
       // Permission may finish after the user has closed the dialog.
       if (generation !== this.generation) { stream.getTracks().forEach(track => track.stop()); return; }
       this.stream = stream;
+      const pinned = typeof video.deviceId === 'object' && !Array.isArray(video.deviceId) ? video.deviceId.exact : undefined;
+      if (typeof pinned === 'string') { this.rearCamera = pinned; info.fixedRear = true; }
+      else if (devices.enumerateDevices) {
+        // Safari may expose no labels until capture is authorized. The old
+        // pre-permission-only lookup left its virtual/macro camera in use.
+        // Resolve a physical wide camera now, BEFORE attaching any preview.
+        let rear: string | undefined;
+        try { rear = fixedRearCamera(await devices.enumerateDevices()); } catch { /* Keep the only available camera. */ }
+        if (generation !== this.generation) return;
+        if (rear) {
+          const current = stream.getVideoTracks?.()[0]?.getSettings?.().deviceId;
+          if (current !== rear) {
+            stream.getTracks().forEach(track => track.stop()); this.stream = undefined;
+            info.requests++; report();
+            stream = await devices.getUserMedia({ audio: false, video: rearConstraints(devices, rear) });
+            if (generation !== this.generation) { stream.getTracks().forEach(track => track.stop()); return; }
+            this.stream = stream;
+          }
+          this.rearCamera = rear;
+          info.fixedRear = true;
+        }
+      }
+      if (generation !== this.generation) return;
+      info.label = stream.getVideoTracks?.()[0]?.label || '';
       this.video.muted = true; this.video.playsInline = true;
       const playback = this.playback = new AbortController();
+      const dimensions = () => {
+        if (generation !== this.generation || !this.video.videoWidth || !this.video.videoHeight) return;
+        const { videoWidth: width, videoHeight: height } = this.video;
+        const last = info.frames.at(-1);
+        if (info.frames.length < 16 && (last?.width !== width || last?.height !== height)) {
+          info.frames.push({ width, height, milliseconds: Math.round(performance.now() - started) }); report();
+        }
+      };
       const ready = () => {
         if (generation === this.generation && this.video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) this.video.dataset.ready = 'true';
       };
@@ -51,9 +88,14 @@ export class CameraScanner {
       // Keep the original live video; no delayed reveal, still or canvas preview.
       this.video.addEventListener('loadeddata', ready, { signal: playback.signal });
       this.video.addEventListener('playing', ready, { signal: playback.signal });
-      this.video.srcObject = stream;
+      if (this.cameraInfo) {
+        this.video.addEventListener('resize', dimensions, { signal: playback.signal });
+        this.video.addEventListener('loadedmetadata', dimensions, { signal: playback.signal });
+      }
+      this.video.srcObject = stream; info.previews++; report();
       await this.video.play(); ready();
       if (generation !== this.generation) return;
+      if (this.cameraInfo) dimensions();
       const decode = await loadDecoder();
       const frame = async () => {
         if (generation !== this.generation) return;

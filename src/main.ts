@@ -6,7 +6,7 @@ import { downloadType } from './download';
 import { registerStatic, setText, t, toggleLanguage } from './i18n';
 import QRCode from 'qrcode';
 import { deriveShare, deriveRecipientShare, receiverDigest, shareFragment, parseShare, isSharingURL } from './share';
-import { CameraScanner } from './scanner';
+import { CameraScanner, type CameraInfo } from './scanner';
 import { supportsTemporaryStorage, listTemporaryFiles, temporaryURL, retainTemporaryFile, deleteTemporaryFile, storedKey, temporaryBusyCount, suspendTemporaryStorage, type StoredFile } from './received-storage';
 import { Transfer, AutoPair, bytes, randomToken, packDescription, unpackDescription, signalKey, type Config, type FileInfo, type TransferEvent } from './protocol';
 import { GroupSender, groupURL, groupRequest, type Recipient } from './group';
@@ -247,7 +247,19 @@ $('confirm-cleanup').onclick = () => run(async () => {
   }
 });
 $<HTMLDialogElement>('cleanup-dialog').addEventListener('cancel', event => { if (clearingStored) event.preventDefault(); });
-const scanner = new CameraScanner($<HTMLVideoElement>('scan-video'), scannedCode, message => scanMessage(message, true));
+// Opt-in, local-only diagnostics for checking a physical phone. No identifiers,
+// frames or reports leave the device; the normal interface has no extra panel.
+let cameraReport: HTMLPreElement | undefined;
+if (new URLSearchParams(location.search).get('camera-debug') === '1') {
+  const details = document.createElement('details'); details.className = 'camera-debug';
+  const summary = document.createElement('summary'); setText(summary, '相机诊断（仅本机）');
+  cameraReport = document.createElement('pre');
+  details.append(summary, cameraReport); $('scan-dialog').append(details);
+}
+function cameraInfo(info: CameraInfo) {
+  if (cameraReport) cameraReport.textContent = JSON.stringify(info, null, 2);
+}
+const scanner = new CameraScanner($<HTMLVideoElement>('scan-video'), scannedCode, message => scanMessage(message, true), cameraReport ? cameraInfo : undefined);
 function scanMessage(message: string, retry = false) {
   setText($('scan-status'), message); $('scan-again').hidden = !retry;
 }

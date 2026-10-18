@@ -54,3 +54,123 @@ test('a late accepted QR result cannot stop a newer camera session', async () =>
     }
   }
 });
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(done => { resolve = done; });
+  return { promise, resolve };
+}
+const lens = (label: string, deviceId: string) => ({ kind: 'videoinput', label, deviceId }) as MediaDeviceInfo;
+const hiddenLenses = [lens('', 'virtual'), lens('', 'wide')];
+const visibleLenses = [lens('Back Triple Camera', 'virtual'), lens('Front Camera', 'front'), lens('Back Camera', 'wide')];
+function capture(id: string, label = id) {
+  const track = { label, stopped: 0, stop() { this.stopped++; }, getSettings: () => ({ deviceId: id }) };
+  return { track, stream: { getTracks: () => [track], getVideoTracks: () => [track] } as unknown as MediaStream };
+}
+function scannerHarness(devices: Partial<MediaDevices>) {
+  const descriptors = new Map(['document', 'navigator', 'HTMLMediaElement'].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: { createElement: () => ({}) } });
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { mediaDevices: devices } });
+  Object.defineProperty(globalThis, 'HTMLMediaElement', { configurable: true, value: { HAVE_CURRENT_DATA: 2 } });
+  const attached: MediaStream[] = [], errors: string[] = [], reports: import('../src/scanner').CameraInfo[] = [];
+  let source: MediaStream | null = null;
+  const video = { dataset: {}, readyState: 0, videoWidth: 0, videoHeight: 0,
+    get srcObject() { return source; }, set srcObject(value: MediaStream | null) { source = value; if (value) attached.push(value); },
+    play: async () => {}, pause() {}, addEventListener() {} } as unknown as HTMLVideoElement;
+  const scanner = new CameraScanner(video, async () => false, text => errors.push(text), info => reports.push(info));
+  return { scanner, video, attached, errors, reports, restore() {
+    scanner.stop();
+    for (const [key, descriptor] of descriptors) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key);
+    }
+  } };
+}
+
+test('first permission resolves the physical rear lens before attaching one preview and remembers it only in the scanner', async () => {
+  let enumerations = 0;
+  const initial = capture('virtual', 'Back Triple Camera'), physical = capture('wide', 'Back Camera'), reopened = capture('wide', 'Back Camera');
+  const requests: MediaStreamConstraints[] = [], order: string[] = [];
+  const originalStop = initial.track.stop.bind(initial.track);
+  initial.track.stop = () => { order.push('stop provisional'); originalStop(); };
+  const h = scannerHarness({
+    enumerateDevices: async () => ++enumerations === 2 ? visibleLenses : hiddenLenses,
+    getUserMedia: async options => {
+      requests.push(options!); order.push('capture ' + requests.length);
+      return [initial.stream, physical.stream, reopened.stream][requests.length - 1];
+    }
+  });
+  try {
+    await h.scanner.start();
+    expect(order).toEqual(['capture 1', 'stop provisional', 'capture 2']);
+    expect(requests).toEqual([{ audio: false, video: { facingMode: { ideal: 'environment' } } }, { audio: false, video: { deviceId: { exact: 'wide' } } }]);
+    expect(h.attached).toEqual([physical.stream]); expect(initial.track.stopped).toBe(1); expect(physical.track.stopped).toBe(0);
+    expect(h.reports.at(-1)).toMatchObject({ requests: 2, fixedRear: true, previews: 1, label: 'Back Camera' });
+    expect(JSON.stringify(h.reports)).not.toContain('deviceId');
+    await h.scanner.start(); expect(requests).toHaveLength(2); // Duplicate click cannot re-open.
+    h.scanner.stop(); await h.scanner.start();
+    expect(requests[2]).toEqual({ audio: false, video: { deviceId: { exact: 'wide' } } });
+    expect(enumerations).toBe(3); expect(h.attached).toEqual([physical.stream, reopened.stream]); expect(h.errors).toEqual([]);
+    h.scanner.stop(); expect(reopened.track.stopped).toBe(1);
+  } finally { h.restore(); }
+});
+
+for (const kind of ['already physical', 'enumeration unavailable'] as const) test(`post-permission lookup keeps the original stream when ${kind}`, async () => {
+  const original = capture('wide', 'Back Camera'); let enumerations = 0, calls = 0;
+  const h = scannerHarness({
+    enumerateDevices: async () => {
+      if (++enumerations === 1) return hiddenLenses;
+      if (kind === 'enumeration unavailable') throw Error('Unavailable');
+      return visibleLenses;
+    },
+    getUserMedia: async () => { calls++; return original.stream; }
+  });
+  try {
+    await h.scanner.start(); expect(calls).toBe(1); expect(h.attached).toEqual([original.stream]);
+    expect(h.reports.at(-1)?.fixedRear).toBe(kind === 'already physical'); expect(h.errors).toEqual([]);
+  } finally { h.restore(); }
+});
+
+test('cancel during post-permission enumeration stops provisional capture immediately and cannot reopen it', async () => {
+  const lookup = deferred<MediaDeviceInfo[]>(), entered = deferred<void>(), original = capture('virtual'); let enumerations = 0, calls = 0;
+  const h = scannerHarness({
+    enumerateDevices: async () => { if (++enumerations === 1) return hiddenLenses; entered.resolve(); return lookup.promise; },
+    getUserMedia: async () => { calls++; return original.stream; }
+  });
+  try {
+    const opening = h.scanner.start(); await entered.promise; h.scanner.stop();
+    expect(original.track.stopped).toBe(1); expect(h.video.srcObject).toBeNull();
+    lookup.resolve(visibleLenses); await opening;
+    expect(calls).toBe(1); expect(h.attached).toEqual([]); expect(h.errors).toEqual([]);
+  } finally { lookup.resolve([]); h.restore(); }
+});
+
+test('late physical capture after cancellation is stopped without detaching the new scanner session', async () => {
+  const pending = deferred<MediaStream>(), entered = deferred<void>();
+  const original = capture('virtual'), late = capture('wide'), current = capture('wide'); let enumerations = 0, calls = 0;
+  const h = scannerHarness({
+    enumerateDevices: async () => ++enumerations === 1 ? hiddenLenses : visibleLenses,
+    getUserMedia: async () => {
+      calls++; if (calls === 1) return original.stream;
+      if (calls === 2) { entered.resolve(); return pending.promise; }
+      return current.stream;
+    }
+  });
+  try {
+    const old = h.scanner.start(); await entered.promise; h.scanner.stop(); await h.scanner.start();
+    pending.resolve(late.stream); await old;
+    expect(original.track.stopped).toBe(1); expect(late.track.stopped).toBe(1); expect(current.track.stopped).toBe(0);
+    expect(h.attached).toEqual([current.stream]); expect(h.video.srcObject).toBe(current.stream); expect(h.errors).toEqual([]);
+  } finally { pending.resolve(late.stream); h.restore(); }
+});
+
+test('denied permission never triggers discovery or another capture request', async () => {
+  let enumerations = 0, calls = 0;
+  const h = scannerHarness({
+    enumerateDevices: async () => { enumerations++; return hiddenLenses; },
+    getUserMedia: async () => { calls++; throw new DOMException('Denied', 'NotAllowedError'); }
+  });
+  try {
+    await h.scanner.start(); expect(enumerations).toBe(1); expect(calls).toBe(1); expect(h.attached).toEqual([]);
+    expect(h.errors).toHaveLength(1); expect(h.errors[0]).toContain('未获得相机权限');
+  } finally { h.restore(); }
+});

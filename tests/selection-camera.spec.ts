@@ -57,7 +57,7 @@ test('direct file entry fits a narrow phone, translates and allows selecting the
   await expect(page.locator('#files strong')).toHaveText('keep.txt');
 });
 
-test('camera position survives permission errors, retry controls, translation and viewport height changes', async ({ page }) => {
+test('scanner is centered on phones and desktop through permission errors, translation and viewport changes', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.addInitScript(() => {
     (window as any).__cameraCalls = 0;
@@ -66,17 +66,23 @@ test('camera position survives permission errors, retry controls, translation an
     } });
   });
   await page.goto('./'); await page.locator('#receive-tab').click(); await page.locator('#open-scanner').click();
-  const before = (await page.locator('.scan-frame').boundingBox())!;
+  const centered = async () => {
+    const box = (await page.locator('#scan-dialog').boundingBox())!, viewport = page.viewportSize()!;
+    expect(Math.abs(box.x + box.width / 2 - viewport.width / 2)).toBeLessThan(1);
+    expect(Math.abs(box.y + box.height / 2 - viewport.height / 2)).toBeLessThan(1);
+    expect(box.y).toBeGreaterThanOrEqual(15);
+    expect(box.y + box.height).toBeLessThanOrEqual(viewport.height - 15);
+  };
+  await centered();
   // Duplicate openings while permission is pending must share the existing request.
   await page.evaluate(() => { document.getElementById('open-scanner')!.click(); document.getElementById('open-scanner')!.click(); });
   await expect.poll(() => page.evaluate(() => (window as any).__cameraCalls)).toBe(1);
   await page.evaluate(() => (window as any).__denyCamera(new DOMException('Denied', 'NotAllowedError')));
   await expect(page.locator('#scan-again')).toBeVisible();
-  for (const height of [844, 740, 640]) {
-    await page.setViewportSize({ width: 390, height });
+  for (const viewport of [{ width: 390, height: 844 }, { width: 390, height: 640 }, { width: 320, height: 740 }, { width: 1280, height: 900 }, { width: 844, height: 390 }]) {
+    await page.setViewportSize(viewport);
     await page.evaluate(() => document.getElementById('language-toggle')!.click());
-    const after = (await page.locator('.scan-frame').boundingBox())!;
-    for (const value of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(before[value] - after[value]), value).toBeLessThan(1);
+    await centered();
   }
   await page.locator('#close-scanner').click();
 });
@@ -138,4 +144,64 @@ test('closing while camera enumeration is pending cannot start capture later', a
   await page.locator('#close-scanner').click();
   await page.evaluate(async () => { (window as any).__finishEnumeration([{ kind: 'videoinput', label: 'Back Camera', deviceId: 'rear' }]); await new Promise(resolve => setTimeout(resolve, 20)); });
   expect(await page.evaluate(() => (window as any).__captureCalls)).toBe(0);
+});
+
+
+test('diagnostics are opt-in, local and leave normal scanner uncluttered', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.locator('.camera-debug')).toHaveCount(0);
+  await page.goto('./?camera-debug=1');
+  await page.locator('#receive-tab').click(); await page.locator('#open-scanner').click();
+  await expect(page.locator('.camera-debug summary')).toHaveText('相机诊断（仅本机）');
+  await expect(page.locator('.camera-debug pre')).not.toBeEmpty();
+  const report = JSON.parse(await page.locator('.camera-debug pre').textContent() || '{}');
+  expect(Object.keys(report).sort()).toEqual(['fixedRear', 'frames', 'label', 'previews', 'requests']);
+  await page.evaluate(() => document.getElementById('language-toggle')!.click());
+  await expect(page.locator('.camera-debug summary')).toHaveText('Camera diagnostics (on this device only)');
+  await page.locator('#close-scanner').click();
+});
+
+test('portrait and landscape previews retain all four corners and the success still uses the same framing', async ({ page, browserName }, info) => {
+  test.skip(browserName === 'webkit', 'Canvas captureStream is exercised in Chromium; WebKit covers layout separately.');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    navigator.mediaDevices.getUserMedia = async () => {
+      const canvas = document.createElement('canvas'); canvas.width = 720; canvas.height = 1280;
+      const ctx = canvas.getContext('2d')!; ctx.fillStyle = '#eeeeee'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      for (const [color, x, y] of [['#ff0000', 0, 0], ['#00ff00', .8, 0], ['#0000ff', 0, .8], ['#ffff00', .8, .8]] as const) {
+        ctx.fillStyle = color; ctx.fillRect(x * canvas.width, y * canvas.height, canvas.width * .2, canvas.height * .2);
+      }
+      (window as any).__previewCanvas = canvas;
+      return canvas.captureStream(10);
+    };
+  });
+  await page.goto('./'); await page.locator('#receive-tab').click(); await page.locator('#open-scanner').click();
+  await expect(page.locator('#scan-video')).toHaveAttribute('data-ready', 'true');
+  for (const mode of ['portrait', 'landscape', 'success'] as const) {
+    if (mode === 'landscape') await page.evaluate(async () => {
+      const old = (window as any).__previewCanvas as HTMLCanvasElement, canvas = document.createElement('canvas');
+      canvas.width = 1280; canvas.height = 720; canvas.getContext('2d')!.drawImage(old, 0, 0, canvas.width, canvas.height);
+      const video = document.getElementById('scan-video') as HTMLVideoElement;
+      (video.srcObject as MediaStream).getTracks().forEach(t => t.stop());
+      (window as any).__previewCanvas = canvas; video.srcObject = canvas.captureStream(10); await video.play();
+    });
+    if (mode === 'success') await page.evaluate(() => {
+      const video = document.getElementById('scan-video') as HTMLVideoElement, still = document.getElementById('scan-freeze') as HTMLCanvasElement;
+      still.width = video.videoWidth; still.height = video.videoHeight; still.getContext('2d')!.drawImage(video, 0, 0); still.hidden = false;
+    });
+    await expect.poll(() => page.locator('#scan-video').evaluate(el => (el as HTMLVideoElement).videoWidth)).toBe(mode === 'portrait' ? 720 : 1280);
+    const screenshot = await page.locator('.scan-frame').screenshot({ path: info.outputPath(`camera-${mode}.png`) });
+    const colors = await page.evaluate(async ({ screenshot, portrait }) => {
+      const image = new Image(); image.src = 'data:image/png;base64,' + screenshot; await image.decode();
+      const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
+      const ctx = canvas.getContext('2d')!; ctx.drawImage(image, 0, 0);
+      const ratio = portrait ? 720 / 1280 : 1280 / 720;
+      const w = Math.min(image.width, image.height * ratio), h = w / ratio, x = (image.width - w) / 2, y = (image.height - h) / 2;
+      return [[.1, .1], [.9, .1], [.1, .9], [.9, .9]].map(([u, v]) => [...ctx.getImageData(Math.round(x + u * w), Math.round(y + v * h), 1, 1).data].slice(0, 3));
+    }, { screenshot: screenshot.toString('base64'), portrait: mode === 'portrait' });
+    const expected = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 0]];
+    colors.forEach((color, index) => color.forEach((channel, component) => expect(Math.abs(channel - expected[index][component]), mode + ' visible corner').toBeLessThan(12)));
+  }
+  await page.locator('#scan-video').evaluate(el => ((el as HTMLVideoElement).srcObject as MediaStream).getTracks().forEach(t => t.stop()));
+  await page.locator('#close-scanner').click();
 });
