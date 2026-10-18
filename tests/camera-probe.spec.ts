@@ -1,6 +1,6 @@
 import { test, expect } from './fixtures';
 
-test('comparison draws the same live stream, reports changing zoom and redacts device identifiers', async ({ page, browserName }, info) => {
+for (const standalone of [false, true]) test(`comparison ${standalone ? 'standalone page' : 'scanner'} draws the same live stream, reports changing zoom and redacts device identifiers`, async ({ page, browserName }, info) => {
   test.skip(browserName === 'webkit', 'Real canvas captureStream is covered in Chromium.');
   await page.setViewportSize({ width: 390, height: 844 });
   await page.addInitScript(() => {
@@ -17,7 +17,10 @@ test('comparison draws the same live stream, reports changing zoom and redacts d
       return stream;
     };
   });
-  await page.goto('./?camera-debug=2'); await page.locator('#receive-tab').click(); await page.locator('#open-scanner').click();
+  await page.goto(standalone ? './camera-check.html' : './?camera-debug=2');
+  if (!standalone) await page.locator('#receive-tab').click();
+  else await expect(page.getByRole('heading', { name: '左右画面对照' })).toBeVisible();
+  await page.locator('#open-scanner').click();
   await expect(page.locator('#camera-reference')).toBeVisible();
   await expect.poll(() => page.locator('#camera-reference').evaluate(el => (el as HTMLCanvasElement).width)).toBe(480);
   const report = async () => JSON.parse(await page.locator('.camera-debug pre').textContent() || '{}');
@@ -33,7 +36,12 @@ test('comparison draws the same live stream, reports changing zoom and redacts d
   const native = (await page.locator('#scan-video').boundingBox())!, reference = (await page.locator('#camera-reference').boundingBox())!;
   expect(Math.abs(native.width - reference.width)).toBeLessThan(1); expect(Math.abs(native.height - reference.height)).toBeLessThan(1);
   expect(reference.x).toBeCloseTo(native.x + native.width, 0);
-  await page.screenshot({ path: info.outputPath('camera-comparison-mobile.png') });
+  await page.screenshot({ path: info.outputPath(standalone ? 'camera-check-mobile.png' : 'camera-comparison-mobile.png') });
+  if (standalone) {
+    await page.evaluate(() => { (window as any).__copied = ''; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text: string) => { (window as any).__copied = text; } } }); });
+    await page.locator('#copy-report').click();
+    expect(JSON.parse(await page.evaluate(() => (window as any).__copied)).comparison.samples.at(-1).settings.zoom).toBe(1.7);
+  }
   await page.locator('#close-scanner').click();
   await expect.poll(() => page.locator('#camera-reference').evaluate(el => (el as HTMLCanvasElement).width)).toBe(0);
   expect(await page.evaluate(() => (window as any).__track.readyState)).toBe('ended');
@@ -68,4 +76,23 @@ test('canceling while the optional comparison loads cannot open the camera later
     expect(await page.evaluate(() => (window as any).__calls)).toBe(1);
     await page.locator('#close-scanner').click();
   } finally { release(); }
+});
+
+
+test('standalone camera check needs no query parameters and shows permission errors with copyable diagnostics', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: {
+      enumerateDevices: async () => [],
+      getUserMedia: async () => { throw new DOMException('Fixture', 'NotAllowedError'); }
+    } });
+  });
+  await page.goto('./camera-check.html');
+  await expect(page).toHaveTitle('PizzaSend · 相机对照测试');
+  await expect(page.locator('.camera-view-label')).toHaveCount(2);
+  await expect(page.locator('#camera-report')).toBeVisible();
+  await page.locator('#open-scanner').click();
+  await expect(page.locator('#camera-status')).toContainText('未获得相机权限');
+  await expect(page.locator('#open-scanner')).toBeEnabled();
+  await expect(page.locator('#copy-report')).toBeEnabled();
+  expect(JSON.parse(await page.locator('#camera-report').textContent() || '{}').requests).toBe(1);
 });

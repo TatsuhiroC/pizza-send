@@ -43,7 +43,8 @@ export function cameraProbe(video: HTMLVideoElement, report: HTMLPreElement) {
     }
   };
   const draw = (now: number) => {
-    if (video.paused || !video.srcObject || !video.closest('dialog')?.open) { reset(); return; }
+    const dialog = video.closest('dialog');
+    if (video.paused || !video.srcObject || (dialog && !dialog.open)) { reset(); return; }
     if (now - lastSample >= 250) { sample(now); lastSample = now; }
     if (now - lastDraw >= 66 && video.readyState >= 2 && video.videoWidth) {
       const scale = Math.min(1, 640 / Math.max(video.videoWidth, video.videoHeight));
