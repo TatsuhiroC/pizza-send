@@ -1,9 +1,10 @@
+import type { CameraPreview } from './camera-preview';
 import { cameraConstraints, fixedRearCamera, rearConstraints } from './camera-choice';
 
 type Decoder = typeof import('jsqr').default;
 let decoder: Promise<Decoder> | undefined;
 const loadDecoder = () => decoder ||= import('jsqr').then(module => module.default);
-export type CameraInfo = { requests: number; namedRearSelected: boolean; requestedDeviceMatched: boolean | null; label: string; previews: number; frames: { width: number; height: number; milliseconds: number }[] };
+export type CameraInfo = { renderer: 'video' | 'canvas'; requests: number; namedRearSelected: boolean; requestedDeviceMatched: boolean | null; label: string; previews: number; frames: { width: number; height: number; milliseconds: number }[] };
 
 export function cameraError(error: unknown): string {
   const name = error instanceof DOMException ? error.name : '';
@@ -21,10 +22,11 @@ export class CameraScanner {
   private rearCamera?: string;
   private timer?: ReturnType<typeof setTimeout>;
   private canvas = document.createElement('canvas');
-  constructor(private video: HTMLVideoElement, private found: (text: string) => Promise<boolean>, private error: (text: string) => void, private cameraInfo?: (info: CameraInfo) => void) {}
+  constructor(private video: HTMLVideoElement, private found: (text: string) => Promise<boolean>, private error: (text: string) => void, private cameraInfo?: (info: CameraInfo) => void, private livePreview?: CameraPreview) {}
   stop() {
     this.active = false; this.generation++; clearTimeout(this.timer);
     this.playback?.abort(); this.playback = undefined;
+    this.livePreview?.stop();
     delete this.video.dataset.ready;
     this.stream?.getTracks().forEach(track => track.stop()); this.stream = undefined;
     this.video.pause(); this.video.srcObject = null;
@@ -35,7 +37,7 @@ export class CameraScanner {
     this.stop(); this.active = true;
     const generation = this.generation;
     const started = performance.now();
-    const info: CameraInfo = { requests: 0, namedRearSelected: false, requestedDeviceMatched: null, label: '', previews: 0, frames: [] };
+    const info: CameraInfo = { renderer: this.livePreview ? 'canvas' : 'video', requests: 0, namedRearSelected: false, requestedDeviceMatched: null, label: '', previews: 0, frames: [] };
     const report = () => { if (generation === this.generation) this.cameraInfo?.({ ...info, frames: [...info.frames] }); };
     if (!navigator.mediaDevices?.getUserMedia) { this.stop(); this.error('这个浏览器无法使用相机，请从图片识别或粘贴链接。'); return; }
     try {
@@ -89,15 +91,15 @@ export class CameraScanner {
       const ready = () => {
         if (generation === this.generation && this.video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) this.video.dataset.ready = 'true';
       };
-      // Preview readiness is independent of downloading/initializing jsQR.
-      // Keep the original live video; no delayed reveal, still or canvas preview.
+      // Both display paths start before downloading/initializing jsQR.
+      // Frame rendering reads this same stream, without a settling delay.
       this.video.addEventListener('loadeddata', ready, { signal: playback.signal });
       this.video.addEventListener('playing', ready, { signal: playback.signal });
       if (this.cameraInfo) {
         this.video.addEventListener('resize', dimensions, { signal: playback.signal });
         this.video.addEventListener('loadedmetadata', dimensions, { signal: playback.signal });
       }
-      this.video.srcObject = stream; info.previews++; report();
+      this.video.srcObject = stream; this.livePreview?.start(); info.previews++; report();
       await this.video.play(); ready();
       if (generation !== this.generation) return;
       if (this.cameraInfo) {

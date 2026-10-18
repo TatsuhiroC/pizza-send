@@ -155,7 +155,7 @@ test('diagnostics are opt-in, local and leave normal scanner uncluttered', async
   await expect(page.locator('.camera-debug summary')).toHaveText('相机诊断（仅本机）');
   await expect(page.locator('.camera-debug pre')).not.toBeEmpty();
   const report = JSON.parse(await page.locator('.camera-debug pre').textContent() || '{}');
-  expect(Object.keys(report).sort()).toEqual(['frames', 'label', 'namedRearSelected', 'previews', 'requestedDeviceMatched', 'requests']);
+  expect(Object.keys(report).sort()).toEqual(['frames', 'label', 'namedRearSelected', 'previews', 'renderer', 'requestedDeviceMatched', 'requests']);
   await page.evaluate(() => document.getElementById('language-toggle')!.click());
   await expect(page.locator('.camera-debug summary')).toHaveText('Camera diagnostics (on this device only)');
   await page.locator('#close-scanner').click();
