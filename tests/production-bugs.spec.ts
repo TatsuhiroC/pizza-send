@@ -11,14 +11,14 @@ async function setup(context: BrowserContext) {
   });
 }
 
-test('10 GiB folder selection reports actual contents and shares the full manifest without buffering the file', async ({ page, context }) => {
+test('10 GiB file selection reports actual sizes and shares the full manifest without buffering the file', async ({ page, context }) => {
   await setup(context);
   const dir = await mkdtemp(join(tmpdir(), 'pizza-folder-size-')), size = 10 * 1073741824 + 192;
   const handle = await open(join(dir, 'movie.mp4'), 'w');
   try { await handle.truncate(size); await handle.write(Buffer.from('tail'), 0, 4, size - 4); } finally { await handle.close(); }
   await writeFile(join(dir, 'notes.txt'), 'notes');
   try {
-    await page.goto('./'); await page.locator('#folder-input').setInputFiles(dir);
+    await page.goto('./'); await page.locator('#file-input').setInputFiles([join(dir, 'movie.mp4'), join(dir, 'notes.txt')]);
     await expect(page.locator('#files .file-row')).toHaveCount(2);
     await expect(page.locator('#selection-summary')).toHaveText('2 个文件 · 10.00 GB');
     await page.locator('#start-send').click(); await expect(page.locator('#share-box')).toBeVisible();

@@ -17,7 +17,8 @@
 - [传输优化与慢网压缩审查](transfer-upgrade-review.md)
 - [压缩触发条件与估算公式](transfer-compression.md)
 - [接收端校验优化](transfer-receive-hash.md)
-- [文件选择与相机调整](selection-camera-review.md)
+- [直接选择文件、文件夹 ZIP 打包与清空选择](folder-archives.md)
+- [文件选择与相机调整（历史记录）](selection-camera-review.md)
 
 ## 维护记录 · Maintenance
 

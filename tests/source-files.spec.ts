@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { checkSources, droppedFiles, readSource, SourceReadError } from '../src/source-files';
+import { checkSources, droppedSources, readSource, SourceReadError } from '../src/source-files';
 import { remainingTime } from '../src/remaining-time';
 
 test('large source validation reads only head and tail without a 32-bit size conversion', async () => {
@@ -27,13 +27,16 @@ test('unreadable and truncated source ranges fail with an actionable source erro
 
 test('folder import drains every directory batch and never counts directory metadata as a file', async () => {
   const a = new File(['first'], 'a.txt'), b = new File(['second'], 'b.txt');
-  const entry = (file: File) => ({ isFile: true, isDirectory: false, file: (resolve: (file: File) => void) => resolve(file) });
+  const entry = (file: File) => ({ name: file.name, isFile: true, isDirectory: false, file: (resolve: (file: File) => void) => resolve(file) });
   let batches = 0;
-  const directory = { isDirectory: true, isFile: false, createReader: () => ({ readEntries: (resolve: (entries: unknown[]) => void) => resolve([ [entry(a)], [entry(b)], [] ][batches++]) }) };
+  const directory = { name: '番茄炒鸡蛋', isDirectory: true, isFile: false, createReader: () => ({ readEntries: (resolve: (entries: unknown[]) => void) => resolve([ [entry(a)], [entry(b)], [] ][batches++]) }) };
   const data = { items: [{ kind: 'file', webkitGetAsEntry: () => directory }], files: [new File([new Uint8Array(192)], 'folder')] } as unknown as DataTransfer;
-  const files = await droppedFiles(data);
-  expect(batches).toBe(3); expect(files.map(file => file.name)).toEqual(['a.txt', 'b.txt']);
-  expect(files.reduce((sum, file) => sum + file.size, 0)).toBe(11);
+  const sources = await droppedSources(data);
+  expect(batches).toBe(3); expect(sources).toHaveLength(1);
+  const folder = sources[0]; if (folder.kind !== 'folder') throw Error('Expected a folder');
+  expect(folder.name).toBe('番茄炒鸡蛋');
+  expect(folder.entries.map(entry => entry.path)).toEqual(['番茄炒鸡蛋/', '番茄炒鸡蛋/a.txt', '番茄炒鸡蛋/b.txt']);
+  expect(folder.entries.reduce((sum, entry) => sum + (entry.file?.size || 0), 0)).toBe(11);
 });
 
 test('ETA uses remaining confirmed bytes, distinguishes unknown speed and final verification', () => {
@@ -50,16 +53,17 @@ test('ETA uses remaining confirmed bytes, distinguishes unknown speed and final 
 test('mixed directory imports capture fallback files before the drop event becomes protected', async () => {
   const a = new File(['first'], 'a.txt'), b = new File(['second'], 'b.txt');
   let protectedMode = false;
-  const directory = { isDirectory: true, isFile: false, createReader: () => {
+  const directory = { name: '番茄炒鸡蛋', isDirectory: true, isFile: false, createReader: () => {
     let done = false;
     return { readEntries: (resolve: (entries: unknown[]) => void) => {
       protectedMode = true;
-      resolve(done ? [] : [{ isFile: true, file: (resolve: (file: File) => void) => resolve(a) }]); done = true;
+      resolve(done ? [] : [{ name: a.name, isFile: true, file: (resolve: (file: File) => void) => resolve(a) }]); done = true;
     } };
   } };
-  const data = { items: [
+  const data = { files: [], items: [
     { kind: 'file', webkitGetAsEntry: () => directory },
     { kind: 'file', getAsFile: () => protectedMode ? null : b }
   ] } as unknown as DataTransfer;
-  expect((await droppedFiles(data)).map(file => file.name)).toEqual(['a.txt', 'b.txt']);
+  const sources = await droppedSources(data);
+  expect(sources.map(source => source.kind === 'file' ? source.file.name : source.name)).toEqual(['番茄炒鸡蛋', 'b.txt']);
 });
