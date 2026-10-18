@@ -1,3 +1,4 @@
+import { safeName } from './file-name';
 import { configure, ZipWriter } from '@zip.js/zip.js/lib/zip-core-custom.js';
 import { readSource, validSourceSegment, type DroppedSource } from './source-files';
 
@@ -107,7 +108,7 @@ async function pack(id: string, folders: Folder[]) {
       await writer.close(); access.flush(); access.close(); access = undefined;
       stage = 'snapshot';
       const snapshot = await handle.getFile();
-      files.push(new File([snapshot], folder.name + '.zip', { type: 'application/zip' })); live.add(index);
+      files.push(new File([snapshot], safeName(folder.name + '.zip'), { type: 'application/zip' })); live.add(index);
     }
     scope.postMessage({ type: 'progress', done: total, total });
     stage = 'deliver'; scope.postMessage({ type: 'done', files });

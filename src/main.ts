@@ -6,7 +6,7 @@ import { downloadType } from './download';
 import { registerStatic, setText, t, toggleLanguage } from './i18n';
 import QRCode from 'qrcode';
 import { deriveShare, deriveRecipientShare, receiverDigest, shareFragment, parseShare, isSharingURL } from './share';
-import { CameraScanner, type CameraInfo } from './scanner';
+import { CameraScanner } from './scanner';
 import { CameraPreview, needsFramePreview } from './camera-preview';
 import { fitCameraFrame } from './camera-frame';
 import { supportsTemporaryStorage, listTemporaryFiles, temporaryURL, retainTemporaryFile, deleteTemporaryFile, storedKey, temporaryBusyCount, suspendTemporaryStorage, type StoredFile } from './received-storage';
@@ -249,35 +249,9 @@ $('confirm-cleanup').onclick = () => run(async () => {
   }
 });
 $<HTMLDialogElement>('cleanup-dialog').addEventListener('cancel', event => { if (clearingStored) event.preventDefault(); });
-// Opt-in, local-only diagnostics for checking a physical phone. No identifiers,
-// frames or reports leave the device; the normal interface has no extra panel.
-let cameraReport: HTMLPreElement | undefined;
-const cameraDebug = new URLSearchParams(location.search).get('camera-debug');
-if (cameraDebug === '1' || cameraDebug === '2') {
-  const details = document.createElement('details'); details.className = 'camera-debug';
-  const summary = document.createElement('summary'); setText(summary, '相机诊断（仅本机）');
-  cameraReport = document.createElement('pre');
-  details.append(summary, cameraReport); $('scan-dialog').append(details);
-}
-let updateProbe: ((info: CameraInfo) => void) | undefined;
-let latestCameraInfo: CameraInfo | undefined;
-let probeReady: Promise<void> | undefined;
-function loadCameraProbe() {
-  if (cameraDebug !== '2' || !cameraReport) return;
-  const report = cameraReport;
-  return probeReady ||= import('./camera-probe').then(({ cameraProbe }) => {
-    updateProbe = cameraProbe($<HTMLVideoElement>('scan-video'), report);
-    if (latestCameraInfo) updateProbe(latestCameraInfo);
-  }).catch(() => { setText(report, '相机对照暂不可用，请刷新后重试。'); });
-}
-function cameraInfo(info: CameraInfo) {
-  latestCameraInfo = info;
-  if (updateProbe) updateProbe(info);
-  else if (cameraReport) cameraReport.textContent = JSON.stringify(info, null, 2);
-}
-const livePreview = needsFramePreview() && cameraDebug !== '2' ? new CameraPreview($<HTMLVideoElement>('scan-video'), $<HTMLCanvasElement>('scan-preview')) : undefined;
+const livePreview = needsFramePreview() ? new CameraPreview($<HTMLVideoElement>('scan-video'), $<HTMLCanvasElement>('scan-preview')) : undefined;
 fitCameraFrame($<HTMLVideoElement>('scan-video'));
-const scanner = new CameraScanner($<HTMLVideoElement>('scan-video'), scannedCode, message => scanMessage(message, true), cameraReport ? cameraInfo : undefined, livePreview);
+const scanner = new CameraScanner($<HTMLVideoElement>('scan-video'), scannedCode, message => scanMessage(message, true), livePreview);
 function scanMessage(message: string, retry = false) {
   setText($('scan-status'), message); $('scan-again').hidden = !retry;
 }
@@ -298,9 +272,6 @@ async function openScanner() {
   const dialog = $<HTMLDialogElement>('scan-dialog');
   if (!dialog.open) { scannerSession++; dialog.showModal(); }
   scanMessage('请允许相机权限，将对方的二维码放入画面。');
-  const session = scannerSession;
-  if (cameraDebug === '2') await loadCameraProbe();
-  if (session !== scannerSession || !dialog.open) return;
   await scanner.start();
 }
 async function connectValue(input: string) {
@@ -884,7 +855,7 @@ $('drop-zone').addEventListener('drop', event => {
   if (!data || busy || packagingFiles) return;
   const revision = selectionRevision;
   const controller = packagingAbort = new AbortController();
-  const sources = droppedSources(data); // Capture native drop data synchronously.
+  const sources = droppedSources(data, controller.signal); // Capture native drop data synchronously.
   packagingFiles = true; renderFiles();
   $('archive-progress').hidden = false; setText($('archive-progress'), '正在读取所选内容…');
   void run(async () => {

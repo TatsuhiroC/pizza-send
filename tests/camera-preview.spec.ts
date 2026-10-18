@@ -42,7 +42,7 @@ for (const slowDecoder of [false, true]) test(`iPhone frame preview preserves pi
     };
   });
   try {
-    await page.goto('./?camera-debug=1'); await page.locator('#receive-tab').click(); await page.locator('#open-scanner').click();
+    await page.goto('./'); await page.locator('#receive-tab').click(); await page.locator('#open-scanner').click();
     const preview = page.locator('#scan-preview'); await expect(preview).toHaveAttribute('data-ready', 'true');
     const pixels = () => preview.evaluate(node => {
       const canvas = node as HTMLCanvasElement, ctx = canvas.getContext('2d')!;
@@ -79,7 +79,6 @@ for (const slowDecoder of [false, true]) test(`iPhone frame preview preserves pi
       ctx.fillStyle = '#aa44cc'; ctx.fillRect(0, 0, source.width, source.height);
     });
     await expect.poll(async () => (await pixels())[0].every((channel, index) => Math.abs(channel - [170, 68, 204][index]) <= 2)).toBe(true);
-    expect(JSON.parse(await page.locator('.camera-debug pre').textContent() || '{}').renderer).toBe('canvas');
     expect(await page.evaluate(() => (window as any).__calls)).toBe(1);
     await page.locator('#close-scanner').click();
     await expect(preview).toBeHidden();

@@ -147,18 +147,19 @@ test('closing while camera enumeration is pending cannot start capture later', a
 });
 
 
-test('diagnostics are opt-in, local and leave normal scanner uncluttered', async ({ page }) => {
-  await page.goto('./');
-  await expect(page.locator('.camera-debug')).toHaveCount(0);
-  await page.goto('./?camera-debug=1');
-  await page.locator('#receive-tab').click(); await page.locator('#open-scanner').click();
-  await expect(page.locator('.camera-debug summary')).toHaveText('相机诊断（仅本机）');
-  await expect(page.locator('.camera-debug pre')).not.toBeEmpty();
-  const report = JSON.parse(await page.locator('.camera-debug pre').textContent() || '{}');
-  expect(Object.keys(report).sort()).toEqual(['frames', 'label', 'namedRearSelected', 'previews', 'renderer', 'requestedDeviceMatched', 'requests']);
-  await page.evaluate(() => document.getElementById('language-toggle')!.click());
-  await expect(page.locator('.camera-debug summary')).toHaveText('Camera diagnostics (on this device only)');
-  await page.locator('#close-scanner').click();
+test('retired diagnostic query flags cannot switch the normal scanner into a comparison view', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: {
+      getUserMedia: async () => { throw new DOMException('Fixture denied', 'NotAllowedError'); }
+    } });
+  });
+  for (const flag of ['1', '2']) {
+    await page.goto('./?camera-debug=' + flag); await page.locator('#receive-tab').click(); await page.locator('#open-scanner').click();
+    await expect(page.locator('#scan-again')).toBeVisible();
+    await expect(page.locator('.camera-debug, #camera-reference, .camera-view-label')).toHaveCount(0);
+    await expect(page.locator('.scan-frame video')).toHaveCount(1);
+    await page.locator('#close-scanner').click();
+  }
 });
 
 test('camera proportions fit the viewport in both languages and persist after capture stops', async ({ page }) => {
