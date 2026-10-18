@@ -1,4 +1,6 @@
 import { retryPairingRequest, ticketURL } from './security';
+import { safeName } from './file-name';
+export { safeName } from './file-name';
 import { readSource, SourceReadError } from './source-files';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { createFileHash, type FileHash } from './file-hash';
@@ -17,23 +19,6 @@ const ACK_BYTES = 256 * 1024;
 const hex = (b: Uint8Array) => Array.from(b, n => n.toString(16).padStart(2, '0')).join('');
 export const randomToken = () => hex(crypto.getRandomValues(new Uint8Array(32)));
 export const bytes = (n: number) => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : n < 1073741824 ? (n / 1048576).toFixed(1) + ' MB' : (n / 1073741824).toFixed(2) + ' GB';
-export function safeName(name: string): string {
-  let clean = name.replace(/[\\/<>:"|?*\u0000-\u001f\u007f]/g, '_').replace(/[. ]+$/, '');
-  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(clean)) clean = '_' + clean;
-  const dot = clean.lastIndexOf('.');
-  const extension = dot > 0 && clean.length - dot <= 20 ? clean.slice(dot) : '';
-  const stem = extension ? clean.slice(0, dot) : clean;
-  const encoder = new TextEncoder();
-  let length = encoder.encode(extension).length, result = '';
-  // Bound both UTF-16 and UTF-8 lengths, reserving space for collision prefixes.
-  // Iterate code points so shortening cannot split an emoji surrogate pair.
-  for (const character of stem) {
-    const size = encoder.encode(character).length;
-    if (result.length + character.length + extension.length > 180 || length + size > 240) break;
-    result += character; length += size;
-  }
-  return result + extension || 'received-file';
-}
 export function validateManifest(value: unknown): FileInfo[] {
   if (!Array.isArray(value) || !value.length || value.length > 100) throw Error('文件列表无效（最多 100 个文件）');
   let total = 0;
@@ -368,8 +353,15 @@ export class Transfer {
     if (!this.pendingBinary.length) return;
     const chunks = this.pendingBinary, size = this.pendingBinaryBytes;
     this.pendingBinary = []; this.pendingBinaryBytes = 0;
-    this.queue = this.queue.then(() => {
+    this.queue = this.queue.then(async () => {
       if (this.stopped) return;
+      // A compressed payload may be followed immediately by plain chunks, with
+      // no intervening control message. Preserve the original message bounds
+      // while a block is open; merging them would treat the tail as gzip bytes.
+      if (this.encodedBlock) {
+        for (const chunk of chunks) await this.handle(chunk, generation);
+        return;
+      }
       const buffer = chunks.length === 1 ? chunks[0] : new ArrayBuffer(size);
       if (chunks.length > 1) {
         const merged = new Uint8Array(buffer); let offset = 0;
@@ -1018,6 +1010,11 @@ export class AutoPair {
   private async handle(message: any, authenticated = false) {
     const t = this.transfer;
     if (this.closed || t.stopped) return;
+    // Service presence/lifecycle notices are unencrypted. SDP, ICE candidates,
+    // restart requests and peer errors must come through authenticated unseal().
+    // Otherwise a compromised/custom signaling service could inject its own
+    // DTLS fingerprints instead of merely relaying encrypted peer negotiation.
+    if (!authenticated && !['signal-ready', 'peer-ready', 'peer-left', 'receiver-left', 'ended'].includes(message?.type)) return;
     if (message.type === 'signal-ready') {
       if (!this.offered && t.role === 'receiver') t.pairingStage(message.peerPresent ? '找到发送方，正在交换连接信息' : '等待发送方回到页面');
     } else if (message.type === 'peer-ready') {

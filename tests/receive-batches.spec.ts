@@ -134,3 +134,40 @@ for (const action of ['cancel', 'replace'] as const) test(`${action} with an unf
   if (action === 'cancel') { expect(result.written).toBe(0); expect(result.aborted).toBe(1); }
   else { expect(result.written).toBe(32768); expect(result.received).toBe(32768); }
 });
+
+test('coalesced compressed-to-plain arrivals retain wire block boundaries and the original hash', async ({ page }) => {
+  await page.goto('./');
+  const result = await page.evaluate(async () => {
+    const { Transfer } = await import('/src/protocol.ts');
+    const { gzip, COMPRESSION } = await import('/src/compression.ts');
+    const { sha256 } = await import('/node_modules/@noble/hashes/sha2.js');
+    const prefix = new Uint8Array(17).fill(11), raw = new Uint8Array(262144).fill(77), tail = new Uint8Array(65536).fill(93);
+    const encoded = await gzip(raw.buffer), original = new Uint8Array(prefix.length + raw.length + tail.length);
+    original.set(prefix); original.set(raw, prefix.length); original.set(tail, prefix.length + raw.length);
+    const hash = (data: Uint8Array) => Array.from(sha256(data), n => n.toString(16).padStart(2, '0')).join('');
+    const errors: string[] = [], writes: Uint8Array[] = [];
+    const transfer = new Transfer({ signalUrl: '', iceServers: [], memoryLimitBytes: 1048576 }, 'receiver', e => { if (e.type === 'error') errors.push(e.data); });
+    const state = transfer as any, channel: any = { readyState: 'open', send() {}, close() {} };
+    state.attach(channel); state.accepted = true;
+    state.handles = [{ createWritable: async () => ({ write: async (data: ArrayBuffer) => { writes.push(new Uint8Array(data.slice(0))); }, close: async () => {}, abort: async () => {} }) }];
+    const send = (data: unknown) => channel.onmessage({ data: data instanceof ArrayBuffer ? data : JSON.stringify(data) });
+    const clock = Object.getOwnPropertyDescriptor(performance, 'now');
+    Object.defineProperty(performance, 'now', { configurable: true, value: () => 10000 });
+    try {
+      send({ type: 'manifest', files: [{ id: 0, name: 'mixed.bin', type: '', size: original.length }], compression: COMPRESSION });
+      send({ type: 'file-start', id: 0 }); send(prefix.buffer); await state.queue;
+      send({ type: 'compression-advice', active: true });
+      send({ type: 'compressed-block', id: 0, offset: prefix.length, raw: raw.length, size: encoded.byteLength });
+      send(encoded); send(tail.slice(0, 32768).buffer); send(tail.slice(32768).buffer);
+      send({ type: 'file-end', id: 0, hash: hash(original) }); send({ type: 'done' }); await state.queue;
+      const written = new Uint8Array(writes.reduce((n, b) => n + b.length, 0)); let at = 0;
+      for (const part of writes) { written.set(part, at); at += part.length; }
+      return { completed: transfer.completed, errors, hash: hash(written), expected: hash(original), queued: state.receivingQueuedBytes, sizes: writes.map(b => b.length) };
+    } finally {
+      if (clock) Object.defineProperty(performance, 'now', clock); else delete (performance as any).now;
+      transfer.close(false);
+    }
+  });
+  expect(result.errors).toEqual([]); expect(result.completed).toBe(true); expect(result.hash).toBe(result.expected);
+  expect(result.queued).toBe(0); expect(result.sizes.every(n => n <= 262144)).toBe(true);
+});

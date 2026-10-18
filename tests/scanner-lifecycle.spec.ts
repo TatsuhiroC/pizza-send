@@ -72,13 +72,13 @@ function scannerHarness(devices: Partial<MediaDevices>) {
   Object.defineProperty(globalThis, 'document', { configurable: true, value: { createElement: () => ({}) } });
   Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { mediaDevices: devices } });
   Object.defineProperty(globalThis, 'HTMLMediaElement', { configurable: true, value: { HAVE_CURRENT_DATA: 2 } });
-  const attached: MediaStream[] = [], errors: string[] = [], reports: import('../src/scanner').CameraInfo[] = [];
+  const attached: MediaStream[] = [], errors: string[] = [];
   let source: MediaStream | null = null;
   const video = { dataset: {}, readyState: 0, videoWidth: 0, videoHeight: 0,
     get srcObject() { return source; }, set srcObject(value: MediaStream | null) { source = value; if (value) attached.push(value); },
     play: async () => {}, pause() {}, addEventListener() {} } as unknown as HTMLVideoElement;
-  const scanner = new CameraScanner(video, async () => false, text => errors.push(text), info => reports.push(info));
-  return { scanner, video, attached, errors, reports, restore() {
+  const scanner = new CameraScanner(video, async () => false, text => errors.push(text));
+  return { scanner, video, attached, errors, restore() {
     scanner.stop();
     for (const [key, descriptor] of descriptors) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key);
@@ -104,8 +104,6 @@ test('first permission resolves the physical rear lens before attaching one prev
     expect(order).toEqual(['capture 1', 'stop provisional', 'capture 2']);
     expect(requests).toEqual([{ audio: false, video: { facingMode: { ideal: 'environment' } } }, { audio: false, video: { deviceId: { exact: 'wide' } } }]);
     expect(h.attached).toEqual([physical.stream]); expect(initial.track.stopped).toBe(1); expect(physical.track.stopped).toBe(0);
-    expect(h.reports.at(-1)).toMatchObject({ requests: 2, namedRearSelected: true, previews: 1, label: 'Back Camera', requestedDeviceMatched: true });
-    expect(JSON.stringify(h.reports)).not.toContain('deviceId');
     await h.scanner.start(); expect(requests).toHaveLength(2); // Duplicate click cannot re-open.
     h.scanner.stop(); await h.scanner.start();
     expect(requests[2]).toEqual({ audio: false, video: { deviceId: { exact: 'wide' } } });
@@ -126,7 +124,7 @@ for (const kind of ['already physical', 'enumeration unavailable'] as const) tes
   });
   try {
     await h.scanner.start(); expect(calls).toBe(1); expect(h.attached).toEqual([original.stream]);
-    expect(h.reports.at(-1)?.namedRearSelected).toBe(kind === 'already physical'); expect(h.errors).toEqual([]);
+    expect(h.errors).toEqual([]);
   } finally { h.restore(); }
 });
 

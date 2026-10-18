@@ -262,3 +262,42 @@ test('unsafe archive paths and conflicting names are rejected without publishing
   });
   expect(failures).toEqual(Array(6).fill(true)); await expect.poll(() => archiveBatches(page)).toHaveLength(0);
 });
+
+test('cancel while a native directory read is pending releases the picker and ignores the late callback', async ({ page }) => {
+  await page.goto('./');
+  await page.evaluate(() => {
+    const dataTransfer = new DataTransfer();
+    const folder = { name: 'slow-folder', isDirectory: true, isFile: false, createReader: () => ({ readEntries(resolve: (entries: any[]) => void) { (window as any).__finishDirectory = resolve; } }) };
+    Object.defineProperty(dataTransfer, 'items', { value: [{ kind: 'file', webkitGetAsEntry: () => folder }] });
+    document.getElementById('drop-zone')!.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }));
+  });
+  await expect.poll(() => page.evaluate(() => typeof (window as any).__finishDirectory)).toBe('function');
+  await page.locator('#cancel-packaging').click();
+  await expect(page.locator('#drop-zone')).toBeEnabled({ timeout: 2000 });
+  await expect(page.locator('#archive-progress')).toBeHidden();
+  await page.evaluate(() => {
+    (window as any).__finishDirectory([{ name: 'late.txt', isFile: true, file() { (window as any).__lateFileRead = true; } }]);
+  });
+  await page.locator('#file-input').setInputFiles({ name: 'fresh.txt', mimeType: 'text/plain', buffer: Buffer.from('fresh selection') });
+  await expect(page.locator('#files strong')).toHaveText('fresh.txt');
+  expect(await page.evaluate(() => !!(window as any).__lateFileRead)).toBe(false);
+  expect(await archiveBatches(page)).toHaveLength(0);
+});
+
+for (const name of ['n'.repeat(255), '猫'.repeat(85)]) test(`long folder names produce a portable ZIP download name while preserving the original root (${name[0]})`, async ({ page }) => {
+  await page.goto('./');
+  await drop(page, [{ name, entries: [{ path: name + '/original.txt', text: 'original contents' }] }]);
+  await expect(page.locator('#files .file-row')).toHaveCount(1, { timeout: 3000 });
+  const exported = await page.locator('#files strong').textContent();
+  expect(exported).toMatch(/\.zip$/); expect(new TextEncoder().encode(exported!).length).toBeLessThanOrEqual(240);
+  const names = await page.evaluate(async () => {
+    const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('pizzasend-source-archives-v1');
+    const id = (await root.keys().next()).value!;
+    const file = await (await (await root.getDirectoryHandle(id)).getFileHandle('0.zip')).getFile();
+    const { ZipReader, BlobReader } = await import('/node_modules/@zip.js/zip.js/lib/zip-core-custom.js');
+    const reader = new ZipReader(new BlobReader(file), { useWebWorkers: false });
+    try { return (await reader.getEntries()).map(entry => entry.filename); } finally { await reader.close(); }
+  });
+  expect(names).toEqual([name + '/', name + '/original.txt']);
+  await page.locator('#clear-files').click(); await expect.poll(() => archiveBatches(page)).toHaveLength(0);
+});

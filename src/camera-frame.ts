@@ -6,7 +6,7 @@ export function fitCameraFrame(video: HTMLVideoElement) {
   let ratio = 4 / 3, pending = 0;
   const fit = () => {
     pending = 0;
-    if (!dialog.open || frame.classList.contains('camera-comparison')) return;
+    if (!dialog.open) return;
     const style = getComputedStyle(dialog);
     const contentWidth = dialog.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
     // Measure the actual heading, instructions and buttons, including wrapping
