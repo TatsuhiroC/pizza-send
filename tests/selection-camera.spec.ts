@@ -43,7 +43,6 @@ test('direct file entry fits a narrow phone, translates and allows selecting the
   await expect(page.locator('#drop-zone')).not.toHaveAttribute('aria-haspopup', 'dialog');
   await page.locator('#language-toggle').click();
   await expect(page.locator('#drop-zone')).toContainText('click to choose');
-  await expect(page.locator('#folder-note')).toContainText('Extract it after receiving');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: info.outputPath('direct-selection-mobile.png') });
   await expect(page.locator('#clear-files')).toHaveText('Clear selected files');

@@ -51,7 +51,7 @@
 
 .compression-hint{min-width:0;margin-top:14px;padding:12px 14px;border:1px solid #e9bd92;border-radius:10px;background:#fff5e9;color:#805434;font-size:12px;line-height:1.7;overflow-wrap:anywhere}.compression-hint p{margin:0}.compression-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px 16px;margin-top:10px}.compression-actions .secondary{min-height:44px;padding:9px 14px;font-size:12px}.compression-dismiss{min-height:44px;padding:6px 0;background:transparent;color:#805434;font-size:12px;text-decoration:underline;text-underline-offset:3px}
 
-.selection-actions{display:flex;justify-content:flex-end;margin-top:14px}.selection-actions:has([hidden]){display:none}.selection-actions button{display:inline-flex;align-items:center;gap:8px;min-height:44px;color:var(--orange)}.selection-actions svg{width:17px;height:17px}
+.selection-actions{display:flex;justify-content:flex-end;margin-top:10px}.selection-actions:has([hidden]){display:none}.selection-actions button{display:inline-flex;align-items:center;gap:5px;min-height:32px;padding:6px 10px;border-radius:7px;font-size:11px;line-height:18px;color:var(--orange)}.selection-actions svg{width:14px;height:14px}
 
 
 
