@@ -577,6 +577,10 @@ export class Transfer {
       if (complete) { this.completed = true; clearInterval(this.heartbeat); this.emit({ type: 'done' }); }
       else if (accepted) this.startSending(file, offset);
     } else if (message.type === 'accept' && this.role === 'sender') {
+      // A save picker can return before the replacement channel's manifest.
+      // Its resume snapshot is authoritative; starting here as well would run
+      // two send loops after recovery. This also covers older receiver pages.
+      if (this.recovering) return;
       if (this.accepted) throw Error('重复的下载请求');
       this.accepted = true;
       this.compressionSupport = message.compression === COMPRESSION && supportsCompression();
@@ -646,7 +650,11 @@ export class Transfer {
       if (this.stopped) return;
       this.handles = handles;
       this.accepted = true; this.started = performance.now();
-      this.emit({ type: 'started' }); this.control({ type: 'accept', compression: this.compressionSupport ? COMPRESSION : undefined });
+      this.emit({ type: 'started' });
+      // The channel can still be closed while the OS returns a chosen path.
+      // Keep that permission; the next manifest reports accepted in resume.
+      if (this.recovering) this.emit({ type: 'recovering' });
+      else this.control({ type: 'accept', compression: this.compressionSupport ? COMPRESSION : undefined });
     } finally { this.accepting = false; }
   }
   private startSending(file: number, offset: number) {
@@ -805,6 +813,8 @@ export class Transfer {
 export class Signaling {
   private socket?: WebSocket;
   private queue = Promise.resolve();
+  private queuedBytes = 0;
+  private queuedMessages = 0;
   private sendQueue = Promise.resolve();
   private sequence = 0;
   private lastReceived = 0;
@@ -851,12 +861,25 @@ export class Signaling {
       // Install handlers before open; peer-ready may arrive immediately.
       socket.onmessage = event => {
         if (socket !== this.socket || this.closed) return;
+        // Apply the service's frame limit before parsing/decryption, and bound
+        // work waiting behind slow peer negotiation, including across reconnects.
+        const data = event.data;
+        const size = typeof data === 'string' ? data.length * 2 : 0;
+        if (typeof data !== 'string' || data.length > 128000 || this.queuedBytes + size > 1048576 || this.queuedMessages >= 128) {
+          this.socket = undefined; clearInterval(this.heartbeat);
+          socket.close(4009, 'Signaling safety limit');
+          this.onError('配对消息超出安全限制，已断开配对服务。已建立的文件直传可以继续。');
+          this.scheduleRetry(); return;
+        }
+        this.queuedBytes += size; this.queuedMessages++;
         this.lastSeen = Date.now();
         this.queue = this.queue.then(async () => {
-          const message = JSON.parse(event.data);
+          if (socket !== this.socket || this.closed) return;
+          const message = JSON.parse(data);
           if (message.type === 'keepalive') return;
           if (message.type === 'signal') {
             const decoded = await unseal(this.key, message.payload);
+            if (socket !== this.socket || this.closed) return;
             if (typeof decoded.session !== 'string' || !/^[a-f0-9]{64}$/.test(decoded.session)) throw Error('配对信息无效');
             if (this.peerSession !== decoded.session) {
               if (this.peerSession && !this.allowNewPeer) throw Error('配对信息无效');
@@ -865,7 +888,9 @@ export class Signaling {
             if (!Number.isInteger(decoded.sequence) || decoded.sequence <= this.lastReceived) throw Error('重复或无效的配对消息');
             this.lastReceived = decoded.sequence; await this.onMessage(decoded.message, true);
           } else await this.onMessage(message);
-        }).catch(e => this.onError(e.message));
+        }).catch(e => { if (socket === this.socket && !this.closed) this.onError(e.message); }).finally(() => {
+          this.queuedBytes -= size; this.queuedMessages--;
+        });
       };
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => { socket.close(); reject(Error('配对服务连接超时')); }, 10000);
@@ -878,7 +903,9 @@ export class Signaling {
             if (Date.now() - this.lastSeen > 30000) { socket.close(); return; }
             if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'keepalive' }));
           }, 10000);
-          this.queue = this.queue.then(() => this.onMessage({ type: 'signal-ready', peerPresent: state.peerPresent })).catch(e => this.onError(e.message));
+          this.queue = this.queue.then(async () => {
+            if (socket === this.socket && !this.closed) await this.onMessage({ type: 'signal-ready', peerPresent: state.peerPresent });
+          }).catch(e => { if (socket === this.socket && !this.closed) this.onError(e.message); });
           resolve();
         };
         socket.onerror = () => { clearTimeout(timeout); reject(Error('无法连接配对服务')); };
@@ -1078,7 +1105,9 @@ export class AutoPair {
       else t.fail('对方已结束传输，或页面已关闭。');
     } else if (message.type === 'peer-left' && !t.completed) {
       if (!this.offered) t.pairingStage(t.role === 'receiver' ? '等待发送方回到页面' : '等待接收方');
-      else t.requestRecovery();
+      // Losing signaling alone says nothing about a live DTLS/SCTP channel.
+      // Let actual transport failures or the existing data heartbeat recover it.
+      else if (t.channel?.readyState !== 'open' || ['failed', 'disconnected', 'closed'].includes(t.pc.connectionState)) t.requestRecovery();
     }
   }
   private async recover() {
