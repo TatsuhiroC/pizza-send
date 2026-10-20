@@ -28,6 +28,8 @@ export class GroupSender {
   private socket?: WebSocket;
   private heartbeat?: ReturnType<typeof setInterval>;
   private queue = Promise.resolve();
+  private queuedBytes = 0;
+  private queuedMessages = 0;
   private lastSeen = 0;
   private peers = new Map<string, Recipient>();
   private retired = new Set<string>();
@@ -88,13 +90,25 @@ export class GroupSender {
     if (this.closed) return;
     const socket = this.socket = new WebSocket(connectionURL); this.lastSeen = Date.now();
     socket.onmessage = event => {
-      if (this.closed || socket !== this.socket) return; this.lastSeen = Date.now();
-      if (typeof event.data !== 'string' || event.data.length > 16384) { socket.close(); return; }
+      if (this.closed || socket !== this.socket) return;
+      const data = event.data, size = typeof data === 'string' ? data.length * 2 : 0;
+      if (typeof data !== 'string' || data.length > 16384 || this.queuedBytes + size > 1048576 || this.queuedMessages >= 128) {
+        // Drop only this service connection, preserving each recipient's direct
+        // channel. The ordinary poll can reconnect to the pairing service.
+        this.socket = undefined; clearInterval(this.heartbeat);
+        socket.close(4009, 'Signaling safety limit');
+        this.onError('配对消息超出安全限制，已断开配对服务。已建立的文件直传可以继续。');
+        return;
+      }
+      this.queuedBytes += size; this.queuedMessages++; this.lastSeen = Date.now();
       this.queue = this.queue.then(async () => {
-        const state = JSON.parse(event.data);
+        if (this.closed || socket !== this.socket) return;
+        const state = JSON.parse(data);
         if (state.type === 'members') await this.consume(state);
         else if (state.type === 'ended') { this.expired = true; this.notify(); }
-      }).catch(error => { if (!this.closed) this.onError(error.message); });
+      }).catch(error => { if (!this.closed && socket === this.socket) this.onError(error.message); }).finally(() => {
+        this.queuedBytes -= size; this.queuedMessages--;
+      });
     };
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => { socket.close(); reject(Error('配对服务连接超时')); }, 10000);

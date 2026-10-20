@@ -1,6 +1,7 @@
 export type Language = 'zh' | 'en';
 type Params = Record<string, string | number>;
 const messages: Record<string, string> = {
+  '配对消息超出安全限制，已断开配对服务。已建立的文件直传可以继续。': 'Pairing messages exceeded the safety limit. The pairing service was disconnected; an established direct transfer can continue.',
   '文件夹如何分享？': 'How do I share a folder?',
   '电脑上拖入文件夹，会在本机打包为 ZIP，保留名称、子目录和空目录；接收后需解压。打包需要额外磁盘空间，移除或清空选择会清理临时 ZIP；关闭网页后，下次打开本站时清理。': 'Drop a folder on a computer to create a local ZIP that preserves its name, subfolders and empty folders. Extract it after receiving. Packaging needs extra disk space. Removing or clearing the selection deletes the temporary ZIP; after closing the page, cleanup runs on your next visit.',
   '清空已选文件': 'Clear selected files',
