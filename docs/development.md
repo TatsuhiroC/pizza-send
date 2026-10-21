@@ -20,7 +20,7 @@ npm run signal:dev
 ## 自行部署
 
 1. Fork 仓库，在 Cloudflare Pages 导入该 Git 仓库；生产分支为 `main`，构建命令 `npm run build`，输出目录 `dist`，Node.js 使用 22.12 或更新的 22.x。绑定自己的自定义域名并确认 HTTPS，同时将 `public/_headers` 中的正式主机名改为自己的域名。Cloudflare 随 `main` 更新构建、发布；GitHub Actions 独立运行完整检查，不再发布 GitHub Pages。推送生产分支前应先完成本地验证。
-2. 修改 `signal/wrangler.jsonc` 的 Worker 名字、`ALLOWED_ORIGINS`，填写自己的前端 origin。部署默认仅允许正式自有域名 origin 和两个本地开发 origin；Cloudflare 的预览域名默认不能连接正式配对服务。`routes` 中的自定义域名也需改成自己已在 Cloudflare 激活的域名；若只使用 `workers.dev`，删除 `routes`。
+2. 修改 `signal/wrangler.jsonc` 的 Worker 名字、`ALLOWED_ORIGINS`，填写自己的前端 origin。部署默认仅允许正式自有域名 origin 和两个本地开发 origin；Cloudflare 的预览域名默认不能连接正式配对服务。`routes` 中的自定义域名也需改成自己已在 Cloudflare 激活的域名；默认关闭 `workers.dev` 入口，只公开自定义域名；若只使用 `workers.dev`，删除 `routes` 并将 `workers_dev` 改为 `true`。
 3. `npx wrangler login`，创建自己的免费 Turnstile 组件并添加前端主机名。将公开站点密钥写入 `TURNSTILE_SITE_KEY`，通过 `npx wrangler secret put TURNSTILE_SECRET_KEY --config signal/wrangler.jsonc` 保存服务端密钥；不要把密钥提交到仓库。然后 `npm run signal:deploy`。Durable Objects 使用 SQLite 存储，账号需支持此功能；用量和费用以 Cloudflare 账号额度为准。
 4. 将返回的 Worker HTTPS 地址写入 `public/app.config.json` 的 `signalUrl`，提交并发布。Worker 更新需要另行部署，仓库中不保存访问令牌。
 
