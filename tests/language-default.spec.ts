@@ -42,6 +42,24 @@ test('an empty preference list falls back to navigator.language', async ({ page 
 
 test.describe('English browser preferences', () => {
   test.use({ locale: 'en-US' });
+  test('wider fallback fonts keep the English title and selected pizza inside small screens', async ({ page }) => {
+    await page.goto('./');
+    await page.addStyleTag({ content: '.intro h1 { font-family: monospace; }' });
+    for (const width of [320, 375, 390, 640, 700]) {
+      await page.setViewportSize({ width, height: 844 });
+      for (const selected of [false, true]) {
+        if (selected) await page.locator('#file-input').setInputFiles({ name: 'test.txt', mimeType: 'text/plain', buffer: Buffer.from('test') });
+        else if (await page.locator('#clear-files').isVisible()) await page.locator('#clear-files').click();
+        // Include the end of box scaling, not only the first transition frame.
+        await page.locator('.hero-pizza').evaluate(async element => {
+          await Promise.allSettled(element.getAnimations({ subtree: true }).filter(animation => Number.isFinite(animation.effect?.getComputedTiming().endTime)).map(animation => animation.finished));
+        });
+        const overflow = await page.evaluate(() => Array.from(document.querySelectorAll('*')).filter(element => element.getBoundingClientRect().right > innerWidth + 1).map(element => ({ tag: element.tagName, id: element.id })));
+        expect(overflow, `viewport ${width}, selected ${selected}`).toEqual([]);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      }
+    }
+  });
   test('invalid saved values do not force Chinese', async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem('pizza-send-language', 'invalid'));
     await page.goto('./');

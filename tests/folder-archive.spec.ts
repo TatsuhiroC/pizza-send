@@ -11,7 +11,7 @@ const test = base.extend({
   context: async ({ context, browserName, playwright }, use) => {
     if (browserName !== 'webkit') { await use(context); return; }
     const profile = await mkdtemp(join(tmpdir(), 'pizza-archive-webkit-'));
-    const persistent = await playwright.webkit.launchPersistentContext(profile, { baseURL: process.env.TEST_BASE_URL || 'http://127.0.0.1:5173', acceptDownloads: true });
+    const persistent = await playwright.webkit.launchPersistentContext(profile, { baseURL: process.env.TEST_BASE_URL || 'http://127.0.0.1:5173', locale: 'zh-CN', acceptDownloads: true });
     try { await use(persistent); } finally { await persistent.close(); await rm(profile, { recursive: true, force: true }); }
   }
 });
