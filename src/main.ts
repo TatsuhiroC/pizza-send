@@ -15,6 +15,7 @@ import { GroupSender, groupURL, groupRequest, type Recipient } from './group';
 import { filenameOverlay, motionPause, reducedMotion } from './interface-motion';
 import { ScreenAwake } from './screen-awake';
 import { checkSources, droppedSources } from './source-files';
+import { setSignalPreconnect } from './signal-preconnect';
 import { cleanupSourceArchives, packageSources, releaseSourceArchive, stopSourceArchives } from './folder-archive';
 import { remainingTime } from './remaining-time';
 import type { CompressionStatus } from './compression';
@@ -1032,6 +1033,7 @@ $('save-settings').onclick = () => run(async () => {
   localStorage.setItem('pizza-send-signal', url); localStorage.setItem('pizza-send-stun', stun);
   config.iceServers = stun ? [{ urls: stun }] : [];
   configurationReady = true; $('retry-config').hidden = true; $('notice').hidden = true; setBusy(busy);
+  setSignalPreconnect(preferredSignalUrl());
   toast('连接设置已保存');
   await connectOriginalShare();
 });
@@ -1085,6 +1087,7 @@ async function init() {
     setBusy(busy);
   }
   if (!configurationReady) return;
+  setSignalPreconnect(preferredSignalUrl());
   if (!('RTCPeerConnection' in window) || !crypto.subtle) { notice('请在支持 WebRTC 的现代浏览器中，通过 HTTPS 打开本站。'); $<HTMLButtonElement>('drop-zone').disabled = true; return; }
   await connectOriginalShare();
 }

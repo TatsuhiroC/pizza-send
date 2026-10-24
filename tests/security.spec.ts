@@ -2,6 +2,7 @@ import { test, expect } from './fixtures';
 import { readFile } from 'node:fs/promises';
 import { webcrypto, createHash } from 'node:crypto';
 import vm from 'node:vm';
+import { createServer } from 'node:http';
 const hex = (n: number) => n.toString(16).padStart(64, '0');
 const hash = (s: string) => createHash('sha256').update(s).digest('hex');
 const origin = 'https://pizzasend.dpdns.org';
@@ -27,7 +28,11 @@ async function fixture(overrides: any = {}) {
   env.ADMISSION = { idFromName: (s: string) => s, get: () => gate };
   env.LIMITS = { idFromName: (s: string) => s, get: (s: string) => { access.limits++; if (!stores.has(s)) stores.set(s, new scope.exports.RateLimit(memory(), env)); return stores.get(s); } };
   env.ROOMS = { idFromName: (s: string) => s, get: (s: string) => { access.rooms++; if (!rooms.has(s)) rooms.set(s, new scope.exports.Room(memory(), env)); return rooms.get(s); } };
-  const request = (path: string, init: RequestInit = {}, ip = 'test-ip') => scope.exports.handler.fetch(new Request('https://signal.test' + path, { ...init, headers: { Origin: origin, 'CF-Connecting-IP': ip, ...Object.fromEntries(new Headers(init.headers)) } }), env);
+  const request = (path: string, init: RequestInit = {}, ip = 'test-ip') => {
+    const headers = new Headers({ Origin: origin, 'CF-Connecting-IP': ip });
+    new Headers(init.headers).forEach((value, name) => headers.set(name, value));
+    return scope.exports.handler.fetch(new Request('https://signal.test' + path, { ...init, headers }), env);
+  };
   const create = (id: number, ip = 'test-ip', challenge?: string) => request('/rooms', { method: 'POST', body: JSON.stringify({ v: 2, room: hex(id), receiverHash: hash(hex(900)), ...(challenge ? { challenge } : {}) }) }, ip);
   return { ...scope.exports, scope, env, clock, logs, access, gate, gateContext, request, create, rooms };
 }
@@ -131,7 +136,8 @@ test('missing security binding returns a safe failure instead of bypassing prote
   const f = await fixture({ REQUEST_LIMITER: undefined }); expect((await f.create(1)).status).toBe(503); expect(f.access.rooms).toBe(0);
 });
 
-test('real transfer and recovery preserve original files; credentials stay out of request URLs', async ({ page, context }) => {
+test('real transfer and recovery preserve original files; credentials stay out of request URLs', async ({ page, context, browserName }) => {
+  test.skip(browserName === 'webkit', 'Real WebRTC transfer is covered by Chromium; this WebKit runner lacks transport support.');
   await context.addInitScript(() => {
     localStorage.setItem('pizza-send-signal', 'http://127.0.0.1:8787'); localStorage.setItem('pizza-send-stun', '');
     const Peer = RTCPeerConnection; (window as any).__pcs = [];
@@ -220,7 +226,53 @@ test('production signaling accepts the custom frontend origin and rejects the re
   const allowed = await f.request('/rooms', { method: 'OPTIONS' });
   expect(allowed.status).toBe(204);
   expect(allowed.headers.get('access-control-allow-origin')).toBe(origin);
+  expect(allowed.headers.get('access-control-max-age')).toBe('600');
   const retired = await f.request('/rooms', { method: 'OPTIONS', headers: { Origin: 'https://tatsuhiroc.github.io' } });
   expect(retired.status).toBe(403);
+  expect(retired.headers.has('access-control-max-age')).toBe(false);
   expect(f.access.rooms).toBe(0);
+});
+
+test('browser reuses preflight permission beyond five seconds while every request still needs credentials', async ({ browser }) => {
+  const f = await fixture(), creation = await f.create(1), created = await creation.json();
+  expect(creation.status).toBe(201); expect(creation.headers.has('access-control-max-age')).toBe(false);
+  // Request interception can suppress native preflights. Use an un-routed
+  // context so this exercises the browser's actual CORS permission cache.
+  const context = await browser.newContext(), page = await context.newPage();
+  await context.addInitScript(() => localStorage.setItem('pizza-send-signal', ''));
+  await page.goto('./');
+  f.env.ALLOWED_ORIGINS = new URL(page.url()).origin;
+  let preflights = 0, requests = 0;
+  const server = createServer((request, response) => {
+    void (async () => {
+      if (request.method === 'OPTIONS') preflights++; else requests++;
+      const result = await f.request(request.url!, { method: request.method, headers: {
+        Origin: request.headers.origin || '', Authorization: request.headers.authorization || ''
+      } });
+      response.writeHead(result.status, Object.fromEntries(result.headers));
+      response.end(await result.text());
+    })().catch(() => { response.writeHead(500); response.end(); });
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const address = server.address(); if (!address || typeof address === 'string') throw Error('No test address');
+    const url = `http://127.0.0.1:${address.port}/rooms/${hex(1)}?role=sender`;
+    const get = (credential: string) => page.evaluate(async ({ url, credential }) => {
+      const response = await fetch(url, { headers: { Authorization: 'Bearer ' + credential } });
+      await response.text();
+      return { status: response.status, cache: response.headers.get('cache-control') };
+    }, { url, credential });
+    expect(await get(created.sender)).toEqual({ status: 200, cache: 'no-store' });
+    // The previous omitted Max-Age falls back to five seconds in the browser.
+    await new Promise(resolve => setTimeout(resolve, 5500));
+    expect(await get(created.sender)).toEqual({ status: 200, cache: 'no-store' });
+    expect(await get(hex(999))).toEqual({ status: 401, cache: 'no-store' });
+    // Even a still-cached preflight cannot bypass a changed server allowlist.
+    f.env.ALLOWED_ORIGINS = 'https://different.invalid';
+    expect(await get(created.sender)).toEqual({ status: 403, cache: 'no-store' });
+    expect(preflights).toBe(1); expect(requests).toBe(4);
+  } finally {
+    await context.close();
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
 });
