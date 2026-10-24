@@ -96,6 +96,7 @@ export class Transfer {
   private failing = false;
   private failureTimer?: ReturnType<typeof setTimeout>;
   get hasAccepted() { return this.accepted; }
+  get reportingSourceFailure() { return this.failing; }
   get saveMode(): 'device' | 'disk' | 'memory' { return this.handles.length ? 'device' : this.temporary ? 'disk' : 'memory'; }
   get temporarySession() { return this.temporary; }
   pairingStage(data: string) { if (!this.opened && !this.stopped) this.emit({ type: 'pairing', data }); }
@@ -107,10 +108,19 @@ export class Transfer {
   enableCandidates(callback: (candidate: RTCIceCandidateInit | null) => void) { this.candidate = callback; }
   enableSourceFailure(callback: () => Promise<void>) { this.sourceFailure = callback; }
   private generation = 0;
+  private sourceReads = new AbortController();
   private resumedGeneration = -1;
   private opened = false;
   private lastSeen = Date.now();
   private localHidden = document.hidden;
+  private sourceResumedAt = -Infinity;
+  private deferSourceTimeout = () => {
+    const now = Date.now();
+    if (this.localHidden && now < this.localBackgroundUntil) return Math.min(5000, this.localBackgroundUntil - now);
+    // Returning from an OS suspension gives the pending read a fresh foreground
+    // interval, rather than mistaking the existing background grace for bad I/O.
+    return Math.max(0, this.sourceResumedAt + 15000 - now);
+  };
   private localBackgroundUntil = 0;
   private peerHidden = false;
   private peerBackgroundUntil = 0;
@@ -124,6 +134,7 @@ export class Transfer {
     this.resetCompressionAdvice();
     this.reportVisibility();
     if (!this.localHidden) {
+      this.sourceResumedAt = Date.now();
       this.lastSeen = Date.now();
       if (this.role === 'sender') this.flow.reset(this.acknowledged);
       if (this.recovering) this.armRecoveryTimeout();
@@ -252,6 +263,7 @@ export class Transfer {
   }
   private async replaceTransportNow() {
     this.generation++;
+    this.sourceReads.abort(); this.sourceReads = new AbortController();
     clearTimeout(this.connectTimer); clearTimeout(this.disconnectedTimer); clearInterval(this.heartbeat);
     const channel = this.channel;
     if (channel) channel.onclose = channel.onerror = channel.onmessage = channel.onopen = channel.onbufferedamountlow = null;
@@ -426,7 +438,7 @@ export class Transfer {
       this.probing = true; this.probeAt = performance.now();
       const id = this.sendingFile, generation = this.generation;
       this.sampledFiles.add(id);
-      void sampleCompression(file, this.sendingOffset).then(sample => {
+      void sampleCompression(file, this.sendingOffset, this.sourceReads.signal).then(sample => {
         if (!sample || this.stopped || this.completed || generation !== this.generation || id !== this.sendingFile || !this.compressionSpeed()) return;
         // Source I/O or receiver writes, rather than the wire, can be the bottleneck.
         if (this.readBytes * 1000 / Math.max(1, this.readMilliseconds) < speed * 2) return;
@@ -668,6 +680,7 @@ export class Transfer {
     });
   }
   private async sendFiles(firstFile: number, firstOffset: number, generation: number) {
+    const sourceOptions = { signal: this.sourceReads.signal, deferTimeout: this.deferSourceTimeout };
     if (!this.started) { this.started = performance.now(); this.emit({ type: 'started' }); }
     const maxMessage = this.pc.sctp?.maxMessageSize || 65536;
     const chunkSize = Math.min(32768, maxMessage);
@@ -683,7 +696,7 @@ export class Transfer {
       if (!hash) {
         hash = sha256.create();
         for (let offset = 0; offset < start; offset += 1048576) {
-          const prefix = await readSource(file, offset, Math.min(offset + 1048576, start));
+          const prefix = await readSource(file, offset, Math.min(offset + 1048576, start), undefined, sourceOptions);
           if (this.stopped || generation !== this.generation) throw new TransportInterrupted();
           hash.update(new Uint8Array(prefix));
         }
@@ -699,7 +712,7 @@ export class Transfer {
           return this.flow.allows(this.sent - this.acknowledged, length) && !bufferBlocked;
         }, generation, 60000, () => bufferBlocked ? 8 : 250);
         const readAt = performance.now();
-        const buffer = await readSource(file, offset, offset + length);
+        const buffer = await readSource(file, offset, offset + length, undefined, sourceOptions);
         if (this.stopped || generation !== this.generation) throw new TransportInterrupted();
         hash.update(new Uint8Array(buffer));
         this.readBytes += length; this.readMilliseconds += performance.now() - readAt;
@@ -789,6 +802,7 @@ export class Transfer {
       try { this.control({ type: 'cancel' }); } catch {}
     }
     this.stopped = true; clearTimeout(this.failureTimer); this.sourceFailure = undefined; clearTimeout(this.connectTimer); clearTimeout(this.disconnectedTimer); clearTimeout(this.recoveryTimer); clearInterval(this.heartbeat);
+    this.sourceReads.abort();
     clearTimeout(this.binaryTimer); this.binaryTimer = undefined;
     this.receivingQueuedBytes -= this.pendingBinaryBytes; this.receivingQueuedMessages -= this.pendingBinary.length;
     this.pendingBinary = []; this.pendingBinaryBytes = 0;

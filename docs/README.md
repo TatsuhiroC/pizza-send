@@ -22,6 +22,7 @@
 
 ## 维护记录 · Maintenance
 
+- [启动配置与源文件读取保护：2026-10-24](startup-source-hardening.md)
 - [分享链接与二维码就绪延迟：2026-10-24](share-readiness.md)
 - [旧配对入口隐私清理：2026-10-21](legacy-endpoint-privacy.md)
 - [全代码审查：2026-10-20](review-2026-10-20.md)
