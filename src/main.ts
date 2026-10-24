@@ -434,6 +434,10 @@ function clearShareQR() {
   canvas.hidden = true; canvas.width = canvas.height = 0;
 
 }
+function clearShare() {
+  shareLink = ''; $<HTMLInputElement>('share-link').value = ''; clearShareQR();
+  $('share-box').hidden = true;
+}
 function renderCompression(container: HTMLElement, state: CompressionStatus, enable: () => void, dismiss: () => void, available = true) {
   container.hidden = !available || (!state.active && !state.offer);
   if (container.hidden) return;
@@ -461,9 +465,9 @@ function reset() {
   senderGroup?.close(); senderGroup = undefined; leaveReceiverGroup();
   signaling?.close(); signaling = undefined;
   transfer?.close(); transfer = undefined;
-  shareLink = ''; $<HTMLInputElement>('share-link').value = ''; clearShareQR(); setBusy(false);
+  clearShare(); setBusy(false);
   $('recipients').replaceChildren(); $('recipients').hidden = true;
-  $('share-box').hidden = true; $('progress-box').hidden = true; $('session-panel').hidden = true;
+  $('progress-box').hidden = true; $('session-panel').hidden = true;
   $('notice').hidden = true; $('incoming-files').innerHTML = ''; $('downloads').innerHTML = '';
   $('save-panel').hidden = true; $('save-feedback').hidden = true; $('save-files').replaceChildren();
   void refreshStored();
@@ -749,14 +753,20 @@ async function automaticSender(t: Transfer) {
     (peers, expired) => { if (senderGroup === group) renderRecipients(peers, expired); },
     message => { if (senderGroup === group) notice(message); });
   senderGroup = group;
-  await group.connect();
-  if (transfer !== t || t.stopped) { group.close(); return; }
   const url = new URL(location.href); url.search = ''; url.hash = shareFragment(secret);
-  clearShareQR();
+  clearShare();
   shareLink = url.toString();
-  $<HTMLInputElement>('share-link').value = shareLink; $('share-box').hidden = false;
-  status('等待接收方', '把同一个链接或二维码发给多位接收者，请保持本页打开。');
+  $<HTMLInputElement>('share-link').value = shareLink;
   await renderShareQR();
+  if (transfer !== t || t.stopped) { group.close(); return; }
+  // The invitation exists after room creation. Publish it without waiting for
+  // member polling, a socket ticket and the notification WebSocket handshake.
+  $('share-box').hidden = false; setText($('cancel'), '结束分享');
+  status('等待接收方', '把同一个链接或二维码发给多位接收者，请保持本页打开。');
+  await group.connect();
+  // An early recipient may already have completed and stopped the first file
+  // connection; the invitation still belongs to the active sender group.
+  if (transfer !== t || senderGroup !== group) group.close();
 }
 async function automaticReceiver(fragment: string, revision: number) {
   const api = endpoint();
@@ -886,8 +896,8 @@ $('start-send').onclick = () => run(async () => {
   status('正在创建传输', '正在准备连接，请稍候。');
   try { if (endpoint()) await automaticSender(t); else await manualSender(t); }
   catch (e) {
-    if (transfer !== t || t.stopped) return;
-    senderGroup?.close(); senderGroup = undefined; t.close(false); signaling?.close(); transfer = undefined; setBusy(false);
+    if (transfer !== t) return;
+    senderGroup?.close(); senderGroup = undefined; clearShare(); t.close(false); signaling?.close(); transfer = undefined; setBusy(false);
     status('连接未完成', '可以重试，或检查连接设置。', 'error'); setText($('cancel'), '重新开始');
     throw e;
   }
