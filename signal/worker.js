@@ -52,7 +52,7 @@ async function roomOptions(request) {
   return value;
 }
 function response(body, status, origin) {
-  return new Response(status === 204 ? null : JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'access-control-allow-origin': origin, 'vary': 'Origin', 'cache-control': 'no-store', 'access-control-allow-methods': 'GET, POST, OPTIONS', 'access-control-allow-headers': 'content-type, authorization', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff', ...(status === 429 || status === 503 ? { 'retry-after': '60' } : {}) } });
+  return new Response(status === 204 ? null : JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'access-control-allow-origin': origin, 'vary': 'Origin', 'cache-control': 'no-store', 'access-control-allow-methods': 'GET, POST, OPTIONS', 'access-control-allow-headers': 'content-type, authorization', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff', ...(status === 204 ? { 'access-control-max-age': '600' } : {}), ...(status === 429 || status === 503 ? { 'retry-after': '60' } : {}) } });
 }
 async function verifyChallenge(env, request, options, origin) {
   if (!env.TURNSTILE_SITE_KEY || !env.TURNSTILE_SECRET_KEY) return false;

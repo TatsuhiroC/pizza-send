@@ -36,12 +36,33 @@ export async function readSource(file: File, start: number, end: number, timeout
 }
 
 export async function checkSources(files: File[], active: () => boolean, signal?: AbortSignal) {
-  for (const file of files) {
-    if (!active()) return;
-    if (!Number.isSafeInteger(file.size) || file.size < 0) throw new SourceReadError('文件大小无效，请重新选择原文件。');
-    await readSource(file, 0, Math.min(32768, file.size), undefined, { signal });
-    if (file.size > 32768 && active()) await readSource(file, Math.max(32768, file.size - 32768), file.size, undefined, { signal });
-  }
+  signal?.throwIfAborted();
+  const controller = new AbortController();
+  let next = 0, stopped = false, failed = false, failure: unknown;
+  const stop = () => { stopped = true; controller.abort(); };
+  signal?.addEventListener('abort', stop, { once: true });
+  const worker = async () => {
+    try {
+      while (!stopped) {
+        if (!active()) { stop(); return; }
+        const file = files[next++];
+        if (!file) return;
+        if (!Number.isSafeInteger(file.size) || file.size < 0) throw new SourceReadError('文件大小无效，请重新选择原文件。');
+        // At most four small reads in flight; a file's head precedes its tail.
+        await readSource(file, 0, Math.min(32768, file.size), undefined, { signal: controller.signal });
+        if (!active()) { stop(); return; }
+        if (file.size > 32768) await readSource(file, Math.max(32768, file.size - 32768), file.size, undefined, { signal: controller.signal });
+      }
+    } catch (error) {
+      // Preserve the first actionable error, rather than a sibling's abort.
+      if (!stopped) { failed = true; failure = error; stop(); }
+    }
+  };
+  try {
+    await Promise.all(Array.from({ length: Math.min(4, files.length) }, worker));
+    if (failed) throw failure;
+    signal?.throwIfAborted();
+  } finally { signal?.removeEventListener('abort', stop); }
 }
 
 export type FolderEntry = { path: string; file?: File };
