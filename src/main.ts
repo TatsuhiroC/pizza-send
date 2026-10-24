@@ -100,6 +100,8 @@ let filenameSequence = 0;
 let cleanupTargets: StoredFile[] = [];
 let clearingStored = false;
 let storedRevision = 0;
+let storedRefresh: Promise<void> | undefined;
+let storedRefreshRequested = false;
 let storedFingerprint = '';
 let storedRetry: ReturnType<typeof setTimeout> | undefined;
 const saveRequests = new Set<string>();
@@ -128,11 +130,26 @@ function saveNote(manifest: FileInfo[]) {
   setText($('save-note'), native ? '选择保存位置后开始传输。文件会写入磁盘，并在完成时校验。' : diskStorageAvailable ? '文件会分块写入本机磁盘，完成后请点击保存。保存时可能同时占用两份空间，下载完成后请清理暂存。' : '当前浏览器将文件暂存在内存中，总计最多 {size}。完成后请点击保存。', { size: bytes(config.memoryLimitBytes) });
   setText($('accept-files'), native ? '选择保存位置并接收' : '接收文件');
 }
-async function refreshStored() {
-  const revision = ++storedRevision;
+function refreshStored(): Promise<void> {
+  storedRevision++; storedRefreshRequested = true;
+  if (storedRefresh) return storedRefresh;
+  storedRefresh = (async () => {
+    try {
+      // Coalesce notifications; awaiters still wait for the latest requested
+      // view. No parallel directory walks or queue of obsolete snapshots.
+      while (storedRefreshRequested) {
+        storedRefreshRequested = false;
+        await refreshStoredNow(storedRevision);
+      }
+    } finally { storedRefresh = undefined; }
+  })();
+  return storedRefresh;
+}
+async function refreshStoredNow(revision: number) {
   try {
     const records = (await listTemporaryFiles()).sort((a, b) =>
       (b.receivedAt ?? b.createdAt) - (a.receivedAt ?? a.createdAt) || b.createdAt - a.createdAt || b.info.id - a.info.id || a.session.localeCompare(b.session));
+    if (revision !== storedRevision) return;
     const links = await Promise.all(records.map(async record => ({ record, url: record.unavailable ? '' : await temporaryURL(record) })));
     if (revision !== storedRevision) return;
     storedFiles = records;
@@ -1040,7 +1057,7 @@ $('save-settings').onclick = () => run(async () => {
 window.addEventListener('beforeunload', event => {
   if (packagingFiles || senderGroup?.active || (transfer && !transfer.completed && !transfer.stopped)) { event.preventDefault(); event.returnValue = ''; }
 });
-window.addEventListener('pagehide', () => { checkingAbort?.abort(); screenAwake.setActive(false); cancelAllDownloads(); clearTimeout(storedRetry); closeScanner(); senderGroup?.close(); leaveReceiverGroup(); signaling?.close(); transfer?.close(false); suspendTemporaryStorage(); stopSourceArchives(); });
+window.addEventListener('pagehide', () => { storedRevision++; storedRefreshRequested = false; checkingAbort?.abort(); screenAwake.setActive(false); cancelAllDownloads(); clearTimeout(storedRetry); closeScanner(); senderGroup?.close(); leaveReceiverGroup(); signaling?.close(); transfer?.close(false); suspendTemporaryStorage(); stopSourceArchives(); });
 window.addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
 function readPreference(key: string) {
   try { return localStorage.getItem(key); } catch { return null; }
