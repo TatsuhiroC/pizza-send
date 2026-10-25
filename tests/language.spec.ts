@@ -41,7 +41,8 @@ test('compact language switch translates the full page, preserves files and reme
   }
 });
 
-test('switching while paired preserves the session and translates completion and downloads', async ({ page, context }) => {
+test('switching while paired preserves the session and translates completion and downloads', async ({ page, context, browserName }) => {
+  test.skip(browserName === 'webkit', 'Real WebRTC transfer is covered by Chromium; this WebKit runner lacks transport support.');
   await context.addInitScript(() => {
     localStorage.setItem('pizza-send-signal', 'http://127.0.0.1:8787');
     localStorage.setItem('pizza-send-stun', '');

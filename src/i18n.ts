@@ -290,8 +290,20 @@ const messages: Record<string, string> = {
   '配对服务连接超时': 'Pairing service connection timed out', '无法连接配对服务': 'Unable to connect to the pairing service',
   '重复或无效的配对消息': 'Duplicate or invalid pairing message', '配对服务已断开；已建立的文件直连可以继续': 'Pairing service disconnected. An established direct transfer can continue.', '配对服务已断开': 'Pairing service disconnected'
 };
-let language: Language = 'zh';
-try { if (localStorage.getItem('pizza-send-language') === 'en') language = 'en'; } catch {}
+function initialLanguage(): Language {
+  try {
+    const saved = localStorage.getItem('pizza-send-language');
+    if (saved === 'zh' || saved === 'en') return saved;
+  } catch { /* Detection still works when browser storage is unavailable. */ }
+  const preferred = navigator.languages?.length ? navigator.languages : [navigator.language];
+  for (const locale of preferred) {
+    const primary = locale.toLowerCase().split('-')[0];
+    if (primary === 'zh' || primary === 'en') return primary;
+  }
+  return 'en';
+}
+// Persist only explicit choices, so later visits can follow changed preferences.
+let language: Language = initialLanguage();
 const fill = (value: string, params: Params) => value.replace(/\{(\w+)\}/g, (match, key) => String((key === 'path' || key === 'time') && typeof params[key] === 'string' ? t(params[key]) : params[key] ?? match));
 const patterns = Object.entries(messages).filter(([key]) => key.includes('{')).map(([key, value]) => {
   const names: string[] = [];

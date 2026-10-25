@@ -52,6 +52,8 @@
 @keyframes pizza-warmth{0%,28%{opacity:0;transform:translateY(7px)}43%{opacity:.5;transform:translateY(0);animation-timing-function:ease-out}68%,100%{opacity:0;transform:translateY(-9px)}}
 @media(prefers-reduced-motion:reduce){.parcel-hero[data-intro=playing] .parcel-scene,.parcel-hero[data-intro=playing] .parcel-loose-slice{animation:none!important}.parcel-intro-base,.parcel-intro-lid,.parcel-intro-steam{display:none!important}}
 
-/* Reserve space for the enlarged box beside narrow English headings. System
-   fonts can be wider than macOS fonts; the complete title and box must fit. */
-@media(max-width:360px){.lang-en h1{max-width:100%;padding-right:42px}.lang-en .parcel-hero{right:6px}}
+/* Include the illustration in the English heading's layout width. Wider
+   system fonts must not push the slice or enlarged box beyond the viewport. */
+.lang-en h1{max-width:100%;padding-right:176px}.lang-en .parcel-hero{right:48px}
+@media(max-width:640px){.lang-en h1{padding-right:72px}.lang-en .parcel-hero{right:16px}}
+@media(max-width:360px){.lang-en h1{padding-right:42px}.lang-en .parcel-hero{right:6px}}

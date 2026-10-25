@@ -186,7 +186,7 @@ test('camera button scans real video frames and stops the camera before pairing'
     '--disable-features=WebRtcHideLocalIpsWithMdns', '--allow-loopback-in-peer-connection', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--use-file-for-fake-video-capture=' + cameraFile
   ] });
   try {
-    const receiverContext = await browser.newContext({ acceptDownloads: true }); await setup(receiverContext);
+    const receiverContext = await browser.newContext({ acceptDownloads: true, locale: 'zh-CN' }); await setup(receiverContext);
     const receiver = await receiverContext.newPage(); await receiver.goto('http://127.0.0.1:5173/');
     await receiver.locator('#receive-tab').click(); await receiver.locator('#open-scanner').click();
     await expect(receiver.locator('#accept-files')).toBeVisible({ timeout: 30000 });
