@@ -6,6 +6,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { createFileHash, type FileHash } from './file-hash';
 import { downloadType } from './download';
 import { TransferFlow } from './transfer-flow';
+import { watchConnectionDiagnostics, type DiagnosticHandle } from './connection-diagnostics';
 import { COMPRESSION, BLOCK_BYTES, SAMPLE_BYTES, SlowLink, compressionEstimate, sampleCompression, supportsCompression, gzip, gunzip, type CompressionSample, type CompressionStatus } from './compression';
 import { createTemporarySession, beginTemporaryFile, writeTemporaryFile, finishTemporaryFile, completeTemporarySession, discardTemporaryPartial } from './received-storage';
 
@@ -198,10 +199,17 @@ export class Transfer {
   private disconnectedTimer?: ReturnType<typeof setTimeout>;
   private fileConfirmed = -1;
   private outputs: { info: FileInfo; url: string }[] = [];
+  private diagnostics?: DiagnosticHandle;
   constructor(public config: Config, public role: 'sender' | 'receiver', private emit: (event: TransferEvent) => void) {
     this.pc = this.createPeer();
     if (this.localHidden) this.localBackgroundUntil = Date.now() + 10 * 60 * 1000;
     document.addEventListener('visibilitychange', this.visibilityChanged);
+    this.diagnostics = watchConnectionDiagnostics(() => ({
+      pc: this.pc, role: this.role, generation: this.generation, started: this.started, sent: this.sent, acknowledged: this.acknowledged, received: this.received,
+      buffered: this.channel?.bufferedAmount || 0, queued: this.receivingQueuedBytes, window: this.flow.windowBytes,
+      sourceBytes: this.readBytes, sourceMs: this.readMilliseconds, sinkBytes: this.writeBytes, sinkMs: this.writeMilliseconds,
+      completed: this.completed, stopped: this.stopped, recovering: this.recovering, hidden: this.localHidden, peerHidden: this.peerHidden
+    }));
   }
   enableRecovery(callback: () => void) {
     this.recovery = callback;
@@ -299,7 +307,7 @@ export class Transfer {
       this.heartbeat = setInterval(() => {
         if (this.stopped || this.completed || this.recovering) return;
         if (Date.now() - this.lastSeen > 8000 && !this.waitingInBackground) { this.requestRecovery(); return; }
-        try { this.control({ type: 'ping' }); } catch { this.requestRecovery(); }
+        try { const metrics = this.diagnostics?.packet(); this.control({ type: 'ping', ...(metrics ? { metrics } : {}) }); } catch { this.requestRecovery(); }
       }, 2000);
     };
     let queuedBinaryBytes = this.received, lastBinaryAt = 0;
@@ -491,8 +499,11 @@ export class Transfer {
     }
     if (data.length > 65536) throw Error('控制信息过大');
     const message = JSON.parse(data);
-    if (message.type === 'ping') { this.reply({ type: 'pong' }, generation); return; }
-    if (message.type === 'pong') return;
+    if (message.type === 'ping') {
+      this.diagnostics?.receive(message.metrics);
+      const metrics = this.diagnostics?.packet(); this.reply({ type: 'pong', ...(metrics ? { metrics } : {}) }, generation); return;
+    }
+    if (message.type === 'pong') { this.diagnostics?.receive(message.metrics); return; }
     if (message.type === 'visibility') {
       if (typeof message.hidden !== 'boolean') throw Error('后台状态信息无效');
       const first = !this.backgroundSupport;
@@ -789,6 +800,7 @@ export class Transfer {
       try { this.control({ type: 'cancel' }); } catch {}
     }
     this.stopped = true; clearTimeout(this.failureTimer); this.sourceFailure = undefined; clearTimeout(this.connectTimer); clearTimeout(this.disconnectedTimer); clearTimeout(this.recoveryTimer); clearInterval(this.heartbeat);
+    this.diagnostics?.close();
     clearTimeout(this.binaryTimer); this.binaryTimer = undefined;
     this.receivingQueuedBytes -= this.pendingBinaryBytes; this.receivingQueuedMessages -= this.pendingBinary.length;
     this.pendingBinary = []; this.pendingBinaryBytes = 0;
