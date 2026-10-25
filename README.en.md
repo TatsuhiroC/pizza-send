@@ -42,7 +42,7 @@ Share files. Drop a folder on a computer to package it as a ZIP. Pair by QR. Rec
 - **Keep both pages open.** Automatic pairing can reconnect; refreshing or closing loses unfinished transfers. Phone locking may interrupt them.
 - **Save what you receive.** Browser copies have a ten-minute expiry and may be reclaimed sooner. Your downloaded copies stay.
 - **Size depends on the receiver.** Space and browser quota set the limit. Without disk storage, total reception is capped at 256 MiB.
-- **Some networks cannot connect.** There is no relay fallback. Links grant access: share them only with people you trust.
+- **Direct first, relay as fallback.** Cloudflare TURN is tried if connecting fails, or speed stays low with a long ETA. DTLS still encrypts files; the relay does not store them. Restricted networks may still block connections. Links grant access: share them only with people you trust.
 
 ## A little more
 

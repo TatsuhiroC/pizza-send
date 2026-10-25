@@ -31,6 +31,52 @@ async function fixture(overrides: any = {}) {
   const create = (id: number, ip = 'test-ip', challenge?: string) => request('/rooms', { method: 'POST', body: JSON.stringify({ v: 2, room: hex(id), receiverHash: hash(hex(900)), ...(challenge ? { challenge } : {}) }) }, ip);
   return { ...scope.exports, scope, env, clock, logs, access, gate, gateContext, request, create, rooms };
 }
+for (const objectFormat of [false, true]) test(`TURN credentials require a bound child room and stay temporary (${objectFormat ? 'object' : 'array'} provider response)`, async () => {
+  const f = await fixture({ TURN_KEY_ID: 'a'.repeat(32), TURN_KEY_TOKEN: 'master-private-marker' });
+  const created = await (await f.create(1)).json(), room = f.rooms.get(hex(1));
+  const path = '/rooms/' + hex(1) + '?role=sender&client=' + hex(7);
+  const request = (secret = created.sender, client = hex(7)) => f.request(path.replace(hex(7), client), { method: 'POST', headers: { Authorization: 'Bearer ' + secret }, body: JSON.stringify({ type: 'turn' }) });
+  let calls = 0;
+  f.scope.fetch = async (url: string, options: any) => {
+    calls++; expect(url).toBe('https://rtc.live.cloudflare.com/v1/turn/keys/' + 'a'.repeat(32) + '/credentials/generate-ice-servers');
+    expect(options.headers.Authorization).toBe('Bearer master-private-marker'); expect(JSON.parse(options.body)).toEqual({ ttl: 3600 });
+    const entries = [{ urls: ['stun:stun.cloudflare.com:3478'] }, { urls: ['stun:stun.cloudflare.com:3478', 'turn:turn.cloudflare.com:53?transport=udp', 'turns:turn.cloudflare.com:443?transport=tcp'], username: 'short-lived-user', credential: 'short-lived-password' }];
+    return Response.json({ iceServers: objectFormat ? entries[1] : entries });
+  };
+  expect((await request(hex(902))).status).toBe(401);
+  expect((await request()).status).toBe(409); expect(calls).toBe(0);
+  const state = await room.ctx.storage.get('room');
+  await room.ctx.storage.put('room', { ...state, senderClient: hex(7), receiverClient: hex(8) });
+  expect((await request(created.sender, hex(9))).status).toBe(409);
+  const results = await Promise.all(Array.from({ length: 8 }, () => request()));
+  expect(results.every(r => r.status === 200)).toBe(true); expect(calls).toBe(1);
+  const data = await results[0].json();
+  expect(data.expiresAt).toBe(f.clock.now + 3600000); expect(data.iceServers).toHaveLength(1);
+  expect(JSON.stringify(data)).not.toContain('master-private-marker'); expect(f.logs.join('')).not.toContain('short-lived-password');
+  expect((await request()).headers.get('cache-control')).toBe('no-store'); expect(calls).toBe(1);
+  await room.ctx.storage.put('room', { ...state, multi: true, members: {}, senderClient: hex(7), receiverClient: hex(8) });
+  expect((await request()).status).toBe(409);
+  await room.setEnded(); expect((await request()).status).toBe(410); expect(calls).toBe(1);
+});
+test('TURN upstream errors and invalid endpoints fail safely with a persisted retry bound', async () => {
+  const f = await fixture({ TURN_KEY_ID: 'a'.repeat(32), TURN_KEY_TOKEN: 'master-private-marker' });
+  const created = await (await f.create(1)).json(), room = f.rooms.get(hex(1)), state = await room.ctx.storage.get('room');
+  await room.ctx.storage.put('room', { ...state, senderClient: hex(7), receiverClient: hex(8) });
+  const request = () => f.request('/rooms/' + hex(1) + '?role=sender&client=' + hex(7), { method: 'POST', headers: { Authorization: 'Bearer ' + created.sender }, body: JSON.stringify({ type: 'turn' }) });
+  let calls = 0;
+  f.scope.fetch = async () => { calls++; throw Error('master-private-marker'); };
+  for (const result of await Promise.all([request(), request(), request()])) {
+    expect(result.status).toBe(503); expect(await result.text()).not.toContain('master-private-marker');
+  }
+  expect(calls).toBe(1); expect((await request()).status).toBe(503); expect(calls).toBe(1);
+  f.clock.now += 30001;
+  f.scope.fetch = async () => { calls++; return Response.json({ iceServers: [{ urls: ['turn:evil.test:3478?transport=udp'], username: 'x', credential: 'y' }] }); };
+  expect((await request()).status).toBe(503); expect(calls).toBe(2);
+  f.clock.now += 30001;
+  f.scope.fetch = async () => Response.json({ iceServers: [{ urls: ['turns:turn.cloudflare.com:443?transport=tcp'], username: 'user', credential: 'master-private-marker' }] });
+  const echoed = await request(); expect(echoed.status).toBe(503); expect(await echoed.text()).not.toContain('master-private-marker');
+  expect(f.logs.join('')).not.toContain('master-private-marker');
+});
 test('malformed credentials, large bodies and edge creation limits stop before room storage', async () => {
   const f = await fixture();
   expect((await f.request('/rooms/' + hex(1) + '?role=sender&token=bad')).status).toBe(401);
