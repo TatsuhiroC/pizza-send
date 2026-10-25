@@ -74,7 +74,7 @@ test('monitor ignores short slow transfers and fast long transfers, then request
     const transfer: any = new Transfer({ signalUrl: '', iceServers: [], memoryLimitBytes: 1048576 }, 'sender', () => {});
     const pair: any = new AutoPair(transfer, await signalKey('a'.repeat(64)), () => {});
     pair.offered = pair.relaySupported = true;
-    Object.defineProperty(transfer.pc, 'connectionState', { value: 'connected' });
+    Object.defineProperty(transfer.pc, 'connectionState', { value: 'connected', writable: true });
     transfer.channel = { readyState: 'open', close() {} };
     let requests = 0, state = { bytes: 0, total: 0, active: true, hidden: false };
     transfer.relayProgress = () => state;
@@ -84,6 +84,9 @@ test('monitor ignores short slow transfers and fast long transfers, then request
       pair.relayPolicy.reset();
       for (let ms = 0; ms <= 20000; ms += 2000) {
         Date.now = () => 1e7 + ms;
+        // Brief repeated reconnects must not reset low-speed observation forever.
+        transfer.recovering = scenario.speed === 30 * 1024 && ms % 4000 === 0;
+        (transfer.pc as any).connectionState = transfer.recovering ? 'connecting' : 'connected';
         state = { bytes: scenario.speed * ms / 1000, total: scenario.speed * scenario.remaining, active: true, hidden: false };
         pair.monitorRelay();
       }

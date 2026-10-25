@@ -287,7 +287,10 @@ export class Room extends DurableObject {
         const urls = typeof server?.urls === 'string' ? [server.urls] : server?.urls;
         return Array.isArray(urls) && urls.some(url => typeof url === 'string' && /^turns?:/.test(url));
       }).map(server => {
-        const urls = (typeof server.urls === 'string' ? [server.urls] : server.urls).filter(url => !/^stun:stun\.cloudflare\.com:(3478|53)$/.test(url) && !/^turn:turn\.cloudflare\.com:53\?transport=udp$/.test(url));
+        const urls = [...new Set((typeof server.urls === 'string' ? [server.urls] : server.urls).filter(url => !/^stun:stun\.cloudflare\.com:(3478|53)$/.test(url) && !/^turn:turn\.cloudflare\.com:53\?transport=(udp|tcp)$/.test(url)))];
+        // Some API responses only include the primary ports. Cloudflare also
+        // supports the same credentials over TLS 443 for UDP-blocked networks.
+        if (!urls.includes('turns:turn.cloudflare.com:443?transport=tcp')) urls.push('turns:turn.cloudflare.com:443?transport=tcp');
         if (!urls.length || urls.length > 8 || !urls.every(url => typeof url === 'string' && /^turns?:turn\.cloudflare\.com:(3478|443|5349|80)\?transport=(udp|tcp)$/.test(url)) ||
           typeof server.username !== 'string' || !server.username.length || server.username.length > 1024 ||
           typeof server.credential !== 'string' || !server.credential.length || server.credential.length > 1024) throw Error('Invalid relay configuration');
