@@ -18,6 +18,7 @@ import { checkSources, droppedSources } from './source-files';
 import { cleanupSourceArchives, packageSources, releaseSourceArchive, stopSourceArchives } from './folder-archive';
 import { remainingTime } from './remaining-time';
 import type { CompressionStatus } from './compression';
+import { connectionDiagnosticsEnabled, mountConnectionDiagnostics } from './connection-diagnostics';
 import './style.css';
 import './interface-motion.css';
 import './parcel.css';
@@ -63,6 +64,7 @@ app.innerHTML = [
   '<dialog id="verification-dialog" aria-labelledby="verification-heading"><div class="dialog-heading"><h2 id="verification-heading">确认是你在创建分享</h2></div><p>创建请求较多，请完成验证后继续。</p><div id="verification-widget"></div><button id="cancel-verification" class="secondary wide" type="button">取消验证</button><p class="subtle">此步骤由 Cloudflare 验证，不会上传你的文件。无法验证时，可以稍后重试或使用手动配对。</p></dialog>',
   '<div id="toast" class="toast" role="status" hidden></div>'
 ].join('');
+mountConnectionDiagnostics(app);
 registerStatic(app);
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const deliveryMotion = new DeliveryMotion(document.querySelector<HTMLElement>('.hero-pizza')!, $('transfer-complete'));
@@ -751,7 +753,7 @@ async function automaticSender(t: Transfer) {
   senderGroup = group;
   await group.connect();
   if (transfer !== t || t.stopped) { group.close(); return; }
-  const url = new URL(location.href); url.search = ''; url.hash = shareFragment(secret);
+  const url = new URL(location.href); url.search = connectionDiagnosticsEnabled ? '?connection-debug=1' : ''; url.hash = shareFragment(secret);
   clearShareQR();
   shareLink = url.toString();
   $<HTMLInputElement>('share-link').value = shareLink; $('share-box').hidden = false;
