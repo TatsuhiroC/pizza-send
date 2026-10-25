@@ -1,68 +1,29 @@
 export class SourceReadError extends Error {}
-type ReadOptions = { signal?: AbortSignal; deferTimeout?: () => number };
 
 // Always read bounded ranges, including files beyond the 2/4 GiB boundaries.
-export async function readSource(file: File, start: number, end: number, timeout = 15000, options: ReadOptions = {}): Promise<ArrayBuffer> {
-  const { signal, deferTimeout } = options;
-  signal?.throwIfAborted();
+export async function readSource(file: File, start: number, end: number, timeout = 0): Promise<ArrayBuffer> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let abort: (() => void) | undefined;
   try {
     if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || end > file.size || end - start > 1048576) throw Error('Invalid source range');
     const reading = file.slice(start, end).arrayBuffer();
-    // One guarded wait per chunk; native arrayBuffer() itself cannot be aborted.
-    // Its late resolution/rejection stays handled after timeout or cancellation.
-    const data = await new Promise<ArrayBuffer>((resolve, reject) => {
-      void reading.then(resolve, reject);
-      if (timeout) {
-        const expire = () => {
-          const delay = deferTimeout?.() ?? 0;
-          if (Number.isFinite(delay) && delay > 0) timer = setTimeout(expire, delay);
-          else reject(Error('Source read timed out'));
-        };
-        timer = setTimeout(expire, timeout);
-      }
-      if (signal) {
-        abort = () => reject(signal.reason ?? new DOMException('Cancelled', 'AbortError'));
-        if (signal.aborted) abort(); else signal.addEventListener('abort', abort, { once: true });
-      }
-    });
+    const data = timeout ? await Promise.race([
+      reading,
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Error('Source read timed out')), timeout); })
+    ]) : await reading;
     if (data.byteLength !== end - start) throw new Error('Short source read');
     return data;
   } catch {
-    signal?.throwIfAborted();
     throw new SourceReadError('无法读取原文件“' + file.name + '”。请确认文件仍在本机、未被移动或修改，再重新选择。');
-  } finally { clearTimeout(timer); if (abort) signal?.removeEventListener('abort', abort); }
+  } finally { clearTimeout(timer); }
 }
 
-export async function checkSources(files: File[], active: () => boolean, signal?: AbortSignal) {
-  signal?.throwIfAborted();
-  const controller = new AbortController();
-  let next = 0, stopped = false, failed = false, failure: unknown;
-  const stop = () => { stopped = true; controller.abort(); };
-  signal?.addEventListener('abort', stop, { once: true });
-  const worker = async () => {
-    try {
-      while (!stopped) {
-        if (!active()) { stop(); return; }
-        const file = files[next++];
-        if (!file) return;
-        if (!Number.isSafeInteger(file.size) || file.size < 0) throw new SourceReadError('文件大小无效，请重新选择原文件。');
-        // At most four small reads in flight; a file's head precedes its tail.
-        await readSource(file, 0, Math.min(32768, file.size), undefined, { signal: controller.signal });
-        if (!active()) { stop(); return; }
-        if (file.size > 32768) await readSource(file, Math.max(32768, file.size - 32768), file.size, undefined, { signal: controller.signal });
-      }
-    } catch (error) {
-      // Preserve the first actionable error, rather than a sibling's abort.
-      if (!stopped) { failed = true; failure = error; stop(); }
-    }
-  };
-  try {
-    await Promise.all(Array.from({ length: Math.min(4, files.length) }, worker));
-    if (failed) throw failure;
-    signal?.throwIfAborted();
-  } finally { signal?.removeEventListener('abort', stop); }
+export async function checkSources(files: File[], active: () => boolean) {
+  for (const file of files) {
+    if (!active()) return;
+    if (!Number.isSafeInteger(file.size) || file.size < 0) throw new SourceReadError('文件大小无效，请重新选择原文件。');
+    await readSource(file, 0, Math.min(32768, file.size), 15000);
+    if (file.size > 32768 && active()) await readSource(file, Math.max(32768, file.size - 32768), file.size, 15000);
+  }
 }
 
 export type FolderEntry = { path: string; file?: File };

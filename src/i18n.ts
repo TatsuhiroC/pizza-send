@@ -287,26 +287,11 @@ const messages: Record<string, string> = {
   '文件保存确认无效': 'Invalid save acknowledgement', '文件传输未完整结束': 'The file transfer has not finished', '文件尚未保存完整': 'Files have not been fully saved', '对方已取消传输。': 'The other device cancelled the transfer.', '收到不支持的传输消息': 'Unsupported transfer message',
   '这个浏览器暂不支持大文件流式保存。请使用桌面 Chrome 或 Edge；当前接收上限为 {size}': 'This browser cannot stream large files to disk. Use desktop Chrome or Edge. The current receive limit is {size}.',
   '对方浏览器的数据通道限制过小': 'The other browser’s data channel limit is too small',
-  '正在加载连接配置…': 'Loading connection settings…',
-  '重试加载连接配置': 'Retry loading connection settings',
-  '连接配置加载失败，请重试，或在连接设置中指定配对服务。': 'Connection settings could not be loaded. Retry, or choose a pairing service in connection settings.',
   '配对服务连接超时': 'Pairing service connection timed out', '无法连接配对服务': 'Unable to connect to the pairing service',
   '重复或无效的配对消息': 'Duplicate or invalid pairing message', '配对服务已断开；已建立的文件直连可以继续': 'Pairing service disconnected. An established direct transfer can continue.', '配对服务已断开': 'Pairing service disconnected'
 };
-function initialLanguage(): Language {
-  try {
-    const saved = localStorage.getItem('pizza-send-language');
-    if (saved === 'zh' || saved === 'en') return saved;
-  } catch { /* Detection still works when browser storage is unavailable. */ }
-  const preferred = navigator.languages?.length ? navigator.languages : [navigator.language];
-  for (const locale of preferred) {
-    const primary = locale.toLowerCase().split('-')[0];
-    if (primary === 'zh' || primary === 'en') return primary;
-  }
-  return 'en';
-}
-// Persist only explicit choices, so later visits can follow changed preferences.
-let language: Language = initialLanguage();
+let language: Language = 'zh';
+try { if (localStorage.getItem('pizza-send-language') === 'en') language = 'en'; } catch {}
 const fill = (value: string, params: Params) => value.replace(/\{(\w+)\}/g, (match, key) => String((key === 'path' || key === 'time') && typeof params[key] === 'string' ? t(params[key]) : params[key] ?? match));
 const patterns = Object.entries(messages).filter(([key]) => key.includes('{')).map(([key, value]) => {
   const names: string[] = [];

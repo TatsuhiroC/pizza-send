@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 const test = base.extend<{ receiverContext: BrowserContext }>({
   receiverContext: async ({ browser }, use, info) => {
     const profile = process.env.BENCH_PERSISTENT ? await mkdtemp(join(tmpdir(), 'pizzasend-benchmark-profile-')) : undefined;
-    const context = profile ? await chromium.launchPersistentContext(profile, { ...browserConfig.use?.launchOptions, acceptDownloads: true, locale: 'zh-CN' }) : await browser.newContext({ acceptDownloads: true, locale: 'zh-CN' });
+    const context = profile ? await chromium.launchPersistentContext(profile, { ...browserConfig.use?.launchOptions, acceptDownloads: true }) : await browser.newContext({ acceptDownloads: true });
     await context.route(url => url.hostname === '127.0.0.1' && url.port === '8787' && url.pathname.startsWith('/rooms'), route =>
       route.continue({ headers: { ...route.request().headers(), 'cf-connecting-ip': 'benchmark-receiver-' + info.testId } }));
     try { await use(context); } finally { await context.close(); if (profile) await rm(profile, { recursive: true, force: true }); }

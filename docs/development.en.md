@@ -26,8 +26,6 @@ Enter `http://127.0.0.1:8787` in the webpage's connection settings. Leave it emp
 
 ## Run checks
 
-On first visit, the browser's language priority list selects Chinese or English, with English as the fallback. An explicit choice made with the language switch is saved and takes priority. Automatic detection does not save an override, so later visits can follow changed browser preferences. Additional languages need matching interface text, errors, saving instructions and small-screen layout checks. Ordinary regressions explicitly use a Chinese locale; language tests cover other preferences independently of the test machine's defaults.
-
 The full test suite also requires Python 3 to verify folder ZIP contents and checksums with an independent standard-library reader. The application and build do not require Python.
 
 ```sh

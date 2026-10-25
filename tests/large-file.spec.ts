@@ -11,7 +11,7 @@ const test = base.extend({
     const profile = await mkdtemp(join(tmpdir(), 'pizza-send-browser-'));
     const context = await chromium.launchPersistentContext(profile, {
       ...info.project.use.launchOptions, headless: true,
-      baseURL: info.project.use.baseURL, acceptDownloads: true, locale: 'zh-CN'
+      baseURL: info.project.use.baseURL, acceptDownloads: true
     });
     try { await use(context); }
     finally { await context.close(); await rm(profile, { recursive: true, force: true }); }

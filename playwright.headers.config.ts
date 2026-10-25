@@ -3,7 +3,7 @@ import base from './playwright.config';
 
 export default defineConfig({
   ...base, testMatch: 'headers.spec.ts', testIgnore: [],
-  use: { locale: 'zh-CN', baseURL: 'http://127.0.0.1:4173', acceptDownloads: true },
+  use: { baseURL: 'http://127.0.0.1:4173', acceptDownloads: true },
   projects: [
     { name: 'headers-chromium', use: { browserName: 'chromium', launchOptions: base.use?.launchOptions } },
     { name: 'headers-webkit', use: { browserName: 'webkit' } }

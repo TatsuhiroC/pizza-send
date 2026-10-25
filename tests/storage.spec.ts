@@ -193,7 +193,7 @@ test('browsers without disk storage retain a bounded memory fallback', async ({ 
 
 const diskTest = test.extend({ context: async ({}, use, info) => {
   const profile = await mkdtemp(join(tmpdir(), 'pizza-send-opfs-profile-'));
-  const context = await chromium.launchPersistentContext(profile, { ...info.project.use.launchOptions, headless: true, baseURL: info.project.use.baseURL, acceptDownloads: true, locale: 'zh-CN' });
+  const context = await chromium.launchPersistentContext(profile, { ...info.project.use.launchOptions, headless: true, baseURL: info.project.use.baseURL, acceptDownloads: true });
   try { await use(context); } finally { await context.close(); await rm(profile, { recursive: true, force: true }); }
 } });
 diskTest('512 MiB receives through the production worker without a picker or full-file memory conversion', async ({ page, context }) => {
