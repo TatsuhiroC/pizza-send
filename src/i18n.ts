@@ -1,6 +1,7 @@
 export type Language = 'zh' | 'en';
 type Params = Record<string, string | number>;
 const messages: Record<string, string> = {
+  '正在尝试加密中继连接': 'Trying an encrypted relay connection',
   '连接诊断（仅本机与传输对端）': 'Connection diagnostics (this device and the transfer peer only)',
   '诊断链接会记录速度、缓冲和连接类型，并向当前传输对端附带匿名计数；不含文件内容、文件名、IP 地址或分享密钥，不上传到服务器。': 'Diagnostic links record speed, buffers and connection types, and attach anonymous counters for the current transfer peer. No file contents, names, IP addresses or share keys are included. Reports are not uploaded to a server.',
   '导出诊断记录': 'Export diagnostics',
@@ -158,7 +159,7 @@ const messages: Record<string, string> = {
   '配对信息无效': 'Invalid pairing information',
   '文件快传': 'File transfer',
   '网络切换，正在恢复连接': 'Network changed. Reconnecting',
-  '已接收的进度会保留，请保持双方页面打开。正在寻找可用的直连路径。': 'Received data is preserved. Keep both pages open while a new direct connection is found.',
+  '已接收的进度会保留，请保持双方页面打开。正在寻找可用的连接路径。': 'Received data is preserved. Keep both pages open while a new connection is found.',
   '等待网络恢复': 'Waiting for the network',
   '连接已恢复，继续传输': 'Reconnected. Resuming transfer',
   '从接收方确认的位置继续，完成后仍会校验整个文件。': 'Resuming from the receiver’s confirmed position. The whole file will still be verified on completion.',
@@ -176,7 +177,7 @@ const messages: Record<string, string> = {
   '发送文件': 'Send files', '接收文件': 'Receive files', '加密直传': 'Encrypted',
   '把文件放在这里': 'Drop your files here',
   '拖放文件，或点击选择': 'Drag and drop, or click to choose',
-  '支持多个文件 · 文件内容不上传到服务器': 'Multiple files · No file uploads to a server',
+  '支持多个文件 · 文件不在服务器保存': 'Multiple files · No server-side file storage',
   '先选一个文件，就可以开始。': 'Choose a file to get started.',
   '创建传输': 'Start sharing',
   '接住这一份分享': 'Receive something good',
@@ -201,7 +202,7 @@ const messages: Record<string, string> = {
   '大文件能传吗？': 'Can I send large files?',
   '桌面 Chrome / Edge 接收单个文件时支持直接保存。多文件或 Safari 等浏览器先在本机磁盘暂存，再选择保存到设备；大小取决于设备空间和浏览器额度，保存时可能同时占用两份空间。不支持写盘时仍限制为总计 256 MB。': 'Desktop Chrome / Edge can save a single file directly. Multiple files and Safari reception use temporary disk storage on this device, then offer actions to save to your device. Capacity depends on free space and browser quota; saving may use space for two copies. Browsers without disk storage remain limited to 256 MB in total.',
   '所有网络都能连上吗？': 'Will every network connect?',
-  '首版使用直连，不提供文件中继。部分移动、公司或受限网络可能无法连接，可以尝试同一 Wi-Fi。': 'This release uses direct connections without a file relay. Some mobile, corporate or restricted networks may not connect. Try the same Wi-Fi.',
+  '优先直连；连接失败，或持续低速且预计等待较长时，会尝试加密中继。部分受限网络仍可能无法连接。': 'Direct connections first. An encrypted relay is tried if connecting fails, or speed stays low with a long estimated wait. Some restricted networks may still block connections.',
   '可以断点续传吗？': 'Can I resume an interrupted transfer?',
   '自动配对支持页面保持打开时断线重连、从已接收位置续传。刷新或关闭页面后不能续传；手动配对暂不支持自动重连。': 'Automatic pairing can reconnect and resume from received bytes while both pages stay open. Refreshing or closing a page loses the session. Manual pairing does not reconnect automatically.',
   '“加密”意味着什么？': 'What does “encrypted” mean?',
@@ -282,7 +283,7 @@ const messages: Record<string, string> = {
   '请在支持 WebRTC 的现代浏览器中，通过 HTTPS 打开本站。': 'Open this site over HTTPS in a modern browser that supports WebRTC.',
   '文件列表无效（最多 100 个文件）': 'Invalid file list (up to 100 files)', '文件信息无效': 'Invalid file information', '文件总大小超出支持范围': 'The total file size exceeds the supported range',
   '这不是有效的 PizzaSend 配对码': 'This is not a valid PizzaSend pairing code', '配对信息过大': 'Pairing information is too large', '配对码类型不正确': 'Incorrect pairing code type',
-  '连接已中断，请重新创建传输。': 'Connection interrupted. Start a new transfer.', '设备直连': 'Device-to-device', '网络直连': 'Direct network connection',
+  '连接已中断，请重新创建传输。': 'Connection interrupted. Start a new transfer.', '设备直连': 'Device-to-device', '网络直连': 'Direct network connection', 'TURN 中继': 'TURN relay',
   '接收队列超出安全限制': 'The receive queue exceeds its safety limit', '对方已结束传输，或页面已关闭。': 'The other device ended the transfer or closed its page.',
   '连接已关闭': 'Connection closed', '对方长时间没有响应，请重新传输': 'The other device is not responding. Start a new transfer.',
   '接收到不符合文件信息的数据': 'Received data does not match the file information', '控制信息过大': 'Control message is too large', '重复的下载请求': 'Duplicate download request',

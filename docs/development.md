@@ -2,7 +2,7 @@
 
 [← 返回项目首页](../README.md) · [English](development.en.md)
 
-前端使用 Vite + TypeScript，部署到 Cloudflare Pages；Worker + Durable Objects 仅处理配对消息，STUN 帮助发现连接地址。文件通过 WebRTC 在浏览器之间直传，目前不提供 TURN 中继。
+前端使用 Vite + TypeScript，部署到 Cloudflare Pages；Worker + Durable Objects 仅处理配对消息，STUN 帮助发现连接地址。文件优先通过 WebRTC 在浏览器之间直传，失败或持续低速且 ETA 较长时尝试 TURN 中继，详见 [中继说明](turn-fallback.md)。
 
 ## 本地开发
 
