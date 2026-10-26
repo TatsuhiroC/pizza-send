@@ -2,11 +2,13 @@ import { authenticatedRequest, retryPairingRequest, ticketURL } from './security
 import { Transfer, AutoPair, randomToken, signalKey, type Config, type TransferEvent } from './protocol';
 import { deriveRecipientShare, receiverDigest } from './share';
 import type { CompressionStatus } from './compression';
+import type { RouteState, TransferRoute } from './stream-fallback';
 
 export type Recipient = {
   client: string; number: number; phase: 'pairing' | 'waiting' | 'sending' | 'recovering' | 'done' | 'error' | 'left';
   message: string; file: string; transferred: number; total: number; speed: number; path: string; started: boolean;
   transfer?: Transfer; pair?: AutoPair; background?: boolean; compression?: CompressionStatus;
+  route?: RouteState;
 };
 const valid = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 export function groupURL(api: string, room: string, role: 'sender' | 'receiver', token: string, client: string) {
@@ -51,6 +53,7 @@ export class GroupSender {
   firstEvent(event: TransferEvent) { if (this.firstClient) this.event(this.firstClient, event); }
   enableCompression(client: string) { this.peers.get(client)?.transfer?.enableCompression(); }
   dismissCompression(client: string) { this.peers.get(client)?.transfer?.dismissCompression(); }
+  async chooseRoute(client: string, route: TransferRoute) { await this.peers.get(client)?.pair?.chooseRoute(route); }
   private notify() { if (!this.closed) this.changed([...this.peers.values()], this.expired || Date.now() >= this.inviteExpiresAt); }
   private schedule() {
     if (this.closed || this.expired) return;
@@ -152,6 +155,7 @@ export class GroupSender {
     else if (event.type === 'recovering') { peer.phase = 'recovering'; peer.message = '网络切换，正在恢复连接'; }
     else if (event.type === 'background') { peer.background = event.data; }
     else if (event.type === 'compression') peer.compression = event.data;
+    else if (event.type === 'route') peer.route = event.data;
     else if (event.type === 'file') peer.file = event.data;
     else if (event.type === 'path') peer.path = event.data;
     else if (event.type === 'progress') { peer.transferred = event.data.transferred; peer.total = event.data.total; peer.speed = event.data.speed; }

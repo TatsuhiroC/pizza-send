@@ -64,3 +64,26 @@ test('direct connection retries do not reset the disconnected fallback observati
   peer.monitor(true, 1e7 + 20000);
   await expect.poll(() => opened).toBe(1); peer.close();
 });
+
+test('manual direct suppresses automatic switching and a manual relay failure is attempted only once', async () => {
+  let opened = 0;
+  const peer: any = new StreamFallback('sender', { epoch: () => 0, progress: () => ({ bytes: 0, total: 1e9, active: true, hidden: false, connected: true }), stopped: () => false,
+    open: async () => { opened++; throw Error('Fixture unavailable'); }, send: async () => {}, activate: async () => {}, restore: () => {} });
+  peer.supported = true; peer.choose('direct');
+  for (let ms = 0; ms <= 30000; ms += 2000) peer.monitor(true, 1e7 + ms);
+  expect(opened).toBe(0);
+  peer.choose('stream'); peer.monitor(true, 1e7 + 32000);
+  await expect.poll(() => peer.busy).toBe(false);
+  for (let ms = 34000; ms <= 60000; ms += 2000) peer.monitor(true, 1e7 + ms);
+  expect(opened).toBe(1); expect(peer.state).toMatchObject({ manual: true, current: 'direct', failed: true });
+  peer.close();
+});
+test('an explicitly selected relay is not automatically replaced because it is slower', () => {
+  let restores = 0;
+  const peer: any = new StreamFallback('sender', { epoch: () => 1, progress: () => ({ bytes: 1000, total: 1e9, active: true, hidden: false, connected: true }), stopped: () => false,
+    open: async () => { throw Error('Unexpected probe'); }, send: async () => {}, activate: async () => {}, restore: () => { restores++; } });
+  peer.supported = peer.active = true; peer.choose('stream');
+  peer.trial = { at: 10000, bytes: 0, oldBps: 100000 };
+  peer.monitor(true, 40000); expect(restores).toBe(0);
+  peer.choose('direct'); peer.monitor(true, 42000); expect(restores).toBe(1); peer.close();
+});

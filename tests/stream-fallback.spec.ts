@@ -20,7 +20,7 @@ test('untrusted stream controls cannot open a channel; native renegotiation defe
     const pair: any = new AutoPair(transfer, await signalKey('a'.repeat(64)), () => {}, 'a'.repeat(64));
     let opens = 0; pair.streamFallback.supported = true; pair.signal.stream = async () => { opens++; throw Error('Fixture unavailable'); };
     const original = transfer.pc;
-    for (const type of ['stream-prepare', 'stream-activate', 'stream-activated', 'stream-unavailable']) await pair.handle({ type, session: 'b'.repeat(64), epoch: 0 });
+    for (const type of ['stream-prepare', 'stream-activate', 'stream-activated', 'stream-unavailable', 'stream-select', 'stream-choice']) await pair.handle({ type, session: 'b'.repeat(64), epoch: 0 });
     const denied = opens === 0 && original === transfer.pc;
     await pair.handle({ type: 'stream-prepare', session: 'b'.repeat(64), epoch: 0 }, true);
     let allowed: boolean | undefined;
@@ -31,7 +31,8 @@ test('untrusted stream controls cannot open a channel; native renegotiation defe
   })).toEqual({ denied: true, opens: 1, deferred: true });
 });
 
-for (const blocked of [false, true]) test(blocked ? 'initial direct ICE failure opens encrypted WSS without a TURN stage' : 'a slow long transfer probes encrypted WSS without a TURN stage and resumes the original file', async ({ page, context, browserName }) => {
+for (const scenario of ['slow', 'initial', 'manual']) test(scenario === 'initial' ? 'initial direct ICE failure opens encrypted WSS without a TURN stage' : scenario === 'manual' ? 'either peer can choose direct and return to encrypted relay without resetting file progress' : 'a slow long transfer probes encrypted WSS without a TURN stage and resumes the original file', async ({ page, context, browserName }) => {
+  const blocked = scenario === 'initial', manual = scenario === 'manual';
   test.skip(browserName === 'webkit', 'The initial native DataChannel comparison uses Chromium.');
   let streamTickets = 0, relayTickets = 0, ciphertextFrames = 0;
   const streams = new Map<string, WebSocketRoute>(), errors: string[] = [];
@@ -53,7 +54,10 @@ for (const blocked of [false, true]) test(blocked ? 'initial direct ICE failure 
     });
     if (streams.has(opposite)) for (const peer of [socket, streams.get(opposite)!]) peer.send(JSON.stringify({ type: 'stream-ready' }));
   });
-  await context.addInitScript(({ blocked }) => {
+  await context.addInitScript(({ blocked, manual }) => {
+    const state = window as any; state.__slowRouteRead = manual;
+    const read = Blob.prototype.arrayBuffer;
+    Blob.prototype.arrayBuffer = async function() { if (state.__slowRouteRead && this.size <= 32768) await new Promise(resolve => setTimeout(resolve, 40)); return read.call(this); };
     if (blocked) {
       const Native = RTCPeerConnection;
       window.RTCPeerConnection = class extends Native {
@@ -73,7 +77,7 @@ for (const blocked of [false, true]) test(blocked ? 'initial direct ICE failure 
       return send.call(this, data);
     } as any;
     void navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => stream.getTracks().forEach(track => track.stop()));
-  }, { blocked });
+  }, { blocked, manual });
   const receiver = await context.newPage(); for (const current of [page, receiver]) current.on('pageerror', error => errors.push(error.message));
   const buffer = Buffer.alloc(8 * 1048576 + 17); for (let i = 0; i < buffer.length; i++) buffer[i] = i % 251;
   const instrument = async (current: typeof page) => current.evaluate(async () => {
@@ -105,6 +109,20 @@ for (const blocked of [false, true]) test(blocked ? 'initial direct ICE failure 
   await receiver.goto(await page.locator('#share-link').inputValue()); await expect(receiver.locator('#accept-files')).toBeVisible({ timeout: 60000 });
   await instrument(receiver); if (!blocked) expect(streamTickets).toBe(0); await receiver.locator('#accept-files').click();
   try {
+    if (manual) {
+      const receiveControls = receiver.locator('#route-controls'), sendControls = page.locator('#route-controls');
+      await expect(receiveControls).toHaveAttribute('data-route', 'stream', { timeout: 70000 });
+      await expect(receiveControls).toHaveAttribute('data-busy', 'false');
+      await receiveControls.locator('[data-route="direct"]').click();
+      await expect(sendControls).toHaveAttribute('data-route', 'direct');
+      await expect(sendControls).toHaveAttribute('data-busy', 'false');
+      await expect(receiveControls.locator('[data-route="direct"]')).toHaveAttribute('aria-pressed', 'true');
+      await sendControls.locator('[data-route="stream"]').click();
+      await expect(receiveControls).toHaveAttribute('data-route', 'stream');
+      await expect(sendControls).toHaveAttribute('data-busy', 'false');
+      for (const current of [page, receiver]) await expect(current.locator('#route-controls .route-hint')).toContainText('不再自动切换');
+      await page.evaluate(() => { (window as any).__slowRouteRead = false; });
+    }
     await expect(receiver.locator('#status')).toHaveText('文件已收到，请保存到设备', { timeout: 100000 });
     await expect(page.locator('#status')).toHaveText('传输完成，原样送达。');
     await expect(receiver.locator('#connection-path')).toContainText('加密服务器转发');
@@ -112,7 +130,8 @@ for (const blocked of [false, true]) test(blocked ? 'initial direct ICE failure 
     const pending = receiver.waitForEvent('download'); await receiver.locator('.download-file').click(); const download = await pending;
     expect(download.suggestedFilename()).toBe('generated-original-video.mp4');
     expect(createHash('sha256').update(await readFile((await download.path())!)).digest('hex')).toBe(createHash('sha256').update(buffer).digest('hex'));
-    expect(streamTickets).toBe(2); expect(relayTickets).toBe(0); expect(ciphertextFrames).toBeGreaterThan(8); expect(errors).toEqual([]);
+    if (manual) expect(await receiver.evaluate(() => (window as any).__streamTrace.filter((entry: any) => entry.type === 'file-start' && entry.offset > 0).length)).toBeGreaterThanOrEqual(2);
+    expect(streamTickets).toBe(manual ? 4 : 2); expect(relayTickets).toBe(0); expect(ciphertextFrames).toBeGreaterThan(8); expect(errors).toEqual([]);
   } catch (error) {
     console.log('SAFE_STREAM_FIXTURE', JSON.stringify({ streamTickets, relayTickets, ciphertextFrames, errors,
       sender: await page.evaluate(() => (window as any).__streamTrace), receiver: await receiver.evaluate(() => (window as any).__streamTrace) }));

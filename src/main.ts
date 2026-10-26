@@ -12,6 +12,7 @@ import { fitCameraFrame } from './camera-frame';
 import { supportsTemporaryStorage, listTemporaryFiles, temporaryURL, retainTemporaryFile, deleteTemporaryFile, storedKey, temporaryBusyCount, suspendTemporaryStorage, type StoredFile } from './received-storage';
 import { Transfer, AutoPair, bytes, randomToken, packDescription, unpackDescription, signalKey, type Config, type FileInfo, type TransferEvent } from './protocol';
 import { GroupSender, groupURL, groupRequest, type Recipient } from './group';
+import { renderRouteControls } from './route-controls';
 import { filenameOverlay, motionPause, reducedMotion } from './interface-motion';
 import { ScreenAwake } from './screen-awake';
 import { checkSources, droppedSources } from './source-files';
@@ -49,7 +50,7 @@ app.innerHTML = [
   '<section class="transfer-card" aria-label="文件传输"><div class="card-top"><div class="tabs" role="tablist" aria-label="传输角色"><button id="send-tab" class="tab active" role="tab" aria-selected="true">'+icon('upload')+'发送文件</button><button id="receive-tab" class="tab" role="tab" aria-selected="false">'+icon('down')+'接收文件</button></div><span class="secure">'+icon('lock')+'加密直传</span></div>',
   '<div id="send-view"><button id="drop-zone" class="drop-zone" type="button"><span class="drop-icon">'+icon('upload')+'</span><strong>把文件放在这里</strong><span>拖放文件，或点击选择</span><small>支持多个文件 · 文件不在服务器保存</small></button><input id="file-input" type="file" multiple hidden/><p id="archive-progress" class="subtle" role="status" hidden></p><button id="cancel-packaging" class="secondary" type="button" hidden>取消打包</button><div class="selection-actions"><button id="clear-files" class="secondary" type="button" hidden>'+icon('trash')+'<span>清空已选文件</span></button></div><div id="files" class="file-list" aria-live="polite"></div><div class="send-bottom"><span id="selection-summary">先选一个文件，就可以开始。</span><button id="start-send" class="primary" disabled><span id="start-send-label">创建传输</span> '+icon('arrow')+'</button></div></div>',
   '<div id="receive-view" hidden><div id="receive-entry"><div class="receive-intro"><span class="drop-icon">'+icon('down')+'</span><h2>接住这一份分享</h2><p>打开对方发来的分享链接即可连接。<br/>也可以在这里粘贴链接或配对码。</p></div><button id="open-scanner" class="secondary wide scan-button" type="button">'+icon('camera')+'打开相机扫描</button><div class="receive-code-heading"><p class="scan-alternative subtle">或粘贴分享链接／配对码</p><button id="paste-receive" class="secondary paste-button" type="button" aria-controls="receive-code">'+icon('paste')+'粘贴</button></div><label class="sr-only" for="receive-code">分享链接或配对码</label><textarea id="receive-code" rows="3" placeholder="粘贴 PizzaSend 分享链接或 PS1. 配对码"></textarea><button id="connect-receive" class="primary wide">连接发送方 '+icon('arrow')+'</button></div><div id="incoming-files" class="file-list"></div><p id="save-note" class="subtle" hidden></p><button id="accept-files" class="primary wide" aria-describedby="save-note" hidden>选择保存位置并接收 '+icon('down')+'</button></div>',
-  '<div id="session-panel" class="session-panel" hidden><div class="session-heading"><span id="status-dot" class="status-dot"></span><h2 id="status" tabindex="-1">等待接收方</h2><button id="cancel" class="session-action" type="button">结束传输</button></div><p id="status-detail" class="subtle">传输期间请保持双方页面打开。</p><p id="background-note" class="background-note subtle" role="status" hidden></p><section id="save-panel" class="save-panel" aria-labelledby="save-heading" hidden><h3 id="save-heading" tabindex="-1">保存到设备</h3><p id="save-location-note" class="subtle">文件目前保存在浏览器暂存中，保存后才能在手机的“文件”App 或浏览器下载记录中找到。</p><button id="download-all" class="primary wide" type="button" aria-describedby="download-all-note" hidden>'+icon('down')+'下载全部</button><p id="download-all-note" class="subtle" hidden>如浏览器询问是否允许下载多个文件，请选择允许。若有文件未下载，请使用下方的单个保存按钮。</p><div id="save-files"></div><div id="downloads" class="downloads"></div><p id="save-empty" class="subtle" hidden>暂存已清理或到期。如未保存，请让发送方重新分享。</p><p id="save-retention" class="subtle"></p><p id="save-feedback" class="save-feedback" role="status" hidden></p></section><div id="share-box" hidden><label for="share-link">把链接发给对方，或者让对方扫码</label><div class="link-row"><input id="share-link" readonly/><button id="copy-link" class="icon-button" aria-label="复制分享链接">'+icon('copy')+'</button></div><canvas id="share-qr" hidden></canvas><p id="share-note" class="subtle">链接 30 分钟内可加入，最多 10 位同时接收。请只分享给预期接收者。</p></div><div id="recipients" class="recipients" hidden></div><div id="progress-box" hidden><div class="progress-meta"><button id="current-file" class="filename-button" type="button" aria-haspopup="dialog"></button><span class="progress-result"><span id="percent">0%</span><span id="transfer-complete" class="completion-mark" aria-hidden="true" hidden>'+completionSymbol+'</span></span></div><progress id="progress" max="100" value="0" aria-label="传输进度"></progress><div class="metrics"><div><span id="transferred">0 B</span><small>已接收</small></div><div><span id="speed">—</span><small>平均速度</small></div><div><span id="remaining">—</span><small>预计剩余</small></div></div><div class="path-label">'+icon('lock')+'<span id="connection-path">浏览器之间加密传输</span><span>SHA-256 校验</span></div></div><div id="compression-hint" class="compression-hint" role="status" hidden></div><div id="awake-panel" class="awake-panel" hidden><div class="awake-controls"><label class="awake-switch"><input id="keep-awake" type="checkbox" role="switch" checked aria-label="保持屏幕常亮" aria-describedby="awake-hint"/><span id="awake-label">保持常亮</span><span class="awake-track" aria-hidden="true"></span></label><button id="retry-awake" class="awake-retry" type="button" hidden>重试</button></div><p id="awake-hint" class="subtle" role="status" hidden></p></div></div>',
+  '<div id="session-panel" class="session-panel" hidden><div class="session-heading"><span id="status-dot" class="status-dot"></span><h2 id="status" tabindex="-1">等待接收方</h2><button id="cancel" class="session-action" type="button">结束传输</button></div><p id="status-detail" class="subtle">传输期间请保持双方页面打开。</p><p id="background-note" class="background-note subtle" role="status" hidden></p><section id="save-panel" class="save-panel" aria-labelledby="save-heading" hidden><h3 id="save-heading" tabindex="-1">保存到设备</h3><p id="save-location-note" class="subtle">文件目前保存在浏览器暂存中，保存后才能在手机的“文件”App 或浏览器下载记录中找到。</p><button id="download-all" class="primary wide" type="button" aria-describedby="download-all-note" hidden>'+icon('down')+'下载全部</button><p id="download-all-note" class="subtle" hidden>如浏览器询问是否允许下载多个文件，请选择允许。若有文件未下载，请使用下方的单个保存按钮。</p><div id="save-files"></div><div id="downloads" class="downloads"></div><p id="save-empty" class="subtle" hidden>暂存已清理或到期。如未保存，请让发送方重新分享。</p><p id="save-retention" class="subtle"></p><p id="save-feedback" class="save-feedback" role="status" hidden></p></section><div id="share-box" hidden><label for="share-link">把链接发给对方，或者让对方扫码</label><div class="link-row"><input id="share-link" readonly/><button id="copy-link" class="icon-button" aria-label="复制分享链接">'+icon('copy')+'</button></div><canvas id="share-qr" hidden></canvas><p id="share-note" class="subtle">链接 30 分钟内可加入，最多 10 位同时接收。请只分享给预期接收者。</p></div><div id="recipients" class="recipients" hidden></div><div id="progress-box" hidden><div class="progress-meta"><button id="current-file" class="filename-button" type="button" aria-haspopup="dialog"></button><span class="progress-result"><span id="percent">0%</span><span id="transfer-complete" class="completion-mark" aria-hidden="true" hidden>'+completionSymbol+'</span></span></div><progress id="progress" max="100" value="0" aria-label="传输进度"></progress><div class="metrics"><div><span id="transferred">0 B</span><small>已接收</small></div><div><span id="speed">—</span><small>平均速度</small></div><div><span id="remaining">—</span><small>预计剩余</small></div></div><div class="path-label">'+icon('lock')+'<span id="connection-path">浏览器之间加密传输</span><span>SHA-256 校验</span></div></div><div id="route-controls" class="route-controls" hidden></div><div id="compression-hint" class="compression-hint" role="status" hidden></div><div id="awake-panel" class="awake-panel" hidden><div class="awake-controls"><label class="awake-switch"><input id="keep-awake" type="checkbox" role="switch" checked aria-label="保持屏幕常亮" aria-describedby="awake-hint"/><span id="awake-label">保持常亮</span><span class="awake-track" aria-hidden="true"></span></label><button id="retry-awake" class="awake-retry" type="button" hidden>重试</button></div><p id="awake-hint" class="subtle" role="status" hidden></p></div></div>',
   '<div id="notice" class="notice" role="alert" hidden></div></section>',
   '<section id="stored-panel" class="stored-panel" aria-labelledby="stored-heading" hidden><div class="stored-heading"><div><h2 id="stored-heading">本机暂存</h2><span id="stored-size"></span></div><button id="clear-stored" class="secondary cleanup-stored" type="button" hidden>'+icon('trash')+'<span>清理全部暂存</span></button></div><p class="subtle">文件暂存在这台设备的磁盘里，整批接收完成后保留 10 分钟。点击保存会为该文件重新预留 10 分钟；下载完成后，也可以立即清理全部暂存。</p><p id="stored-busy" class="subtle" hidden>部分暂存正在另一个页面使用。请关闭该页面后，再清理全部暂存。</p><div id="stored-files"></div><p class="subtle">到期自动清理。网页关闭或暂停时，下次打开或返回再清理；不会删除已经下载的副本。刷新不会延长保存时间，未完成的传输不能在刷新后续传。浏览器也可能提前回收暂存，请及时保存。</p></section>',
   '<section class="benefits"><div>'+icon('bolt')+'<h3>直接送达</h3><p>两端连接后，即传即收。</p></div><div>'+icon('lock')+'<h3>加密传输</h3><p>文件在浏览器之间加密传递。</p></div><div>'+icon('file')+'<h3>原样分享</h3><p>保留内容，逐个校验文件。</p></div></section>',
@@ -456,6 +457,7 @@ function renderCurrentCompression() {
 }
 function reset() {
   deliveryMotion.setState('idle');
+  $('route-controls').hidden = true;
   compressionState = { active: false }; $('compression-hint').hidden = true;
   cancelChallenge();
   sessionRevision++; pendingSaveScroll = undefined; saveRequests.clear(); systemSaveRequests.clear(); cancelAllDownloads();
@@ -476,7 +478,9 @@ function reset() {
   history.replaceState(null, '', location.pathname + location.search);
 }
 function events(event: TransferEvent) {
-  if (event.type === 'compression') {
+  if (event.type === 'route') {
+    renderRouteControls($('route-controls'), event.data, route => run(async () => { await signaling?.chooseRoute(route); }), !!transfer && !transfer.completed && !transfer.stopped);
+  } else if (event.type === 'compression') {
     compressionState = event.data; renderCurrentCompression();
   } else if (event.type === 'pairing') {
     status(event.data, event.data === '配对信息已交换，正在寻找直连路径' ? '请保持手机在发送页面；VPN 需要允许本地网络和 WebRTC。' : '请让发送方保持页面打开，手机不要锁屏。');
@@ -512,6 +516,7 @@ function events(event: TransferEvent) {
     row.append(downloadRow(event.data.info.name, a, true));
     a.onclick = () => markSaveRequested(key); $('downloads').append(row);
   } else if (event.type === 'done') {
+    $('route-controls').hidden = true;
     $('compression-hint').hidden = true;
     deliveryMotion.setState('done');
     if (transfer?.role === 'receiver') completeReception(transfer);
@@ -532,6 +537,7 @@ function events(event: TransferEvent) {
     deliveryMotion.setState('transferring');
     status('连接已恢复，继续传输', '从接收方确认的位置继续，完成后仍会校验整个文件。', 'connected');
   } else if (event.type === 'error') {
+    $('route-controls').hidden = true;
     $('compression-hint').hidden = true;
     transferFailed = true;
     deliveryMotion.setState('idle');
@@ -679,6 +685,8 @@ function renderRecipients(peers: Recipient[], expired: boolean) {
     setText($('speed'), bytes(peer.speed) + '/s'); setText($('remaining'), remainingTime(peer.total, peer.transferred, peer.speed, peer.phase));
     if (peer.path) setText($('connection-path'), peer.path === '加密服务器转发' ? '{path} · AES-GCM 端到端加密' : '{path} · DTLS 加密', { path: peer.path });
   }
+  const single = peers.length === 1 ? peers[0] : undefined;
+  renderRouteControls($('route-controls'), single?.route, route => run(async () => { if (single) await senderGroup?.chooseRoute(single.client, route); }), !!single && !['done', 'error', 'left'].includes(single.phase));
   const rows = new Map(Array.from($('recipients').querySelectorAll<HTMLElement>('.recipient-row'), row => [row.dataset.client, row]));
   const clients = new Set(peers.map(peer => peer.client));
   for (const [client, row] of rows) if (!clients.has(client!)) row.remove();
@@ -686,10 +694,11 @@ function renderRecipients(peers: Recipient[], expired: boolean) {
     let row = rows.get(peer.client);
     if (!row) {
       row = document.createElement('div'); row.className = 'recipient-row'; row.dataset.client = peer.client;
-      row.innerHTML = '<div class="recipient-heading"><strong></strong><span><span class="recipient-message"></span><span class="completion-mark" aria-hidden="true" hidden>'+completionSymbol+'</span></span></div><button class="filename-button" type="button" aria-haspopup="dialog"></button><progress max="100" value="0"></progress><div class="recipient-detail"><span></span><span></span></div><div class="compression-hint" role="status" hidden></div>';
+      row.innerHTML = '<div class="recipient-heading"><strong></strong><span><span class="recipient-message"></span><span class="completion-mark" aria-hidden="true" hidden>'+completionSymbol+'</span></span></div><button class="filename-button" type="button" aria-haspopup="dialog"></button><progress max="100" value="0"></progress><div class="recipient-detail"><span></span><span></span></div><div class="route-controls" hidden></div><div class="compression-hint" role="status" hidden></div>';
       $('recipients').append(row);
     }
     row.dataset.phase = peer.phase;
+    renderRouteControls(row.querySelector<HTMLElement>('.route-controls')!, peer.route, route => run(async () => { await senderGroup?.chooseRoute(peer.client, route); }), peers.length > 1 && !['done', 'error', 'left'].includes(peer.phase));
     renderCompression(row.querySelector<HTMLElement>('.compression-hint')!, peer.compression || { active: false }, () => senderGroup?.enableCompression(peer.client), () => senderGroup?.dismissCompression(peer.client), peer.phase === 'sending' && !peer.background);
     setText(row.querySelector('strong')!, '接收者 {number}', { number: peer.number }); setText(row.querySelector('.recipient-message')!, peer.message);
     if (peer.background) setText(row.querySelector('.recipient-message')!, '对方已切到后台，等待返回');

@@ -8,7 +8,7 @@ import { downloadType } from './download';
 import { TransferFlow } from './transfer-flow';
 import { StreamChannel, type DataChannel } from './stream-channel';
 import { StreamCipher } from './stream-cipher';
-import { StreamFallback } from './stream-fallback';
+import { StreamFallback, type RouteState, type TransferRoute } from './stream-fallback';
 import { watchConnectionDiagnostics, type DiagnosticHandle } from './connection-diagnostics';
 import { COMPRESSION, BLOCK_BYTES, SAMPLE_BYTES, SlowLink, compressionEstimate, sampleCompression, supportsCompression, gzip, gunzip, type CompressionSample, type CompressionStatus } from './compression';
 import { createTemporarySession, beginTemporaryFile, writeTemporaryFile, finishTemporaryFile, completeTemporarySession, discardTemporaryPartial } from './received-storage';
@@ -211,6 +211,7 @@ export class Transfer {
       active: this.accepted && !this.localHidden && !this.peerHidden && !this.stopped && !this.completed,
       hidden: this.localHidden || this.peerHidden };
   }
+  reportRoute(state: RouteState) { if (!this.stopped && !this.completed) this.emit({ type: 'route', data: state }); }
   constructor(public config: Config, public role: 'sender' | 'receiver', private emit: (event: TransferEvent) => void) {
     this.pc = this.createPeer();
     if (this.localHidden) this.localBackgroundUntil = Date.now() + 10 * 60 * 1000;
@@ -1030,6 +1031,9 @@ export class AutoPair {
   private retry: ReturnType<typeof setInterval>;
   private routeMonitor: ReturnType<typeof setInterval>;
   private streamFallback?: StreamFallback;
+  private routeSnapshot = '';
+  private pendingRoute?: TransferRoute;
+  private routeRequestTimer?: ReturnType<typeof setTimeout>;
   constructor(private transfer: Transfer, key: CryptoKey, private onError: (message: string) => void, secret?: string) {
     this.signal = new Signaling(key, (message, authenticated) => this.handle(message, authenticated), onError);
     if (secret) this.streamFallback = new StreamFallback(transfer.role, {
@@ -1044,7 +1048,8 @@ export class AutoPair {
           await transfer.replaceTransport(channel);
         } finally { this.negotiating = false; }
       },
-      restore: () => { this.lastAttempt = 0; transfer.requestRecovery(); }
+      restore: () => { this.lastAttempt = 0; transfer.requestRecovery(); },
+      changed: () => this.reportRoute()
     });
     transfer.enableSourceFailure(async () => {
       const receipt = new Promise<void>(resolve => { this.sourceFailureAck = resolve; });
@@ -1067,6 +1072,41 @@ export class AutoPair {
   }
   private monitorRoute() {
     this.streamFallback?.monitor(this.offered && !this.negotiating && !this.closed);
+    this.reportRoute();
+  }
+  private reportRoute() {
+    const fallback = this.streamFallback, t = this.transfer;
+    if (!fallback || this.closed || t.stopped || t.completed) return;
+    const state = { ...fallback.state };
+    state.busy ||= !!this.pendingRoute || this.negotiating;
+    state.recovering = t.recovering;
+    if (this.pendingRoute) state.target = this.pendingRoute;
+    const snapshot = JSON.stringify(state);
+    if (snapshot !== this.routeSnapshot) { this.routeSnapshot = snapshot; t.reportRoute(state); }
+  }
+  async chooseRoute(route: TransferRoute) {
+    const fallback = this.streamFallback;
+    if (!fallback?.state.available || this.closed || this.transfer.stopped || this.transfer.completed ||
+      fallback.busy || this.pendingRoute || this.negotiating || !['direct', 'stream'].includes(route)) throw Error('暂时无法切换路线，请稍后重试。');
+    this.pendingRoute = route; this.reportRoute();
+    try {
+      if (this.transfer.role === 'sender') await this.commitRouteChoice(route);
+      else {
+        await this.signal.send({ type: 'stream-select', route }, true);
+        if (this.pendingRoute === route) this.routeRequestTimer = setTimeout(() => {
+          this.pendingRoute = undefined; this.reportRoute();
+          if (!this.closed && !this.transfer.stopped && !this.transfer.completed) this.onError('暂时无法切换路线，请稍后重试。');
+        }, 10000);
+      }
+    } catch (error) {
+      this.pendingRoute = undefined; this.reportRoute();
+      if (!this.closed && !this.transfer.stopped && !this.transfer.completed) throw error;
+    }
+  }
+  private async commitRouteChoice(route: TransferRoute) {
+    await this.signal.send({ type: 'stream-choice', route }, true);
+    if (this.closed || this.transfer.stopped || this.transfer.completed) return;
+    this.pendingRoute = undefined; this.streamFallback?.choose(route); this.monitorRoute();
   }
   async connect(endpoint: string, room: string, role: string, token: string) {
     if (role === 'receiver') this.waitingTimer = setTimeout(() => {
@@ -1110,6 +1150,16 @@ export class AutoPair {
     // Otherwise a compromised/custom signaling service could inject its own
     // DTLS fingerprints instead of merely relaying encrypted peer negotiation.
     if (!authenticated && !['signal-ready', 'peer-ready', 'peer-left', 'receiver-left', 'ended'].includes(message?.type)) return;
+    if (['stream-select', 'stream-choice'].includes(message?.type)) {
+      if (!this.streamFallback?.state.available || !['direct', 'stream'].includes(message.route)) return;
+      if (message.type === 'stream-select' && t.role === 'sender') void this.commitRouteChoice(message.route).catch(() => {
+        if (!this.closed && !t.stopped && !t.completed) this.onError('暂时无法切换路线，请稍后重试。');
+      });
+      else if (message.type === 'stream-choice' && t.role === 'receiver') {
+        clearTimeout(this.routeRequestTimer); this.pendingRoute = undefined; this.streamFallback.choose(message.route); this.reportRoute();
+      }
+      return;
+    }
     if (typeof message?.type === 'string' && message.type.startsWith('stream-')) { await this.streamFallback?.handle(message); return; }
     if (message.type === 'signal-ready') {
       if (!this.offered && t.role === 'receiver') t.pairingStage(message.peerPresent ? '找到发送方，正在交换连接信息' : '等待发送方回到页面');
@@ -1208,5 +1258,5 @@ export class AutoPair {
     } catch { /* Preserve the checkpoint and retry until the recovery deadline. */ }
     finally { this.negotiating = false; }
   }
-  close() { this.closed = true; this.streamFallback?.close(); this.sourceFailureAck?.(); this.sourceFailureAck = undefined; clearInterval(this.retry); clearInterval(this.routeMonitor); clearTimeout(this.candidateTimer); clearTimeout(this.waitingTimer); this.signal.close(); }
+  close() { this.closed = true; this.pendingRoute = undefined; this.streamFallback?.close(); this.sourceFailureAck?.(); this.sourceFailureAck = undefined; clearInterval(this.retry); clearInterval(this.routeMonitor); clearTimeout(this.routeRequestTimer); clearTimeout(this.candidateTimer); clearTimeout(this.waitingTimer); this.signal.close(); }
 }

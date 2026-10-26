@@ -1,6 +1,14 @@
 export type Language = 'zh' | 'en';
 type Params = Record<string, string | number>;
 const messages: Record<string, string> = {
+  '传输路线': 'Transfer route', '直连': 'Direct', '加密转发': 'Encrypted relay',
+  '正在切回直连，已接收进度会保留。': 'Switching back to direct. Received progress is kept.',
+  '正在连接加密转发，已接收进度会保留。': 'Connecting to the encrypted relay. Received progress is kept.',
+  '加密转发暂时不可用，继续使用直连。': 'Encrypted relay unavailable. Keeping the direct route.',
+  '当前使用加密转发': 'Using the encrypted relay', '当前使用直连': 'Using a direct connection',
+  '已手动选择，本次传输不再自动切换。': 'Manual choice. Automatic route switching is paused for this transfer.',
+  '可以切换路线，已接收进度会保留。': 'You can switch routes. Received progress is kept.',
+  '暂时无法切换路线，请稍后重试。': 'Cannot switch routes right now. Please try again shortly.',
   '连接诊断（仅本机与传输对端）': 'Connection diagnostics (this device and the transfer peer only)',
   '诊断链接会记录速度、缓冲和连接类型，并向当前传输对端附带匿名计数；不含文件内容、文件名、IP 地址或分享密钥，不上传到服务器。': 'Diagnostic links record speed, buffers and connection types, and attach anonymous counters for the current transfer peer. No file contents, names, IP addresses or share keys are included. Reports are not uploaded to a server.',
   '导出诊断记录': 'Export diagnostics',
