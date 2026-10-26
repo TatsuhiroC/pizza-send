@@ -6,6 +6,9 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { createFileHash, type FileHash } from './file-hash';
 import { downloadType } from './download';
 import { TransferFlow } from './transfer-flow';
+import { StreamChannel, type DataChannel } from './stream-channel';
+import { StreamCipher } from './stream-cipher';
+import { StreamFallback } from './stream-fallback';
 import { TurnFallbackPolicy, readTurnCredentials, type TurnCredentials } from './turn-fallback';
 import { watchConnectionDiagnostics, type DiagnosticHandle } from './connection-diagnostics';
 import { COMPRESSION, BLOCK_BYTES, SAMPLE_BYTES, SlowLink, compressionEstimate, sampleCompression, supportsCompression, gzip, gunzip, type CompressionSample, type CompressionStatus } from './compression';
@@ -86,7 +89,9 @@ class TransportInterrupted extends Error {}
 
 export class Transfer {
   pc: RTCPeerConnection;
-  channel?: RTCDataChannel;
+  channel?: DataChannel;
+  private streamTransport = false;
+  get transportConnected() { return this.channel?.readyState === 'open' && (this.streamTransport || this.pc.connectionState === 'connected'); }
   files: File[] = [];
   manifest: FileInfo[] = [];
   stopped = false;
@@ -130,7 +135,7 @@ export class Transfer {
       if (this.role === 'sender') this.flow.reset(this.acknowledged);
       if (this.recovering) this.armRecoveryTimeout();
       if (this.connectTimer && this.channel?.readyState !== 'open') this.startTimeout();
-      if (this.opened && (this.channel?.readyState !== 'open' || ['failed', 'disconnected', 'closed'].includes(this.pc.connectionState))) this.requestRecovery();
+      if (this.opened && (this.channel?.readyState !== 'open' || !this.streamTransport && ['failed', 'disconnected', 'closed'].includes(this.pc.connectionState))) this.requestRecovery();
     }
     this.wake();
   };
@@ -217,7 +222,8 @@ export class Transfer {
       pc: this.pc, role: this.role, generation: this.generation, started: this.started, sent: this.sent, acknowledged: this.acknowledged, received: this.received,
       buffered: this.channel?.bufferedAmount || 0, queued: this.receivingQueuedBytes, window: this.flow.windowBytes,
       sourceBytes: this.readBytes, sourceMs: this.readMilliseconds, sinkBytes: this.writeBytes, sinkMs: this.writeMilliseconds,
-      completed: this.completed, stopped: this.stopped, recovering: this.recovering, hidden: this.localHidden, peerHidden: this.peerHidden
+      completed: this.completed, stopped: this.stopped, recovering: this.recovering, hidden: this.localHidden, peerHidden: this.peerHidden,
+      transport: this.streamTransport ? 'websocket' : 'webrtc', connectionOpen: this.transportConnected
     }));
   }
   enableRecovery(callback: () => void) {
@@ -262,12 +268,12 @@ export class Transfer {
     }
   }
   private transportQueue = Promise.resolve();
-  replaceTransport() {
-    const task = this.transportQueue.then(() => this.replaceTransportNow());
+  replaceTransport(stream?: StreamChannel) {
+    const task = this.transportQueue.then(() => this.replaceTransportNow(stream));
     this.transportQueue = task.catch(() => {});
     return task;
   }
-  private async replaceTransportNow() {
+  private async replaceTransportNow(stream?: StreamChannel) {
     this.generation++;
     clearTimeout(this.connectTimer); clearTimeout(this.disconnectedTimer); clearInterval(this.heartbeat);
     const channel = this.channel;
@@ -280,8 +286,16 @@ export class Transfer {
     this.encodedBlock = undefined;
     this.resetCompressionAdvice();
     if (this.stopped) throw new TransportInterrupted();
-    this.pc = this.createPeer();
-    if (this.role === 'sender') this.attach(this.pc.createDataChannel('pizza-send-v2', { ordered: true }));
+    this.streamTransport = !!stream;
+    if (stream) {
+      this.attach(stream);
+      // A candidate is opened and tested before replacing the old transport.
+      queueMicrotask(() => { if (!this.stopped && this.channel === stream && stream.readyState === 'open') stream.onopen?.(new Event('open')); });
+      this.emit({ type: 'path', data: '加密服务器转发' });
+    } else {
+      this.pc = this.createPeer();
+      if (this.role === 'sender') this.attach(this.pc.createDataChannel('pizza-send-v2', { ordered: true }));
+    }
   }
   private restored() {
     const wasRecovering = this.recovering;
@@ -301,7 +315,7 @@ export class Transfer {
       }
     });
   }
-  private attach(channel: RTCDataChannel) {
+  private attach(channel: DataChannel) {
     const generation = this.generation;
     this.channel = channel; channel.binaryType = 'arraybuffer'; channel.bufferedAmountLowThreshold = 256 * 1024;
     channel.onbufferedamountlow = () => this.wake();
@@ -310,7 +324,8 @@ export class Transfer {
       this.lastSeen = Date.now();
       if (!this.opened) this.emit({ type: 'connected' });
       this.opened = true;
-      if (this.role === 'sender') this.control({ type: 'manifest', files: this.manifest, version: 2, backgroundSupport: true, compression: supportsCompression() ? COMPRESSION : undefined });
+      if (this.role === 'sender') this.control({ type: 'manifest', files: this.manifest, version: 2, backgroundSupport: true,
+        ...(this.generation ? { resumeRequested: true } : {}), compression: supportsCompression() ? COMPRESSION : undefined });
       this.reportVisibility();
       clearInterval(this.heartbeat);
       this.heartbeat = setInterval(() => {
@@ -580,7 +595,15 @@ export class Transfer {
         if (JSON.stringify(manifest) !== JSON.stringify(this.manifest)) throw Error('续传文件列表不一致');
         this.reply({ type: 'resume', file: this.receivedFiles, offset: this.incoming?.received || 0, bytes: this.received, accepted: this.accepted, complete: this.completed, compression: this.compressionSupport ? COMPRESSION : undefined }, generation);
         this.restored();
-      } else { this.manifest = manifest; this.restored(); this.emit({ type: 'manifest', data: this.manifest }); }
+      } else {
+        this.manifest = manifest;
+        // Initial ICE can fail before any manifest reaches the receiver. The
+        // replacement sender still needs a resume snapshot before it can accept
+        // a subsequent download request; do not wait for another recovery cycle.
+        if (message.resumeRequested === true) this.reply({ type: 'resume', file: 0, offset: 0, bytes: 0, accepted: false, complete: false,
+          compression: this.compressionSupport ? COMPRESSION : undefined }, generation);
+        this.restored(); this.emit({ type: 'manifest', data: this.manifest });
+      }
     } else if (message.type === 'resume' && this.role === 'sender') {
       if (!generation || this.resumedGeneration === generation) throw Error('重复或无效的续传信息');
       const { file, offset, bytes: received, accepted, complete } = message;
@@ -968,6 +991,13 @@ export class Signaling {
     if (this.closed) throw Error('中继暂时不可用');
     return credentials;
   }
+  async stream(secret: string, session: string) {
+    if (this.closed || !this.endpoint) throw Error('加密转发暂时不可用');
+    const room = new URL(this.endpoint).pathname.split('/').at(-1)!;
+    const [url, cipher] = await Promise.all([ticketURL(this.endpoint, session), StreamCipher.create(secret, room, session, this.role as 'sender' | 'receiver')]);
+    if (this.closed) throw Error('加密转发暂时不可用');
+    return new StreamChannel(url, cipher);
+  }
   async send(message: unknown, connectedOnly = false) {
     const task = this.sendQueue.then(async () => {
       if (connectedOnly) {
@@ -1024,8 +1054,23 @@ export class AutoPair {
   private relayReadyTimer?: ReturnType<typeof setTimeout>;
   private relayTrialTimer?: ReturnType<typeof setTimeout>;
   private disconnectedSince = 0;
-  constructor(private transfer: Transfer, key: CryptoKey, private onError: (message: string) => void) {
+  private streamFallback?: StreamFallback;
+  constructor(private transfer: Transfer, key: CryptoKey, private onError: (message: string) => void, secret?: string) {
     this.signal = new Signaling(key, (message, authenticated) => this.handle(message, authenticated), onError);
+    if (secret) this.streamFallback = new StreamFallback(transfer.role, {
+      epoch: () => this.epoch, stopped: () => this.closed || transfer.stopped || transfer.completed,
+      progress: () => ({ ...transfer.relayProgress(), connected: transfer.transportConnected && !transfer.recovering }),
+      open: session => this.signal.stream(secret, session), send: message => this.signal.send(message),
+      activate: async (channel, epoch) => {
+        if (this.closed || transfer.stopped || transfer.completed || epoch !== this.epoch + 1) throw Error('Stale stream activation');
+        this.negotiating = true;
+        try {
+          transfer.pauseRecovery(); this.epoch = epoch; this.lastOffer = this.lastAnswer = undefined; this.resetCandidates();
+          await transfer.replaceTransport(channel);
+        } finally { this.negotiating = false; }
+      },
+      restore: () => { this.lastAttempt = 0; transfer.requestRecovery(); }
+    });
     transfer.enableSourceFailure(async () => {
       const receipt = new Promise<void>(resolve => { this.sourceFailureAck = resolve; });
       try { await this.signal.send({ type: 'source-unavailable' }, true); await receipt; }
@@ -1047,6 +1092,8 @@ export class AutoPair {
   }
   private monitorRelay() {
     const t = this.transfer, now = Date.now(), state = t.relayProgress();
+    this.streamFallback?.monitor(this.relayTried && !this.relayPreparing && !this.relayRestartPending && !this.negotiating);
+    if (this.streamFallback?.active || this.streamFallback?.busy) return;
     if (this.closed || t.stopped || t.completed || !this.offered || !this.relaySupported || state.hidden) {
       this.relayPolicy.reset(); this.disconnectedSince = 0; return;
     }
@@ -1110,7 +1157,7 @@ export class AutoPair {
     }, 100);
   }
   private async sendDescription(type: 'offer' | 'answer', description: RTCSessionDescriptionInit) {
-    await this.signal.send({ type, epoch: this.epoch, description, relaySupport: true, ...(this.relayActive ? { relay: true } : {}) });
+    await this.signal.send({ type, epoch: this.epoch, description, relaySupport: true, ...(this.streamFallback ? { streamSupport: 1 } : {}), ...(this.relayActive ? { relay: true } : {}) });
     this.descriptionSent = true; this.scheduleCandidates();
   }
   private async applyCandidates() {
@@ -1131,6 +1178,7 @@ export class AutoPair {
     // Otherwise a compromised/custom signaling service could inject its own
     // DTLS fingerprints instead of merely relaying encrypted peer negotiation.
     if (!authenticated && !['signal-ready', 'peer-ready', 'peer-left', 'receiver-left', 'ended'].includes(message?.type)) return;
+    if (typeof message?.type === 'string' && message.type.startsWith('stream-')) { await this.streamFallback?.handle(message); return; }
     if (message.type === 'relay-request' && t.role === 'sender' && message.epoch === this.epoch) {
       void this.prepareRelay();
     } else if (message.type === 'relay-prepare' && t.role === 'receiver' && message.epoch === this.epoch) {
@@ -1179,6 +1227,7 @@ export class AutoPair {
         return;
       }
       this.relaySupported = message.relaySupport === true;
+      if (this.streamFallback) { this.streamFallback.supported = message.streamSupport === 1; this.streamFallback.useNative(); }
       if (message.relay === true) {
         if (!this.relayCredentials || this.relayCredentials.expiresAt < Date.now() + 60000) this.relayCredentials = await this.signal.turn();
         if (this.closed || t.stopped || t.completed) return;
@@ -1194,6 +1243,7 @@ export class AutoPair {
     } else if (message.type === 'answer' && t.role === 'sender') {
       if (message.epoch === this.epoch && t.pc.signalingState === 'have-local-offer') {
         this.relaySupported = message.relaySupport === true;
+        if (this.streamFallback) this.streamFallback.supported = message.streamSupport === 1;
         await t.finish(message.description); await this.applyCandidates();
         t.pairingStage(this.relayActive ? '正在尝试加密中继连接' : '配对信息已交换，正在寻找直连路径');
       }
@@ -1224,12 +1274,18 @@ export class AutoPair {
       if (!this.offered) t.pairingStage(t.role === 'receiver' ? '等待发送方回到页面' : '等待接收方');
       // Losing signaling alone says nothing about a live DTLS/SCTP channel.
       // Let actual transport failures or the existing data heartbeat recover it.
-      else if (t.channel?.readyState !== 'open' || ['failed', 'disconnected', 'closed'].includes(t.pc.connectionState)) t.requestRecovery();
+      else if (!t.transportConnected) t.requestRecovery();
     }
   }
   private async recover() {
     const t = this.transfer;
-    if (this.closed || t.stopped || t.completed || this.negotiating || Date.now() - this.lastAttempt < 10000) return;
+    if (this.closed || t.stopped || t.completed || this.negotiating || this.streamFallback?.busy || Date.now() - this.lastAttempt < 10000) return;
+    if (this.streamFallback?.active) {
+      this.lastAttempt = Date.now();
+      if (t.role === 'receiver') await this.signal.send({ type: 'restart-request' }).catch(() => {});
+      else this.streamFallback.reconnect();
+      return;
+    }
     this.negotiating = true;
     const revision = this.revision;
     try {
@@ -1248,5 +1304,5 @@ export class AutoPair {
     } catch { /* Preserve the checkpoint and retry until the recovery deadline. */ }
     finally { this.negotiating = false; }
   }
-  close() { this.closed = true; this.sourceFailureAck?.(); this.sourceFailureAck = undefined; clearInterval(this.retry); clearInterval(this.relayMonitor); clearTimeout(this.relayReadyTimer); clearTimeout(this.relayTrialTimer); clearTimeout(this.candidateTimer); clearTimeout(this.waitingTimer); this.signal.close(); }
+  close() { this.closed = true; this.streamFallback?.close(); this.sourceFailureAck?.(); this.sourceFailureAck = undefined; clearInterval(this.retry); clearInterval(this.relayMonitor); clearTimeout(this.relayReadyTimer); clearTimeout(this.relayTrialTimer); clearTimeout(this.candidateTimer); clearTimeout(this.waitingTimer); this.signal.close(); }
 }

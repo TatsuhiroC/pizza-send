@@ -17,7 +17,7 @@ PizzaSend 是一个开源的浏览器文件快传工具。手机与电脑之间�
 <table width="100%">
   <thead><tr><th align="left">特性</th><th align="left">体验</th></tr></thead>
   <tbody>
-    <tr><td><strong>加密直传</strong></td><td>浏览器之间直接传输，文件内容不经配对服务器。</td></tr>
+    <tr><td><strong>加密传输</strong></td><td>设备直连优先，加密中继按需兜底；服务器不保存文件。</td></tr>
     <tr><td><strong>原样送达</strong></td><td>保留文件名与内容，逐个做 SHA-256 校验。</td></tr>
     <tr><td><strong>一起分享</strong></td><td>同一链接，最多 10 人同时接收，各自拥有独立进度。</td></tr>
   </tbody>
@@ -33,7 +33,7 @@ PizzaSend 是一个开源的浏览器文件快传工具。手机与电脑之间�
 
 ## 轻巧背后的技术
 
-- **连接轻，文件直达。** Cloudflare 服务协助配对，连接信息在浏览器里用 AES-256-GCM 加密；文件通过 WebRTC DataChannel 直传，由 DTLS 加密保护，不存入服务器。
+- **连接轻，文件直达。** Cloudflare 服务协助配对，连接信息在浏览器里用 AES-256-GCM 加密；文件优先通过 DTLS 保护的 WebRTC DataChannel 传输。另有[默认关闭的加密流式兜底](docs/stream-relay.md)，用于改善部分慢通道；两种路径都不在服务器保存文件。
 - **边接收，边写入。** 支持写盘的浏览器分块保存文件，并做增量 SHA-256 校验，减少大文件对内存的压力。接收端优先用 WebAssembly 加速校验，不支持时自动回退到 JavaScript。
 - **跟着网络调节。** 根据接收反馈调整发送窗口；自动配对断线后从已确认进度恢复。慢网压缩会计入压缩与解压耗时，预计划算时才建议启用，接收后还原原文件。
 

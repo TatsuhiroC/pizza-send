@@ -10,12 +10,12 @@ function memory() {
   const storage = { get: async (k: string) => structuredClone(data.get(k)), put: async (k: string, v: any) => { data.set(k, structuredClone(v)); },
     transaction: (fn: any) => { const next = lock.then(() => fn(storage)); lock = next.then(() => {}, () => {}); return next; },
     setAlarm: async (_: number) => {}, deleteAll: async () => { data.clear(); } };
-  return { data, storage, getWebSockets: () => [] };
+  return { data, storage, getWebSockets: () => [], blockConcurrencyWhile: (fn: any) => fn() };
 }
 async function fixture(overrides: any = {}) {
   const clock = { now: 1000000 }, logs: string[] = [], access = { rooms: 0, limits: 0, siteverify: 0 }, stores = new Map<string, any>(), rooms = new Map<string, any>();
   class Clock extends Date { static now() { return clock.now; } }
-  const scope: any = { Date: Clock, crypto: webcrypto, TextEncoder, TextDecoder, Request, Headers, Response, URL, AbortSignal, WebSocket: { OPEN: 1 },
+  const scope: any = { Date: Clock, crypto: webcrypto, TextEncoder, TextDecoder, Request, Headers, Response, URL, AbortSignal, setTimeout, clearTimeout, WebSocket: { OPEN: 1 },
     console: { log: (s: string) => logs.push(s) }, fetch: async () => { access.siteverify++; return Response.json(scope.verification); },
     DurableObject: class { ctx: any; constructor(ctx: any) { this.ctx = ctx; } } };
   const source = (await readFile('signal/worker.js', 'utf8')).replace("import { DurableObject } from 'cloudflare:workers';", '').replace('export default', 'const handler =').replaceAll('export class', 'class');
@@ -31,6 +31,139 @@ async function fixture(overrides: any = {}) {
   const create = (id: number, ip = 'test-ip', challenge?: string) => request('/rooms', { method: 'POST', body: JSON.stringify({ v: 2, room: hex(id), receiverHash: hash(hex(900)), ...(challenge ? { challenge } : {}) }) }, ip);
   return { ...scope.exports, scope, env, clock, logs, access, gate, gateContext, request, create, rooms };
 }
+test('experimental stream is disabled by default and requires the bound child, role and client', async () => {
+  const f = await fixture(), created = await (await f.create(1)).json(), room = f.rooms.get(hex(1));
+  const state = await room.ctx.storage.get('room');
+  await room.ctx.storage.put('room', { ...state, senderClient: hex(7), receiverClient: hex(8) });
+  const request = (secret = created.sender, client = hex(7), session = hex(10)) => f.request('/rooms/' + hex(1) + '?role=sender&client=' + client,
+    { method: 'POST', headers: { Authorization: 'Bearer ' + secret }, body: JSON.stringify({ type: 'stream-connect', session }) });
+  expect((await request()).status).toBe(409);
+  f.env.STREAM_PROBE_ROOM = hex(1);
+  for (const headers of [{ Upgrade: 'websocket', Authorization: 'Bearer ' + created.sender }, { Upgrade: 'websocket' }]) {
+    const path = '/rooms/' + hex(1) + '?role=sender&client=' + hex(7) + '&transport=stream&session=' + hex(10) + '&token=' + created.sender;
+    expect((await f.request(path, { headers })).status).toBe(401);
+  }
+  expect((await request(hex(901))).status).toBe(401);
+  expect((await request(created.sender, hex(9))).status).toBe(409);
+  expect((await request(created.sender, hex(7), 'bad')).status).toBe(409);
+  const ticket = (await (await request()).json()).ticket;
+  expect(await room.consumeTicket(ticket, 'sender', hex(7))).toBe(false);
+  expect(await room.consumeTicket(ticket, 'receiver', hex(7), 'stream', hex(10))).toBe(false);
+  expect(await room.consumeTicket(ticket, 'sender', hex(7), 'stream', hex(11))).toBe(false);
+  expect(await room.consumeTicket(ticket, 'sender', hex(7), 'stream', hex(10))).toBe(true);
+  expect(await room.consumeTicket(ticket, 'sender', hex(7), 'stream', hex(10))).toBe(false);
+  await room.ctx.storage.put('room', { ...state, multi: true, senderClient: hex(7), receiverClient: hex(8) });
+  expect((await request()).status).toBe(409);
+});
+test('stream tickets do not invalidate signaling tickets, expire and cannot bypass session ending', async () => {
+  const f = await fixture({ STREAM_PROBE_ROOM: hex(1) }), created = await (await f.create(1)).json(), room = f.rooms.get(hex(1));
+  const state = await room.ctx.storage.get('room');
+  await room.ctx.storage.put('room', { ...state, senderClient: hex(7), receiverClient: hex(8) });
+  const signal = await (await room.issueTicket('sender', hex(7))).json();
+  const stream = await (await room.issueTicket('sender', hex(7), 'stream', hex(10))).json();
+  expect(await room.consumeTicket(signal.ticket, 'sender', hex(7))).toBe(true);
+  f.clock.now += 30001;
+  expect(await room.consumeTicket(stream.ticket, 'sender', hex(7), 'stream', hex(10))).toBe(false);
+  await room.setEnded();
+  expect((await f.request('/rooms/' + hex(1) + '?role=sender&client=' + hex(7), { method: 'POST', headers: { Authorization: 'Bearer ' + created.sender }, body: JSON.stringify({ type: 'stream-connect', session: hex(10) }) })).status).toBe(410);
+});
+test('stream grants have an atomic persistent monthly ceiling and fail closed for invalid limits', async () => {
+  const f = await fixture({ MAX_STREAM_BYTES_PER_MONTH: String(2 * 1048576) });
+  const grants = await Promise.all(Array.from({ length: 16 }, () => f.gate.grantStream(1048576)));
+  expect(grants.filter(Boolean)).toHaveLength(2);
+  expect(f.gateContext.data.get('stream-budget').reserved).toBe(2 * 1048576);
+  expect(await f.gate.grantStream(1)).toBe(false);
+  f.clock.now = Date.UTC(2026, 10, 1); expect(await f.gate.grantStream(1048576)).toBe(true);
+  expect(await f.gate.grantStream(1048576, '2026-10')).toBe(false);
+  expect(f.gateContext.data.get('stream-budget')).toEqual({ month: '2026-11', reserved: 1048576 });
+  for (const cap of ['0', '-1', 'unlimited', '500000000001']) { f.env.MAX_STREAM_BYTES_PER_MONTH = cap; expect(await f.gate.grantStream(1048576)).toBe(false); }
+  f.env.MAX_STREAM_BYTES_PER_MONTH = '500000000000';
+  for (const bytes of [0, -1, 8 * 1048576 + 1, NaN, Infinity]) expect(await f.gate.grantStream(bytes)).toBe(false);
+});
+test('public stream enablement still requires the authenticated paired child and does not enable parent invitations', async () => {
+  const f = await fixture({ STREAM_RELAY_ENABLED: '1' }), created = await (await f.create(1)).json(), room = f.rooms.get(hex(1));
+  const state = await room.ctx.storage.get('room'); await room.ctx.storage.put('room', { ...state, senderClient: hex(7), receiverClient: hex(8) });
+  const request = () => f.request('/rooms/' + hex(1) + '?role=sender&client=' + hex(7), { method: 'POST', headers: { Authorization: 'Bearer ' + created.sender }, body: JSON.stringify({ type: 'stream-connect', session: hex(10) }) });
+  expect((await request()).status).toBe(200);
+  f.env.STREAM_PROBE_ROOM = hex(2); expect((await request()).status).toBe(409); delete f.env.STREAM_PROBE_ROOM;
+  await room.ctx.storage.put('room', { ...state, multi: true, senderClient: hex(7), receiverClient: hex(8) }); expect((await request()).status).toBe(409);
+});
+test('live stream grants expire at UTC month boundaries, renew active rooms and stop before the byte ceiling', async () => {
+  const f = await fixture({ MAX_STREAM_BYTES_PER_MONTH: String(1048576) });
+  f.clock.now = Date.UTC(2026, 9, 31, 23, 59, 59); await f.create(1);
+  const room = f.rooms.get(hex(1)); await room.ctx.storage.put('room', { ...await room.ctx.storage.get('room'), senderClient: hex(7), receiverClient: hex(8) });
+  const sockets: any[] = []; room.ctx.getWebSockets = (tag?: string) => sockets.filter(socket => !tag || socket.tag === tag);
+  const make = (role: string) => {
+    let meta = { kind: 'stream', role, client: hex(role === 'sender' ? 7 : 8), session: hex(10), sent: 0, credited: 0, remaining: 0, count: 0, window: f.clock.now };
+    const socket = { tag: 'stream:' + role, readyState: 1, bytes: 0, code: 0, close(code: number) { this.code = code; this.readyState = 3; },
+      send(data: any) { this.bytes += data.byteLength || 0; }, deserializeAttachment: () => structuredClone(meta), serializeAttachment(value: any) { meta = structuredClone(value); } };
+    sockets.push(socket); return socket;
+  };
+  const sender = make('sender'), receiver = make('receiver');
+  await room.webSocketMessage(sender, new ArrayBuffer(32)); expect(sender.deserializeAttachment().remaining).toBe(1048576 - 32);
+  f.clock.now = Date.UTC(2026, 10, 1); await room.webSocketMessage(sender, new ArrayBuffer(32));
+  expect(f.gateContext.data.get('stream-budget')).toEqual({ month: '2026-11', reserved: 1048576 });
+  expect(sender.deserializeAttachment().remaining).toBe(1048576 - 32);
+  f.clock.now += 120000; await room.webSocketMessage(sender, new ArrayBuffer(32));
+  expect((await room.ctx.storage.get('room')).expiresAt).toBe(f.clock.now + 30 * 60000);
+  for (let i = 0; i < 5; i++) await room.webSocketMessage(sender, new ArrayBuffer(262144));
+  expect(sender.code).toBe(1008); expect(receiver.bytes).toBeLessThanOrEqual(1048576);
+  expect(f.gateContext.data.get('stream-budget').reserved).toBe(1048576);
+});
+test('stream ciphertext is isolated from signaling and bounded by validated opposite-peer credits', async () => {
+  const f = await fixture(), created = await (await f.create(1)).json(), room = f.rooms.get(hex(1));
+  void created;
+  await room.ctx.storage.put('room', { ...await room.ctx.storage.get('room'), senderClient: hex(7), receiverClient: hex(8) });
+  const sockets: any[] = [];
+  room.ctx.getWebSockets = (tag?: string) => sockets.filter(socket => !tag || socket.tag === tag);
+  const socket = (role: string, session = hex(10), kind = 'stream') => {
+    let meta = { kind, role, client: role === 'sender' ? hex(7) : hex(8), session, sent: 0, credited: 0, count: 0, window: f.clock.now };
+    const value = { tag: kind === 'stream' ? 'stream:' + role : role, readyState: 1, sent: [] as any[], code: 0,
+      close(code: number) { this.code = code; this.readyState = 3; }, send(data: any) { this.sent.push(data); },
+      deserializeAttachment: () => structuredClone(meta), serializeAttachment(data: any) { meta = structuredClone(data); } };
+    sockets.push(value); return value;
+  };
+  const sender = socket('sender'), receiver = socket('receiver'), control = socket('receiver', hex(10), 'signal'), other = socket('receiver', hex(11));
+  const frame = new ArrayBuffer(262144);
+  for (let i = 0; i < 32; i++) await room.webSocketMessage(sender, frame);
+  expect(receiver.sent.filter(data => typeof data !== 'string')).toHaveLength(32); expect(control.sent).toEqual([]); expect(other.sent).toEqual([]);
+  expect(sender.sent).toEqual([]);
+  const challenges = receiver.sent.filter(data => typeof data === 'string').map(data => JSON.parse(data));
+  expect(challenges).toHaveLength(8); expect(Buffer.byteLength(JSON.stringify(sender.deserializeAttachment()))).toBeLessThan(2048);
+  await room.webSocketMessage(receiver, JSON.stringify({ ...challenges[0], type: 'credit' }));
+  for (let i = 0; i < 4; i++) await room.webSocketMessage(sender, frame);
+  expect(receiver.sent.filter(data => typeof data !== 'string')).toHaveLength(36);
+  await room.webSocketMessage(sender, frame); expect(sender.code).toBe(1008);
+  const malicious = socket('receiver');
+  await room.webSocketMessage(malicious, JSON.stringify({ type: 'credit', bytes: 100e6 })); expect(malicious.code).toBe(1008);
+  const oversized = socket('sender', hex(12)); await room.webSocketMessage(oversized, new ArrayBuffer(262145)); expect(oversized.code).toBe(1009);
+  const crossing = socket('sender', hex(12)); await room.webSocketMessage(crossing, new ArrayBuffer(32)); expect(crossing.code).toBe(1008);
+  await room.webSocketClose(receiver, 1000, 'Done'); expect(control.sent).toEqual([]);
+});
+for (const attack of ['no-nonce', 'guess', 'future', 'replay']) test(`stream queue credits reject ${attack} instead of trusting an unread byte claim`, async () => {
+  const f = await fixture(); await f.create(1); const room = f.rooms.get(hex(1));
+  await room.ctx.storage.put('room', { ...await room.ctx.storage.get('room'), senderClient: hex(7), receiverClient: hex(8) });
+  const sockets: any[] = [];
+  room.ctx.getWebSockets = (tag?: string) => sockets.filter(socket => !tag || socket.tag === tag);
+  const make = (role: string) => {
+    let meta: any = { kind: 'stream', role, client: hex(role === 'sender' ? 7 : 8), session: hex(10), sent: 0, credited: 0, remaining: 0, count: 0, window: f.clock.now };
+    const socket = { tag: 'stream:' + role, readyState: 1, code: 0, sent: [] as any[],
+      close(code: number) { this.code = code; this.readyState = 3; }, send(data: any) { this.sent.push(data); },
+      deserializeAttachment: () => structuredClone(meta), serializeAttachment(data: any) { meta = structuredClone(data); } };
+    sockets.push(socket); return socket;
+  };
+  const sender = make('sender'), receiver = make('receiver');
+  for (let i = 0; i < 4; i++) await room.webSocketMessage(sender, new ArrayBuffer(262144));
+  const challenge = JSON.parse(receiver.sent.find(data => typeof data === 'string'));
+  const credit = { ...challenge, type: 'credit' };
+  if (attack === 'no-nonce') delete credit.nonce;
+  if (attack === 'guess') credit.nonce = hex(999);
+  if (attack === 'future') credit.bytes++;
+  if (attack === 'replay') await room.webSocketMessage(receiver, JSON.stringify(credit));
+  await room.webSocketMessage(receiver, JSON.stringify(credit));
+  expect(receiver.code).toBe(1008);
+  expect(sender.deserializeAttachment().credited).toBe(attack === 'replay' ? 1048576 : 0);
+});
 for (const objectFormat of [false, true]) test(`TURN credentials require a bound child room and stay temporary (${objectFormat ? 'object' : 'array'} provider response)`, async () => {
   const f = await fixture({ TURN_KEY_ID: 'a'.repeat(32), TURN_KEY_TOKEN: 'master-private-marker' });
   const created = await (await f.create(1)).json(), room = f.rooms.get(hex(1));

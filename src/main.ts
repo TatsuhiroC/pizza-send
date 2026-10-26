@@ -53,7 +53,7 @@ app.innerHTML = [
   '<div id="notice" class="notice" role="alert" hidden></div></section>',
   '<section id="stored-panel" class="stored-panel" aria-labelledby="stored-heading" hidden><div class="stored-heading"><div><h2 id="stored-heading">本机暂存</h2><span id="stored-size"></span></div><button id="clear-stored" class="secondary cleanup-stored" type="button" hidden>'+icon('trash')+'<span>清理全部暂存</span></button></div><p class="subtle">文件暂存在这台设备的磁盘里，整批接收完成后保留 10 分钟。点击保存会为该文件重新预留 10 分钟；下载完成后，也可以立即清理全部暂存。</p><p id="stored-busy" class="subtle" hidden>部分暂存正在另一个页面使用。请关闭该页面后，再清理全部暂存。</p><div id="stored-files"></div><p class="subtle">到期自动清理。网页关闭或暂停时，下次打开或返回再清理；不会删除已经下载的副本。刷新不会延长保存时间，未完成的传输不能在刷新后续传。浏览器也可能提前回收暂存，请及时保存。</p></section>',
   '<section class="benefits"><div>'+icon('bolt')+'<h3>直接送达</h3><p>两端连接后，即传即收。</p></div><div>'+icon('lock')+'<h3>加密传输</h3><p>文件在浏览器之间加密传递。</p></div><div>'+icon('file')+'<h3>原样分享</h3><p>保留内容，逐个校验文件。</p></div></section>',
-  '<details class="faq"><summary>开始之前，你可能想知道</summary><div><p><strong>要一直打开页面吗？</strong> 是的。发送和接收期间请保持页面打开，手机尽量不要锁屏。关闭页面会中断传输。</p><p><strong>大文件能传吗？</strong> 桌面 Chrome / Edge 接收单个文件时支持直接保存。多文件或 Safari 等浏览器先在本机磁盘暂存，再选择保存到设备；大小取决于设备空间和浏览器额度，保存时可能同时占用两份空间。不支持写盘时仍限制为总计 256 MB。</p><p><strong>文件夹如何分享？</strong> 电脑上拖入文件夹，会在本机打包为 ZIP，保留名称、子目录和空目录；接收后需解压。打包需要额外磁盘空间，移除或清空选择会清理临时 ZIP；关闭网页后，下次打开本站时清理。</p><p><strong>所有网络都能连上吗？</strong> 优先直连；连接失败，或持续低速且预计等待较长时，会尝试加密中继。部分受限网络仍可能无法连接。</p><p><strong>可以断点续传吗？</strong> 自动配对支持页面保持打开时断线重连、从已接收位置续传。刷新或关闭页面后不能续传；手动配对暂不支持自动重连。</p><p><strong>“加密”意味着什么？</strong> WebRTC 数据通道使用 DTLS 加密。自动配对信息也在浏览器里加密，配对密钥放在链接片段中。使用网页仍需要信任本站提供的程序代码。</p></div></details>',
+  '<details class="faq"><summary>开始之前，你可能想知道</summary><div><p><strong>要一直打开页面吗？</strong> 是的。发送和接收期间请保持页面打开，手机尽量不要锁屏。关闭页面会中断传输。</p><p><strong>大文件能传吗？</strong> 桌面 Chrome / Edge 接收单个文件时支持直接保存。多文件或 Safari 等浏览器先在本机磁盘暂存，再选择保存到设备；大小取决于设备空间和浏览器额度，保存时可能同时占用两份空间。不支持写盘时仍限制为总计 256 MB。</p><p><strong>文件夹如何分享？</strong> 电脑上拖入文件夹，会在本机打包为 ZIP，保留名称、子目录和空目录；接收后需解压。打包需要额外磁盘空间，移除或清空选择会清理临时 ZIP；关闭网页后，下次打开本站时清理。</p><p><strong>所有网络都能连上吗？</strong> 优先直连；连接失败，或持续低速且预计等待较长时，会尝试加密中继。部分受限网络仍可能无法连接。</p><p><strong>可以断点续传吗？</strong> 自动配对支持页面保持打开时断线重连、从已接收位置续传。刷新或关闭页面后不能续传；手动配对暂不支持自动重连。</p><p><strong>“加密”意味着什么？</strong> 直连和 TURN 使用 DTLS；额外流式兜底若启用，则在浏览器中用 AES-GCM 加密，服务器只转发密文、不保存文件。配对信息也在浏览器里加密，密钥放在链接片段中。使用网页仍需要信任本站程序代码。</p></div></details>',
   '<details class="settings"><summary>连接设置</summary><div class="settings-body"><label for="signal-url">配对服务地址</label><input id="signal-url" placeholder="https://signal.example.com"/><label for="stun-url">STUN 服务地址</label><input id="stun-url" placeholder="stun:stun.cloudflare.com:3478"/><button id="save-settings" class="secondary">保存设置</button><p class="subtle">没有配对服务时，可用手动配对码连接。STUN 只帮助建立连接，不中转文件。</p></div></details>',
   '</main><footer><span>🍕 一点披萨精神，一份直接的分享。</span><span>受 <a href="https://github.com/kern/filepizza" target="_blank" rel="noopener">FilePizza</a> 启发 · 开源制作</span></footer>',
   '<dialog id="pair-dialog"><div class="dialog-heading"><h2>手动配对</h2><button id="close-dialog" class="icon-button" aria-label="关闭配对窗口">'+icon('close')+'</button></div><p id="pair-instructions"></p><label id="outgoing-label" for="outgoing-code">配对码</label><textarea id="outgoing-code" rows="4" readonly></textarea><div class="dialog-actions"><button id="copy-code" class="secondary">'+icon('copy')+'复制配对码</button><button id="pair-qr-button" class="secondary">'+icon('qr')+'二维码</button></div><canvas id="pair-qr" hidden></canvas><div id="answer-section"><label for="answer-code">对方返回的应答码</label><textarea id="answer-code" rows="3" placeholder="粘贴接收方返回的 PS1. 应答码"></textarea><button id="apply-answer" class="primary wide">完成配对 '+icon('arrow')+'</button></div><p class="subtle">仅交换连接信息，文件仍通过加密直连发送。请只向预期接收者提供配对码。</p></dialog>',
@@ -497,7 +497,7 @@ function events(event: TransferEvent) {
     status('正在传输', '请保持页面打开，手机不要锁屏。', 'connected');
     $('progress').setAttribute('value', '0'); setText($('percent'), '0%');
   } else if (event.type === 'file') $('current-file').textContent = event.data;
-  else if (event.type === 'path') setText($('connection-path'), '{path} · DTLS 加密', { path: event.data });
+  else if (event.type === 'path') setText($('connection-path'), event.data === '加密服务器转发' ? '{path} · AES-GCM 端到端加密' : '{path} · DTLS 加密', { path: event.data });
   else if (event.type === 'progress') {
     const p = event.data; const percent = p.total ? Math.min(100, p.transferred / p.total * 100) : 0;
     $<HTMLProgressElement>('progress').value = percent; setText($('percent'), Math.floor(percent) + '%');
@@ -677,7 +677,7 @@ function renderRecipients(peers: Recipient[], expired: boolean) {
     $('current-file').textContent = peer.file; $<HTMLProgressElement>('progress').value = percentage;
     setText($('percent'), Math.floor(percentage) + '%'); setText($('transferred'), bytes(peer.transferred) + ' / ' + bytes(peer.total));
     setText($('speed'), bytes(peer.speed) + '/s'); setText($('remaining'), remainingTime(peer.total, peer.transferred, peer.speed, peer.phase));
-    if (peer.path) setText($('connection-path'), '{path} · DTLS 加密', { path: peer.path });
+    if (peer.path) setText($('connection-path'), peer.path === '加密服务器转发' ? '{path} · AES-GCM 端到端加密' : '{path} · DTLS 加密', { path: peer.path });
   }
   const rows = new Map(Array.from($('recipients').querySelectorAll<HTMLElement>('.recipient-row'), row => [row.dataset.client, row]));
   const clients = new Set(peers.map(peer => peer.client));
@@ -720,7 +720,7 @@ function endpoint() {
 }
 function signalFailure(message: string) {
   if (transfer?.completed || transfer?.stopped) return;
-  if (transfer?.pc.connectionState === 'connected') toast('配对服务已断开，文件直传继续');
+  if (transfer?.transportConnected) toast('配对服务已断开，文件传输继续');
   else { notice(message); status('配对服务不可用', '可以结束后使用手动配对，或检查连接设置。', 'error'); }
 }
 async function automaticSender(t: Transfer) {
@@ -781,7 +781,7 @@ async function automaticReceiver(fragment: string, revision: number) {
   }
   const key = await signalKey(pairedSecret);
   if (transfer !== t || t.stopped) return;
-  const connection = new AutoPair(t, key, message => { if (transfer === t && !t.stopped) signalFailure(message); });
+  const connection = new AutoPair(t, key, message => { if (transfer === t && !t.stopped) signalFailure(message); }, pairedSecret);
   signaling = connection;
   await connection.connect(api, pairedRoom, 'receiver', pairedToken);
   if (transfer !== t || t.stopped) { connection.close(); return; }

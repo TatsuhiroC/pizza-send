@@ -139,7 +139,7 @@ export class GroupSender {
       if (this.closed || this.retired.has(peer.client)) return;
       if (!this.firstClient) { this.firstClient = peer.client; peer.transfer = this.initial; }
       else { peer.transfer = new Transfer(this.config, 'sender', event => this.event(peer.client, event)); peer.transfer.prepare(this.files); }
-      peer.pair = new AutoPair(peer.transfer, key, message => { if (!this.closed) { peer.message = message; this.notify(); } });
+      peer.pair = new AutoPair(peer.transfer, key, message => { if (!this.closed) { peer.message = message; this.notify(); } }, share.secret);
       await peer.pair.connect(this.api, share.room, 'sender', member.sender);
       if (this.closed) { peer.pair.close(); peer.transfer.close(false); }
     } catch (error) { if (!this.closed) this.event(peer.client, { type: 'error', data: (error as Error).message }); }

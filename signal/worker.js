@@ -175,6 +175,21 @@ export class Admission extends DurableObject {
       if (state?.active[room]?.lease === lease) { delete state.active[room]; await storage.put('admission', state); }
     });
   }
+  async grantStream(bytes, requestedMonth) {
+    if (!Number.isSafeInteger(bytes) || bytes <= 0 || bytes > 8 * 1048576) return false;
+    const cap = Number(this.runtime.MAX_STREAM_BYTES_PER_MONTH ?? '500000000000');
+    if (!Number.isSafeInteger(cap) || cap < 0 || cap > 500000000000) return false;
+    return this.ctx.storage.transaction(async storage => {
+      const month = new Date(Date.now()).toISOString().slice(0, 7);
+      if (requestedMonth !== undefined && requestedMonth !== month) return false;
+      const budget = await storage.get('stream-budget') || { month, reserved: 0 };
+      if (budget.month !== month) { budget.month = month; budget.reserved = 0; }
+      if (budget.reserved + bytes > cap) return false;
+      // Reserve before forwarding; never refund unused grants after a close.
+      // Conservative reservation cannot overshoot under concurrent rooms.
+      budget.reserved += bytes; await storage.put('stream-budget', budget); return true;
+    });
+  }
 }
 export class Room extends DurableObject {
   constructor(ctx, env) { super(ctx, env); this.runtime = env; }
@@ -195,8 +210,13 @@ export class Room extends DurableObject {
     const url = new URL(request.url), role = url.searchParams.get('role'), client = url.searchParams.get('client') || '';
     if (!['sender', 'receiver'].includes(role)) return new Response('Unauthorized', { status: 401 });
     const ticket = url.searchParams.get('ticket');
+    const stream = url.searchParams.get('transport') === 'stream', session = url.searchParams.get('session') || '';
+    if (stream && this.streamAccess(url, state, role, client, session)) return new Response('Stream unavailable', { status: 409 });
+    // The new data transport never accepts persistent credentials in a WS URL,
+    // including the legacy token-based signaling compatibility path below.
+    if (stream && request.headers.get('Upgrade')?.toLowerCase() === 'websocket' && !ticket) return new Response('Unauthorized', { status: 401 });
     if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket' && ticket) {
-      if (!await this.consumeTicket(ticket, role, client)) return new Response('Unauthorized', { status: 401 });
+      if (!await this.consumeTicket(ticket, role, client, stream ? 'stream' : 'signal', stream ? session : '')) return new Response('Unauthorized', { status: 401 });
     } else {
       const secret = request.headers.get('Authorization')?.replace(/^Bearer /, '') || url.searchParams.get('token') || '';
       if (!validToken(secret) || await digest(secret) !== state[role]) return new Response('Unauthorized', { status: 401 });
@@ -207,6 +227,15 @@ export class Room extends DurableObject {
       try { body = await readBody(request.clone(), 2048); } catch { return new Response('Invalid request', { status: 400 }); }
       if (body?.type === 'connect') return this.issueTicket(role, client);
       if (body?.type === 'turn') return this.issueTurn(role, client);
+      if (body?.type === 'stream-connect') {
+        const code = this.streamAccess(url, state, role, client, body.session);
+        if (code) return Response.json({ error: 'Stream unavailable', code }, { status: 409 });
+        return this.issueTicket(role, client, 'stream', body.session);
+      }
+    }
+    if (stream) {
+      if (request.method !== 'GET' || request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') return new Response('Method not allowed', { status: 405 });
+      return this.openStream(role, session, client);
     }
     if (state.multi) return this.groupFetch(request, role, client);
     if (request.method !== 'GET') return new Response('Method not allowed', { status: 405 });
@@ -238,7 +267,7 @@ export class Room extends DurableObject {
     if (this.sockets(opposite).length) pair[1].send(JSON.stringify({ type: 'peer-ready' }));
     return new Response(null, { status: 101, webSocket: pair[0] });
   }
-  async issueTicket(role, client) {
+  async issueTicket(role, client, purpose = 'signal', session = '') {
     if (!validToken(client)) return new Response('Invalid client', { status: 400 });
     return this.ctx.storage.transaction(async storage => {
       const state = await storage.get('room'), now = Date.now();
@@ -246,8 +275,8 @@ export class Room extends DurableObject {
       if (state.multi && role !== 'sender') return new Response('Unauthorized', { status: 401 });
       if (state[role + 'Client'] && state[role + 'Client'] !== client) return new Response('Session occupied', { status: 409 });
       if (role === 'receiver' && !state.receiverClient && (state.inviteExpiresAt ?? state.expiresAt) <= now) return new Response('Invitation expired', { status: 410 });
-      const tickets = (await storage.get('tickets') || []).filter(t => t.expires > now && !(t.role === role && t.client === client));
-      const value = token(); tickets.push({ hash: await digest(value), role, client, expires: now + 30000 });
+      const tickets = (await storage.get('tickets') || []).filter(t => t.expires > now && !(t.role === role && t.client === client && (t.purpose || 'signal') === purpose));
+      const value = token(); tickets.push({ hash: await digest(value), role, client, purpose, session, expires: now + 30000 });
       await storage.put('tickets', tickets.slice(-8)); return Response.json({ ticket: value });
     });
   }
@@ -317,15 +346,96 @@ export class Room extends DurableObject {
     }
     finally { this.turnPending.delete(role); }
   }
-  async consumeTicket(value, role, client) {
+  async consumeTicket(value, role, client, purpose = 'signal', session = '') {
     if (!validToken(value) || !validToken(client)) return false;
     const hash = await digest(value);
     return this.ctx.storage.transaction(async storage => {
       const tickets = await storage.get('tickets') || [], now = Date.now();
-      const match = tickets.find(t => t.hash === hash && t.role === role && t.client === client && t.expires > now);
+      const match = tickets.find(t => t.hash === hash && t.role === role && t.client === client && t.expires > now && (t.purpose || 'signal') === purpose && (t.session || '') === session);
       if (!match) return false;
       await storage.put('tickets', tickets.filter(t => t !== match && t.expires > now)); return true;
     });
+  }
+  streamAccess(url, state, role, client, session) {
+    // The experimental transport is closed by default. Live probes must be
+    // explicitly restricted to one already paired, agent-owned child room.
+    if (!this.runtime.STREAM_PROBE_ROOM && this.runtime.STREAM_RELAY_ENABLED !== '1') return 'stream-disabled';
+    if (this.runtime.STREAM_PROBE_ROOM && url.pathname !== '/rooms/' + this.runtime.STREAM_PROBE_ROOM) return 'stream-scope';
+    if (state.multi) return 'stream-parent';
+    if (!state.senderClient || !state.receiverClient) return 'stream-unpaired';
+    if (state[role + 'Client'] !== client) return 'stream-binding';
+    if (!validToken(session)) return 'stream-session';
+    return null;
+  }
+  streamSockets(role, session) {
+    return this.sockets('stream:' + role).filter(socket => socket.deserializeAttachment().session === session);
+  }
+  openStream(role, session, client) {
+    for (const old of this.sockets('stream:' + role)) old.close(1000, 'Connection replaced');
+    const pair = new WebSocketPair(), opposite = role === 'sender' ? 'receiver' : 'sender';
+    this.ctx.acceptWebSocket(pair[1], ['stream:' + role]);
+    pair[1].serializeAttachment({ kind: 'stream', role, client, session, sent: 0, credited: 0, remaining: 0, count: 0, window: Date.now() });
+    const peers = this.streamSockets(opposite, session);
+    for (const peer of peers) peer.send(JSON.stringify({ type: 'stream-ready' }));
+    if (peers.length) pair[1].send(JSON.stringify({ type: 'stream-ready' }));
+    return new Response(null, { status: 101, webSocket: pair[0] });
+  }
+  async streamMessage(socket, data, meta) {
+    if (!this.streamSockets(meta.role, meta.session).includes(socket)) return;
+    const opposite = meta.role === 'sender' ? 'receiver' : 'sender';
+    if (typeof data !== 'string' && (!Number.isInteger(data.byteLength) || data.byteLength < 24 || data.byteLength > 262144)) { socket.close(1009, 'Invalid frame'); return; }
+    if (typeof data !== 'string' && (meta.budgetMonth !== new Date(Date.now()).toISOString().slice(0, 7) || (meta.remaining || 0) < data.byteLength)) {
+      if (!this.streamSockets(opposite, meta.session).length) { socket.close(1008, 'Stream peer disconnected'); return; }
+      const granted = await this.ctx.blockConcurrencyWhile(async () => {
+        const current = socket.deserializeAttachment();
+        const month = new Date(Date.now()).toISOString().slice(0, 7);
+        if (current.budgetMonth !== month) { current.budgetMonth = month; current.remaining = 0; socket.serializeAttachment(current); }
+        if ((current.remaining || 0) >= data.byteLength) return true;
+        const bytes = current.sent >= 512 * 1024 ? 8 * 1048576 : 1048576;
+        let timeout;
+        try {
+          const allowed = await Promise.race([admission(this.runtime).grantStream(bytes, month), new Promise(resolve => { timeout = setTimeout(() => resolve(false), 5000); })]);
+          if (!allowed || month !== new Date(Date.now()).toISOString().slice(0, 7)) return false;
+          const latest = socket.deserializeAttachment(); latest.remaining = (latest.remaining || 0) + bytes; socket.serializeAttachment(latest); return true;
+        } catch { return false; } finally { clearTimeout(timeout); }
+      });
+      if (!granted) { socket.close(1008, 'Relay quota unavailable'); return; }
+      const state = await this.ctx.storage.get('room');
+      if (!state || state.ended || state.expiresAt <= Date.now() || !state.senderClient || !state.receiverClient || state[meta.role + 'Client'] !== meta.client) { socket.close(1008, 'Session expired'); return; }
+      meta = socket.deserializeAttachment();
+    }
+    const peers = this.streamSockets(opposite, meta.session);
+    if (Date.now() - meta.window >= 1000) { meta.window = Date.now(); meta.count = 0; }
+    if (++meta.count > 4096) { socket.close(1008, 'Rate limit'); return; }
+    if (typeof data !== 'string') {
+      const size = data.byteLength;
+      if (meta.budgetMonth !== new Date(Date.now()).toISOString().slice(0, 7)) { socket.close(1008, 'Relay quota unavailable'); return; }
+      if (!Number.isInteger(size) || size < 24 || size > 262144) { socket.close(1009, 'Invalid frame'); return; }
+      // A receiver must read the unpredictable marker sent AFTER these bytes
+      // before granting more credit. Cumulative byte claims alone let colluding
+      // clients acknowledge an unread TCP queue and exhaust the isolate.
+      if (!peers.length || meta.sent - meta.credited + size > 8 * 1048576) { socket.close(1008, 'Stream backpressure'); return; }
+      meta.sent += size; meta.remaining -= size;
+      let challenge;
+      if (meta.sent - (meta.marked || 0) >= 1048576) {
+        challenge = { bytes: meta.sent, nonce: token() }; meta.marked = meta.sent;
+        meta.challenges = [...(meta.challenges || []), challenge];
+        if (meta.challenges.length > 8) { socket.close(1008, 'Stream backpressure'); return; }
+      }
+      socket.serializeAttachment(meta);
+      for (const peer of peers) peer.send(data);
+      if (challenge) for (const peer of peers) peer.send(JSON.stringify({ type: 'credit-request', ...challenge }));
+      return;
+    }
+    try {
+      if (data.length > 128) throw Error();
+      const message = JSON.parse(data);
+      if (message.type !== 'credit' || !Number.isSafeInteger(message.bytes) || !validToken(message.nonce) || peers.length !== 1) throw Error();
+      const peer = peers[0], other = peer.deserializeAttachment();
+      if (message.bytes <= other.credited || message.bytes > other.sent || !(other.challenges || []).some(c => c.bytes === message.bytes && c.nonce === message.nonce)) throw Error();
+      other.credited = message.bytes; other.challenges = other.challenges.filter(c => c.bytes > message.bytes);
+      peer.serializeAttachment(other); socket.serializeAttachment(meta);
+    } catch { socket.close(1008, 'Invalid credit'); }
   }
   async releaseReservation(state) {
     if (state?.reservation) await admission(this.runtime).release(state.reservation.room, state.reservation.lease);
@@ -451,6 +561,17 @@ export class Room extends DurableObject {
     const state = await this.ctx.storage.get('room');
     if (!state || state.ended || state.expiresAt <= Date.now()) { socket.close(1008, 'Session expired'); return; }
     const meta = socket.deserializeAttachment();
+    if (meta.kind === 'stream') {
+      if (!state.senderClient || !state.receiverClient || state[meta.role + 'Client'] !== meta.client) { socket.close(1008, 'Session unavailable'); return; }
+      // A live data channel must not expire merely because its independent
+      // signaling socket is temporarily unavailable. Preserve the 24-hour cap.
+      if (state.expiresAt - Date.now() <= TTL - 60000) {
+        await this.renewActive();
+        const current = await this.ctx.storage.get('room');
+        if (!current || current.ended || current.expiresAt <= Date.now() || !current.senderClient || !current.receiverClient || current[meta.role + 'Client'] !== meta.client) { socket.close(1008, 'Session unavailable'); return; }
+      }
+      await this.streamMessage(socket, data, meta); return;
+    }
     if (!this.sockets(meta.role).includes(socket)) return;
     if (typeof data !== 'string' || data.length > 128000) { socket.close(1009, 'Message too large'); return; }
     if (Date.now() - meta.window > 60000) { meta.window = Date.now(); meta.count = 0; }
@@ -493,6 +614,10 @@ export class Room extends DurableObject {
     const meta = socket.deserializeAttachment();
     if (code === 1005 || code === 1006 || code === 1015) code = 1000;
     try { socket.close(code, reason); } catch {}
+    if (meta.kind === 'stream') {
+      if (reason !== 'Connection replaced') for (const peer of this.streamSockets(meta.role === 'sender' ? 'receiver' : 'sender', meta.session)) peer.close(1011, 'Stream peer disconnected');
+      return;
+    }
     // A socket close can mean a network change. Keep room tokens valid until
     // explicit cancellation or expiry so both browsers can reconnect.
     if (reason === 'Connection replaced' || meta.left) return;
