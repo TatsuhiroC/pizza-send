@@ -23,6 +23,7 @@
 
 ## 维护记录 · Maintenance
 
+- [24 日功能逐项恢复与新路线兼容：2026-10-26](restoration-2026-10-26.md)
 - [回退后的独立功能恢复范围：2026-10-25](independent-restoration-2026-10-25.md)
 - [体积、复杂度与重复工作审查：2026-10-24（历史）](lightweight-review.md)
 - [创建准备优化与全仓审查：2026-10-24（历史）](startup-preparation-review.md)

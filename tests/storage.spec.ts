@@ -186,9 +186,22 @@ test('failed integrity of a later file preserves earlier verified temporary down
 test('browsers without disk storage retain a bounded memory fallback', async ({ page, context }) => {
   await setup(context); const receiver = await context.newPage();
   await receiver.addInitScript(() => Object.defineProperty(navigator.storage, 'getDirectory', { value: undefined }));
-  await receiver.route('**/app.config.json', route => route.fulfill({ json: { memoryLimitBytes: 1048576 } }));
-  await begin(page, receiver, { name: 'too-big.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(2 * 1048576) });
-  await expect(receiver.locator('#notice')).toContainText('当前接收上限为 1.0 MB'); await expect(receiver.locator('.download-file')).toHaveCount(0);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => release = resolve);
+  await receiver.route('**/app.config.json', async route => { await gate; await route.fulfill({ json: { memoryLimitBytes: 1048576 } }); });
+  try {
+    await page.goto('./');
+    await page.locator('#file-input').setInputFiles({ name: 'too-big.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(2 * 1048576) });
+    await page.locator('#start-send').click(); await expect(page.locator('#share-box')).toBeVisible();
+    // The saved service can pair before shared configuration arrives. Its
+    // later memory cap must reach this already-created transfer and the UI.
+    await receiver.goto(await page.locator('#share-link').inputValue(), { waitUntil: 'domcontentloaded' });
+    await expect(receiver.locator('#accept-files')).toBeVisible();
+    release();
+    await expect(receiver.locator('#save-note')).toContainText('1.0 MB');
+    await receiver.locator('#accept-files').click();
+    await expect(receiver.locator('#notice')).toContainText('当前接收上限为 1.0 MB'); await expect(receiver.locator('.download-file')).toHaveCount(0);
+  } finally { release(); }
 });
 
 const diskTest = test.extend({ context: async ({}, use, info) => {

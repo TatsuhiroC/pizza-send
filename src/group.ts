@@ -81,7 +81,7 @@ export class GroupSender {
     if (state.multi !== true || !Array.isArray(state.members) || state.members.length > 10 || !Number.isSafeInteger(state.inviteExpiresAt)) throw Error('配对服务尚不支持多人分享，请刷新后重试。');
     this.inviteExpiresAt = state.inviteExpiresAt;
     const listed = new Set<string>(state.members.map((member: any) => member.client));
-    for (const peer of this.peers.values()) if (!listed.has(peer.client) && !this.retired.has(peer.client)) {
+    for (const peer of this.peers.values()) if (!listed.has(peer.client) && !this.retired.has(peer.client) && !peer.transfer?.reportingSourceFailure) {
       peer.phase = 'left'; peer.message = '接收者已退出'; peer.background = false; peer.pair?.close(); peer.transfer?.close(false); this.retired.add(peer.client);
     }
     await Promise.allSettled(state.members.filter((member: any) => !this.peers.has(member.client) && !this.retired.has(member.client)).map((member: any) => this.add(member)));

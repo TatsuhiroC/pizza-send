@@ -16,6 +16,7 @@ import { renderRouteControls } from './route-controls';
 import { filenameOverlay, motionPause, reducedMotion } from './interface-motion';
 import { ScreenAwake } from './screen-awake';
 import { checkSources, droppedSources } from './source-files';
+import { setSignalPreconnect } from './signal-preconnect';
 import { cleanupSourceArchives, packageSources, releaseSourceArchive, stopSourceArchives } from './folder-archive';
 import { remainingTime } from './remaining-time';
 import type { CompressionStatus } from './compression';
@@ -51,7 +52,7 @@ app.innerHTML = [
   '<div id="send-view"><button id="drop-zone" class="drop-zone" type="button"><span class="drop-icon">'+icon('upload')+'</span><strong>把文件放在这里</strong><span>拖放文件，或点击选择</span><small>支持多个文件 · 文件不在服务器保存</small></button><input id="file-input" type="file" multiple hidden/><p id="archive-progress" class="subtle" role="status" hidden></p><button id="cancel-packaging" class="secondary" type="button" hidden>取消打包</button><div class="selection-actions"><button id="clear-files" class="secondary" type="button" hidden>'+icon('trash')+'<span>清空已选文件</span></button></div><div id="files" class="file-list" aria-live="polite"></div><div class="send-bottom"><span id="selection-summary">先选一个文件，就可以开始。</span><button id="start-send" class="primary" disabled><span id="start-send-label">创建传输</span> '+icon('arrow')+'</button></div></div>',
   '<div id="receive-view" hidden><div id="receive-entry"><div class="receive-intro"><span class="drop-icon">'+icon('down')+'</span><h2>接住这一份分享</h2><p>打开对方发来的分享链接即可连接。<br/>也可以在这里粘贴链接或配对码。</p></div><button id="open-scanner" class="secondary wide scan-button" type="button">'+icon('camera')+'打开相机扫描</button><div class="receive-code-heading"><p class="scan-alternative subtle">或粘贴分享链接／配对码</p><button id="paste-receive" class="secondary paste-button" type="button" aria-controls="receive-code">'+icon('paste')+'粘贴</button></div><label class="sr-only" for="receive-code">分享链接或配对码</label><textarea id="receive-code" rows="3" placeholder="粘贴 PizzaSend 分享链接或 PS1. 配对码"></textarea><button id="connect-receive" class="primary wide">连接发送方 '+icon('arrow')+'</button></div><div id="incoming-files" class="file-list"></div><p id="save-note" class="subtle" hidden></p><button id="accept-files" class="primary wide" aria-describedby="save-note" hidden>选择保存位置并接收 '+icon('down')+'</button></div>',
   '<div id="session-panel" class="session-panel" hidden><div class="session-heading"><span id="status-dot" class="status-dot"></span><h2 id="status" tabindex="-1">等待接收方</h2><button id="cancel" class="session-action" type="button">结束传输</button></div><p id="status-detail" class="subtle">传输期间请保持双方页面打开。</p><p id="background-note" class="background-note subtle" role="status" hidden></p><section id="save-panel" class="save-panel" aria-labelledby="save-heading" hidden><h3 id="save-heading" tabindex="-1">保存到设备</h3><p id="save-location-note" class="subtle">文件目前保存在浏览器暂存中，保存后才能在手机的“文件”App 或浏览器下载记录中找到。</p><button id="download-all" class="primary wide" type="button" aria-describedby="download-all-note" hidden>'+icon('down')+'下载全部</button><p id="download-all-note" class="subtle" hidden>如浏览器询问是否允许下载多个文件，请选择允许。若有文件未下载，请使用下方的单个保存按钮。</p><div id="save-files"></div><div id="downloads" class="downloads"></div><p id="save-empty" class="subtle" hidden>暂存已清理或到期。如未保存，请让发送方重新分享。</p><p id="save-retention" class="subtle"></p><p id="save-feedback" class="save-feedback" role="status" hidden></p></section><div id="share-box" hidden><label for="share-link">把链接发给对方，或者让对方扫码</label><div class="link-row"><input id="share-link" readonly/><button id="copy-link" class="icon-button" aria-label="复制分享链接">'+icon('copy')+'</button></div><canvas id="share-qr" hidden></canvas><p id="share-note" class="subtle">链接 30 分钟内可加入，最多 10 位同时接收。请只分享给预期接收者。</p></div><div id="recipients" class="recipients" hidden></div><div id="progress-box" hidden><div class="progress-meta"><button id="current-file" class="filename-button" type="button" aria-haspopup="dialog"></button><span class="progress-result"><span id="percent">0%</span><span id="transfer-complete" class="completion-mark" aria-hidden="true" hidden>'+completionSymbol+'</span></span></div><progress id="progress" max="100" value="0" aria-label="传输进度"></progress><div class="metrics"><div><span id="transferred">0 B</span><small>已接收</small></div><div><span id="speed">—</span><small>平均速度</small></div><div><span id="remaining">—</span><small>预计剩余</small></div></div><div class="path-label">'+icon('lock')+'<span id="connection-path">浏览器之间加密传输</span><span>SHA-256 校验</span></div></div><div id="route-controls" class="route-controls" hidden></div><div id="compression-hint" class="compression-hint" role="status" hidden></div><div id="awake-panel" class="awake-panel" hidden><div class="awake-controls"><label class="awake-switch"><input id="keep-awake" type="checkbox" role="switch" checked aria-label="保持屏幕常亮" aria-describedby="awake-hint"/><span id="awake-label">保持常亮</span><span class="awake-track" aria-hidden="true"></span></label><button id="retry-awake" class="awake-retry" type="button" hidden>重试</button></div><p id="awake-hint" class="subtle" role="status" hidden></p></div></div>',
-  '<div id="notice" class="notice" role="alert" hidden></div></section>',
+  '<div id="notice" class="notice" role="alert" hidden></div><button id="retry-config" class="secondary" type="button" hidden>重试加载连接配置</button></section>',
   '<section id="stored-panel" class="stored-panel" aria-labelledby="stored-heading" hidden><div class="stored-heading"><div><h2 id="stored-heading">本机暂存</h2><span id="stored-size"></span></div><button id="clear-stored" class="secondary cleanup-stored" type="button" hidden>'+icon('trash')+'<span>清理全部暂存</span></button></div><p class="subtle">文件暂存在这台设备的磁盘里，整批接收完成后保留 10 分钟。点击保存会为该文件重新预留 10 分钟；下载完成后，也可以立即清理全部暂存。</p><p id="stored-busy" class="subtle" hidden>部分暂存正在另一个页面使用。请关闭该页面后，再清理全部暂存。</p><div id="stored-files"></div><p class="subtle">到期自动清理。网页关闭或暂停时，下次打开或返回再清理；不会删除已经下载的副本。刷新不会延长保存时间，未完成的传输不能在刷新后续传。浏览器也可能提前回收暂存，请及时保存。</p></section>',
   '<section class="benefits"><div>'+icon('bolt')+'<h3>直接送达</h3><p>两端连接后，即传即收。</p></div><div>'+icon('lock')+'<h3>加密传输</h3><p>文件在浏览器之间加密传递。</p></div><div>'+icon('file')+'<h3>原样分享</h3><p>保留内容，逐个校验文件。</p></div></section>',
   '<details class="faq"><summary>开始之前，你可能想知道</summary><div><p><strong>要一直打开页面吗？</strong> 是的。发送和接收期间请保持页面打开，手机尽量不要锁屏。关闭页面会中断传输。</p><p><strong>大文件能传吗？</strong> 桌面 Chrome / Edge 接收单个文件时支持直接保存。多文件或 Safari 等浏览器先在本机磁盘暂存，再选择保存到设备；大小取决于设备空间和浏览器额度，保存时可能同时占用两份空间。不支持写盘时仍限制为总计 256 MB。</p><p><strong>文件夹如何分享？</strong> 电脑上拖入文件夹，会在本机打包为 ZIP，保留名称、子目录和空目录；接收后需解压。打包需要额外磁盘空间，移除或清空选择会清理临时 ZIP；关闭网页后，下次打开本站时清理。</p><p><strong>所有网络都能连上吗？</strong> 优先直连；启用加密转发后，连接失败或持续低速且预计等待较长时，会先测试替代路线，更快才切换。部分受限网络仍可能无法连接。</p><p><strong>可以断点续传吗？</strong> 自动配对支持页面保持打开时断线重连、从已接收位置续传。刷新或关闭页面后不能续传；手动配对暂不支持自动重连。</p><p><strong>“加密”意味着什么？</strong> 直连使用 DTLS；额外流式兜底若启用，则在浏览器中用 AES-GCM 加密，服务器只转发密文、不保存文件。配对信息也在浏览器里加密，密钥放在链接片段中。使用网页仍需要信任本站程序代码。</p></div></details>',
@@ -71,6 +72,7 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getEleme
 const deliveryMotion = new DeliveryMotion(document.querySelector<HTMLElement>('.hero-pizza')!, $('transfer-complete'));
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 let config: Config = { signalUrl: '', iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }], memoryLimitBytes: 268435456 };
+const transferSupported = typeof window.RTCPeerConnection === 'function' && !!crypto.subtle;
 let files: File[] = [];
 let transfer: Transfer | undefined;
 let signaling: AutoPair | undefined;
@@ -80,7 +82,13 @@ let shareLink = '';
 let shareQRRevision = 0;
 let pairingKind: 'offer' | 'answer' = 'offer';
 let busy = false;
+let configurationReady = false;
+let configurationLoading = false;
+let configurationTask: Promise<void> | undefined;
+let configurationController: AbortController | undefined;
+let configurationVersion = 0;
 let checkingFiles = false;
+let checkingAbort: AbortController | undefined;
 let packagingFiles = false;
 let packagingAbort: AbortController | undefined;
 let selectionRevision = 0;
@@ -99,6 +107,8 @@ let filenameSequence = 0;
 let cleanupTargets: StoredFile[] = [];
 let clearingStored = false;
 let storedRevision = 0;
+let storedRefresh: Promise<void> | undefined;
+let storedRefreshRequested = false;
 let storedFingerprint = '';
 let storedRetry: ReturnType<typeof setTimeout> | undefined;
 const saveRequests = new Set<string>();
@@ -127,11 +137,26 @@ function saveNote(manifest: FileInfo[]) {
   setText($('save-note'), native ? '选择保存位置后开始传输。文件会写入磁盘，并在完成时校验。' : diskStorageAvailable ? '文件会分块写入本机磁盘，完成后请点击保存。保存时可能同时占用两份空间，下载完成后请清理暂存。' : '当前浏览器将文件暂存在内存中，总计最多 {size}。完成后请点击保存。', { size: bytes(config.memoryLimitBytes) });
   setText($('accept-files'), native ? '选择保存位置并接收' : '接收文件');
 }
-async function refreshStored() {
-  const revision = ++storedRevision;
+function refreshStored(): Promise<void> {
+  storedRevision++; storedRefreshRequested = true;
+  if (storedRefresh) return storedRefresh;
+  storedRefresh = (async () => {
+    try {
+      // Coalesce notifications; awaiters still wait for the latest requested
+      // view. No parallel directory walks or queue of obsolete snapshots.
+      while (storedRefreshRequested) {
+        storedRefreshRequested = false;
+        await refreshStoredNow(storedRevision);
+      }
+    } finally { storedRefresh = undefined; }
+  })();
+  return storedRefresh;
+}
+async function refreshStoredNow(revision: number) {
   try {
     const records = (await listTemporaryFiles()).sort((a, b) =>
       (b.receivedAt ?? b.createdAt) - (a.receivedAt ?? a.createdAt) || b.createdAt - a.createdAt || b.info.id - a.info.id || a.session.localeCompare(b.session));
+    if (revision !== storedRevision) return;
     const links = await Promise.all(records.map(async record => ({ record, url: record.unavailable ? '' : await temporaryURL(record) })));
     if (revision !== storedRevision) return;
     storedFiles = records;
@@ -406,19 +431,19 @@ function select(next: File[]) {
   const combined = [...files, ...next];
   if (combined.length > 100) { next.forEach(releaseSourceArchive); notice('一次最多选择 100 个文件'); return; }
   if (combined.some(f => f.name.length > 255)) { next.forEach(releaseSourceArchive); notice('文件名过长，请缩短后重试'); return; }
-  selectionRevision++; files = combined; renderFiles();
+  checkingAbort?.abort(); selectionRevision++; files = combined; renderFiles();
 }
 function renderFiles() {
   if (!busy) deliveryMotion.setState(files.length ? 'selected' : 'idle');
   $('files').innerHTML = fileMarkup(files, true); $('drop-zone').classList.toggle('compact', files.length > 0);
   setText($('selection-summary'), files.length ? '{count} 个文件 · {size}' : '先选一个文件，就可以开始。', { count: files.length, size: bytes(files.reduce((n, f) => n + f.size, 0)) });
-  $<HTMLButtonElement>('start-send').disabled = !files.length || busy || checkingFiles || packagingFiles;
+  $<HTMLButtonElement>('start-send').disabled = !transferSupported || !configurationReady || !files.length || busy || checkingFiles || packagingFiles;
   $<HTMLButtonElement>('drop-zone').disabled = busy || packagingFiles;
   $<HTMLButtonElement>('cancel-packaging').hidden = !packagingFiles;
   $<HTMLButtonElement>('clear-files').hidden = !files.length;
   $<HTMLButtonElement>('clear-files').disabled = busy;
   document.querySelectorAll<HTMLButtonElement>('.remove-file').forEach(b => b.disabled = busy || packagingFiles);
-  setText($('start-send-label'), checkingFiles ? '检查文件…' : '创建传输');
+  setText($('start-send-label'), checkingFiles ? '检查文件…' : configurationLoading && !configurationReady ? '正在加载连接配置…' : '创建传输');
 }
 function setBusy(value: boolean) {
   busy = value; renderFiles();
@@ -426,9 +451,10 @@ function setBusy(value: boolean) {
   document.querySelector('.transfer-card')!.classList.toggle('in-session', value);
   $<HTMLButtonElement>('drop-zone').disabled = value || packagingFiles;
   document.querySelectorAll<HTMLButtonElement>('.remove-file').forEach(b => b.disabled = value || packagingFiles);
-  $<HTMLButtonElement>('connect-receive').disabled = value;
+  $<HTMLButtonElement>('connect-receive').disabled = value || !transferSupported;
   $<HTMLButtonElement>('open-scanner').disabled = value;
   $<HTMLButtonElement>('paste-receive').disabled = value || pasting;
+  $<HTMLButtonElement>('retry-config').disabled = value || configurationLoading;
   syncAwake();
 }
 function clearShareQR() {
@@ -436,6 +462,9 @@ function clearShareQR() {
   const canvas = $<HTMLCanvasElement>('share-qr');
   canvas.hidden = true; canvas.width = canvas.height = 0;
 
+}
+function clearShare() {
+  shareLink = ''; $<HTMLInputElement>('share-link').value = ''; clearShareQR(); $('share-box').hidden = true;
 }
 function renderCompression(container: HTMLElement, state: CompressionStatus, enable: () => void, dismiss: () => void, available = true) {
   container.hidden = !available || (!state.active && !state.offer);
@@ -456,6 +485,7 @@ function renderCurrentCompression() {
   renderCompression($('compression-hint'), compressionState, () => { transfer?.enableCompression(); }, () => { transfer?.dismissCompression(); }, !!transfer && !transfer.completed && !transfer.stopped && !transfer.recovering);
 }
 function reset() {
+  checkingAbort?.abort();
   deliveryMotion.setState('idle');
   $('route-controls').hidden = true;
   compressionState = { active: false }; $('compression-hint').hidden = true;
@@ -465,7 +495,7 @@ function reset() {
   senderGroup?.close(); senderGroup = undefined; leaveReceiverGroup();
   signaling?.close(); signaling = undefined;
   transfer?.close(); transfer = undefined;
-  shareLink = ''; $<HTMLInputElement>('share-link').value = ''; clearShareQR(); setBusy(false);
+  clearShare(); setBusy(false);
   $('recipients').replaceChildren(); $('recipients').hidden = true;
   $('share-box').hidden = true; $('progress-box').hidden = true; $('session-panel').hidden = true;
   $('notice').hidden = true; $('incoming-files').innerHTML = ''; $('downloads').innerHTML = '';
@@ -760,16 +790,22 @@ async function automaticSender(t: Transfer) {
     (peers, expired) => { if (senderGroup === group) renderRecipients(peers, expired); },
     message => { if (senderGroup === group) notice(message); });
   senderGroup = group;
-  await group.connect();
-  if (transfer !== t || t.stopped) { group.close(); return; }
   const url = new URL(location.href); url.search = connectionDiagnosticsEnabled ? '?connection-debug=1' : ''; url.hash = shareFragment(secret);
-  clearShareQR();
-  shareLink = url.toString();
-  $<HTMLInputElement>('share-link').value = shareLink; $('share-box').hidden = false;
-  status('等待接收方', '把同一个链接或二维码发给多位接收者，请保持本页打开。');
+  clearShare(); shareLink = url.toString(); $<HTMLInputElement>('share-link').value = shareLink;
   await renderShareQR();
+  if (transfer !== t || t.stopped) { group.close(); return; }
+  $('share-box').hidden = false; setText($('cancel'), '结束分享');
+  status('等待接收方', '把同一个链接或二维码发给多位接收者，请保持本页打开。');
+  await group.connect();
+  if (transfer !== t || senderGroup !== group) group.close();
 }
 async function automaticReceiver(fragment: string, revision: number) {
+  if (!configurationReady) {
+    status('正在加载连接配置…', '正在准备连接，请稍候。');
+    await configurationTask;
+    if (revision !== sessionRevision) return;
+    if (!configurationReady) { status('连接未完成', '可以重试，或检查连接设置。', 'error'); throw Error('连接配置加载失败，请重试，或在连接设置中指定配对服务。'); }
+  }
   const api = endpoint();
   if (!api) throw Error('本站尚未配置自动配对服务，请使用手动配对码');
   const { room, receiver: token, secret } = await parseShare(fragment);
@@ -848,12 +884,12 @@ $('drop-zone').onclick = () => {
 $<HTMLInputElement>('file-input').onchange = event => { const input = event.target as HTMLInputElement; select(Array.from(input.files || [])); };
 $('clear-files').onclick = () => {
   if (busy) return;
-  selectionRevision++; packagingAbort?.abort();
+  checkingAbort?.abort(); selectionRevision++; packagingAbort?.abort();
   files.forEach(releaseSourceArchive); files = [];
   $<HTMLInputElement>('file-input').value = '';
   renderFiles();
 };
-$('files').onclick = event => { const button = (event.target as HTMLElement).closest<HTMLElement>('.remove-file'); if (button && !busy && !packagingFiles) { selectionRevision++; const [removed] = files.splice(Number(button.dataset.index), 1); if (removed) releaseSourceArchive(removed); renderFiles(); } };
+$('files').onclick = event => { const button = (event.target as HTMLElement).closest<HTMLElement>('.remove-file'); if (button && !busy && !packagingFiles) { checkingAbort?.abort(); selectionRevision++; const [removed] = files.splice(Number(button.dataset.index), 1); if (removed) releaseSourceArchive(removed); renderFiles(); } };
 for (const event of ['dragenter', 'dragover']) $('drop-zone').addEventListener(event, e => { e.preventDefault(); if (!busy && !packagingFiles) $('drop-zone').classList.add('dragging'); });
 $('drop-zone').addEventListener('dragleave', () => $('drop-zone').classList.remove('dragging'));
 $('drop-zone').addEventListener('drop', event => {
@@ -884,21 +920,22 @@ $('cancel-packaging').onclick = () => {
 window.addEventListener('dragover', event => event.preventDefault());
 window.addEventListener('drop', event => event.preventDefault());
 $('start-send').onclick = () => run(async () => {
-  if (busy || checkingFiles || packagingFiles || !files.length) return;
+  if (!configurationReady || busy || checkingFiles || packagingFiles || !files.length) return;
   const revision = selectionRevision, session = sessionRevision, selected = [...files];
   const current = () => revision === selectionRevision && session === sessionRevision && !busy && $('send-tab').getAttribute('aria-selected') === 'true';
   checkingFiles = true; renderFiles(); $('notice').hidden = true;
-  try { await checkSources(selected, current); }
+  const controller = checkingAbort = new AbortController();
+  try { await checkSources(selected, current, controller.signal); }
   catch (error) { if (!current()) return; throw error; }
-  finally { checkingFiles = false; renderFiles(); }
+  finally { if (checkingAbort === controller) { checkingAbort = undefined; checkingFiles = false; renderFiles(); } }
   if (!current()) return;
   sessionRevision++;
   const t = createTransfer('sender'); t.prepare(files);
   status('正在创建传输', '正在准备连接，请稍候。');
   try { if (endpoint()) await automaticSender(t); else await manualSender(t); }
   catch (e) {
-    if (transfer !== t || t.stopped) return;
-    senderGroup?.close(); senderGroup = undefined; t.close(false); signaling?.close(); transfer = undefined; setBusy(false);
+    if (transfer !== t) return;
+    senderGroup?.close(); senderGroup = undefined; clearShare(); t.close(false); signaling?.close(); transfer = undefined; setBusy(false);
     status('连接未完成', '可以重试，或检查连接设置。', 'error'); setText($('cancel'), '重新开始');
     throw e;
   }
@@ -906,8 +943,15 @@ $('start-send').onclick = () => run(async () => {
 $('connect-receive').onclick = () => run(async () => {
   await connectValue($<HTMLTextAreaElement>('receive-code').value);
 });
+function receiveEdited() {
+  if (busy) return;
+  if (originalSharePending()) $('session-panel').hidden = true;
+  sessionRevision++;
+}
+$('receive-code').addEventListener('input', receiveEdited);
 $('paste-receive').onclick = async () => {
   if (busy || pasting) return;
+  receiveEdited();
   const input = $<HTMLTextAreaElement>('receive-code');
   const revision = sessionRevision, previous = input.value;
   const current = () => !busy && revision === sessionRevision && !$('receive-view').hidden && input.value === previous;
@@ -1017,33 +1061,90 @@ $('save-settings').onclick = () => run(async () => {
   if (stun && !/^stuns?:[^\s]+$/.test(stun)) throw Error('请输入有效的 stun: 或 stuns: 地址');
   localStorage.setItem('pizza-send-signal', url); localStorage.setItem('pizza-send-stun', stun);
   config.iceServers = stun ? [{ urls: stun }] : [];
+  configurationVersion++; configurationController?.abort(); configurationController = undefined; configurationTask = undefined;
+  configurationLoading = false; configurationReady = true;
+  $('retry-config').hidden = true; $('notice').hidden = true; setBusy(busy);
+  setSignalPreconnect(preferredSignalUrl());
   toast('连接设置已保存');
+  await connectOriginalShare();
 });
 window.addEventListener('beforeunload', event => {
   if (packagingFiles || senderGroup?.active || (transfer && !transfer.completed && !transfer.stopped)) { event.preventDefault(); event.returnValue = ''; }
 });
-window.addEventListener('pagehide', () => { screenAwake.setActive(false); cancelAllDownloads(); clearTimeout(storedRetry); closeScanner(); senderGroup?.close(); leaveReceiverGroup(); signaling?.close(); transfer?.close(false); suspendTemporaryStorage(); stopSourceArchives(); });
+window.addEventListener('pagehide', () => { sessionRevision++; storedRevision++; storedRefreshRequested = false; checkingAbort?.abort(); configurationVersion++; configurationController?.abort(); screenAwake.setActive(false); cancelAllDownloads(); clearTimeout(storedRetry); closeScanner(); senderGroup?.close(); leaveReceiverGroup(); signaling?.close(); transfer?.close(false); suspendTemporaryStorage(); stopSourceArchives(); });
 window.addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
 function readPreference(key: string) {
   try { return localStorage.getItem(key); } catch { return null; }
 }
-async function init() {
-  void cleanupSourceArchives();
-  try {
-    const response = await fetch('./app.config.json', { cache: 'no-store' });
-    if (response.ok) config = { ...config, ...await response.json() };
-  } catch {}
-  const stun = readPreference('pizza-send-stun');
-  if (stun !== null) config.iceServers = stun ? [{ urls: stun }] : [];
-  $<HTMLInputElement>('signal-url').value = preferredSignalUrl();
-  $<HTMLInputElement>('stun-url').value = String(config.iceServers[0]?.urls || '');
-  if (!('RTCPeerConnection' in window) || !crypto.subtle) { notice('请在支持 WebRTC 的现代浏览器中，通过 HTTPS 打开本站。'); $<HTMLButtonElement>('drop-zone').disabled = true; return; }
+function originalSharePending() {
   const params = new URLSearchParams(originalHash.slice(1));
-  if (!busy && sessionRevision === 0 && (originalHash.startsWith('#2.') || params.has('r') || params.has('offer'))) {
+  return !busy && sessionRevision === 0 && (originalHash.startsWith('#2.') || params.has('r') || params.has('offer'));
+}
+async function connectOriginalShare() {
+  if (!transferSupported) return;
+  if (originalSharePending()) {
     view('receiver');
+    if (!new URLSearchParams(originalHash.slice(1)).has('offer') && !configurationReady) {
+      if (configurationLoading) status('正在加载连接配置…', '正在准备连接，请稍候。');
+      return;
+    }
     const url = new URL(location.href); url.hash = originalHash;
     await run(() => connectValue(url.toString()));
   }
 }
+function init(): Promise<void> {
+  if (!transferSupported) { notice('请在支持 WebRTC 的现代浏览器中，通过 HTTPS 打开本站。'); return Promise.resolve(); }
+  if (configurationLoading || busy) return configurationTask || Promise.resolve();
+  const version = ++configurationVersion, controller = configurationController = new AbortController();
+  configurationLoading = true; configurationReady = readPreference('pizza-send-signal') !== null;
+  const stun = readPreference('pizza-send-stun');
+  if (stun !== null) config.iceServers = stun ? [{ urls: stun }] : [];
+  $('retry-config').hidden = true; $('notice').hidden = true;
+  $<HTMLInputElement>('signal-url').value = preferredSignalUrl();
+  $<HTMLInputElement>('stun-url').value = String(config.iceServers[0]?.urls || '');
+  setSignalPreconnect(preferredSignalUrl()); setBusy(busy);
+  const timer = setTimeout(() => controller.abort(), 8000);
+  const attempt = (async () => {
+    try {
+      const response = await fetch('./app.config.json', { cache: 'no-store', signal: controller.signal });
+      if (!response.ok) throw Error('Configuration unavailable');
+      const value = await response.json();
+      if (version !== configurationVersion) return;
+      if (!value || typeof value !== 'object' || Array.isArray(value) || typeof (readPreference('pizza-send-signal') ?? value.signalUrl) !== 'string' ||
+        value.memoryLimitBytes !== undefined && (!Number.isSafeInteger(value.memoryLimitBytes) || value.memoryLimitBytes <= 0) ||
+        value.iceServers !== undefined && (!Array.isArray(value.iceServers) || !value.iceServers.every((server: RTCIceServer) => {
+          const urls = typeof server?.urls === 'string' ? [server.urls] : server?.urls;
+          return Array.isArray(urls) && urls.length && urls.every(url => typeof url === 'string' && /^stuns?:[^\s]+$/.test(url));
+        }))) throw Error('Invalid configuration');
+      // Saved pairing settings may already have started a transfer. Keep its
+      // configuration reference current, including a subsequently loaded cap.
+      Object.assign(config, value); configurationReady = true;
+    } catch {
+      if (version !== configurationVersion) return;
+      configurationReady = readPreference('pizza-send-signal') !== null;
+      if (!configurationReady && !busy) {
+        notice('连接配置加载失败，请重试，或在连接设置中指定配对服务。');
+        if (originalSharePending()) status('连接未完成', '可以重试，或检查连接设置。', 'error');
+      }
+    } finally {
+      clearTimeout(timer);
+      if (version === configurationVersion) {
+        configurationLoading = false; configurationController = undefined; configurationTask = undefined;
+        const savedStun = readPreference('pizza-send-stun');
+        if (savedStun !== null) config.iceServers = savedStun ? [{ urls: savedStun }] : [];
+        if (transfer?.role === 'receiver' && transfer.manifest.length && !transfer.hasAccepted) saveNote(transfer.manifest);
+        $<HTMLInputElement>('signal-url').value = preferredSignalUrl();
+        $<HTMLInputElement>('stun-url').value = String(config.iceServers[0]?.urls || '');
+        $('retry-config').hidden = configurationReady; setSignalPreconnect(preferredSignalUrl()); setBusy(busy);
+      }
+    }
+    if (version === configurationVersion && configurationReady) await connectOriginalShare();
+  })();
+  configurationTask = attempt; return attempt;
+}
+$('retry-config').onclick = () => { void init(); };
+void cleanupSourceArchives();
+if (!('RTCPeerConnection' in window) || !crypto.subtle) notice('请在支持 WebRTC 的现代浏览器中，通过 HTTPS 打开本站。');
 void init();
+void connectOriginalShare();
 

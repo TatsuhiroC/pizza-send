@@ -1,6 +1,9 @@
 export type Language = 'zh' | 'en';
 type Params = Record<string, string | number>;
 const messages: Record<string, string> = {
+  '正在加载连接配置…': 'Loading connection settings…',
+  '重试加载连接配置': 'Retry loading connection settings',
+  '连接配置加载失败，请重试，或在连接设置中指定配对服务。': 'Connection settings could not be loaded. Retry, or choose a pairing service in connection settings.',
   '传输路线': 'Transfer route', '直连': 'Direct', '加密转发': 'Encrypted relay',
   '正在切回直连，已接收进度会保留。': 'Switching back to direct. Received progress is kept.',
   '正在连接加密转发，已接收进度会保留。': 'Connecting to the encrypted relay. Received progress is kept.',
