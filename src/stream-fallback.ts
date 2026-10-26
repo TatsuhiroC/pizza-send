@@ -3,7 +3,7 @@ import type { StreamChannel } from './stream-channel';
 
 type Progress = { bytes: number; total: number; active: boolean; hidden: boolean; connected: boolean };
 export type TransferRoute = 'direct' | 'stream';
-export type RouteState = { available: boolean; current: TransferRoute; target: TransferRoute; busy: boolean; manual: boolean; failed: boolean; recovering?: boolean; directFailed?: boolean };
+export type RouteState = { available: boolean; current: TransferRoute; target: TransferRoute; busy: boolean; manual: boolean; failed: boolean; recovering?: boolean; directFailed?: boolean; connected?: boolean };
 type Hooks = {
   epoch(): number; progress(): Progress; stopped(): boolean;
   open(session: string, current: () => boolean): Promise<StreamChannel>;
@@ -13,8 +13,11 @@ type Hooks = {
   changed?(): void;
 };
 type Candidate = { session: string; epoch: number; channel?: StreamChannel; bytes: number;
+  probeBytes: number; automaticConnect: boolean;
   timer: ReturnType<typeof setTimeout>; acknowledged?: () => void; activated?: () => void; committing?: boolean; cancelled?: boolean; early: string[]; earlyBytes: number };
 const PROBE_BYTES = 256 * 1024;
+export const INITIAL_RELAY_WAIT_MS = 4000;
+export const MAX_CONNECT_ATTEMPTS = 3;
 const valid = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 
 export function streamWorthTrying(oldBps: number, probeMs: number, remaining: number) {
@@ -29,6 +32,7 @@ export function streamWorthTrying(oldBps: number, probeMs: number, remaining: nu
 // while the old route continues; switch only after a measured benefit.
 export class StreamFallback {
   supported = false;
+  quickSupported = false;
   active = false;
   busy = false;
   private closed = false;
@@ -36,7 +40,10 @@ export class StreamFallback {
   private candidate?: Candidate;
   private policy = new RouteFallbackPolicy();
   private samples: { at: number; bytes: number }[] = [];
-  private disconnectedAt = 0;
+  private disconnectedAt?: number;
+  private connectAttempts = 0;
+  private retryAt = 0;
+  private observedAt = Date.now();
   private trial?: { at: number; bytes: number; oldBps: number };
   private used = new Set<string>();
   private preference?: TransferRoute;
@@ -46,7 +53,8 @@ export class StreamFallback {
   private directFailed = false;
   constructor(private role: 'sender' | 'receiver', private hooks: Hooks) {}
   get state(): RouteState { return { available: this.supported && this.used.size > 0, current: this.active ? 'stream' : 'direct', target: this.target,
-    busy: this.busy, manual: !!this.preference, failed: this.failed, directFailed: this.directFailed }; }
+    busy: this.busy, manual: !!this.preference, failed: this.failed, directFailed: this.directFailed, connected: this.hooks.progress().connected }; }
+  negotiated(now = Date.now()) { this.disconnectedAt ??= now; }
   choose(route: TransferRoute, directFailed = false) {
     this.directFailed = directFailed;
     this.preference = route; this.manualAttempted = false; this.trial = undefined; this.failed = false; this.target = route;
@@ -54,9 +62,10 @@ export class StreamFallback {
     this.hooks.changed?.();
   }
   monitor(allowed: boolean, now = Date.now()) {
+    this.observedAt = now;
     const state = this.hooks.progress();
     if (this.closed || this.hooks.stopped()) { this.close(); return; }
-    if (!this.supported || state.hidden) { this.policy.reset(); this.samples = []; this.trial = undefined; return; }
+    if (!this.supported || state.hidden) { this.policy.reset(); this.samples = []; this.trial = undefined; this.disconnectedAt = undefined; return; }
     if (this.role !== 'sender' || this.busy) return;
     if (this.preference) {
       if (this.preference === 'direct' && this.active) this.restore();
@@ -74,13 +83,18 @@ export class StreamFallback {
       }
       return;
     }
-    if (this.tried) { this.policy.reset(); this.samples = []; this.disconnectedAt = 0; return; }
-    if (state.connected) this.disconnectedAt = 0; else this.disconnectedAt ||= now;
+    if (!state.connected) {
+      this.disconnectedAt ??= now; this.policy.reset(); this.samples = [];
+      if (allowed && now - this.disconnectedAt >= INITIAL_RELAY_WAIT_MS && this.connectAttempts < MAX_CONNECT_ATTEMPTS && now >= this.retryAt) void this.prepare(0, false);
+      return;
+    }
+    this.disconnectedAt = undefined; this.connectAttempts = 0;
+    if (this.tried) { this.policy.reset(); this.samples = []; return; }
     this.samples.push({ at: now, bytes: state.bytes });
     while (this.samples.length > 1 && this.samples[1].at <= now - 10000) this.samples.shift();
     const slow = this.policy.update(now, state.bytes, state.total, state.active);
     if (!allowed) return; // Observe recovery pauses, but do not race native negotiation.
-    if (!slow && (!this.disconnectedAt || now - this.disconnectedAt < 15000)) return;
+    if (!slow) return;
     const first = this.samples[0], oldBps = state.connected && now > first.at ? Math.max(0, state.bytes - first.bytes) * 1000 / (now - first.at) : 0;
     void this.prepare(oldBps, false);
   }
@@ -89,10 +103,11 @@ export class StreamFallback {
     if (!this.busy && this.role === 'sender') void this.prepare(0, true);
     return true;
   }
-  private begin(session: string, epoch: number) {
+  private begin(session: string, epoch: number, probeBytes = PROBE_BYTES, automaticConnect = false) {
     if (this.used.has(session) || this.used.size >= 128) throw Error('Stream session reused');
     this.used.add(session);
-    const candidate: Candidate = { session, epoch, bytes: 0, early: [], earlyBytes: 0, timer: setTimeout(() => this.abort(candidate), 30000) };
+    const candidate: Candidate = { session, epoch, probeBytes, automaticConnect, bytes: 0, early: [], earlyBytes: 0,
+      timer: setTimeout(() => this.abort(candidate), probeBytes === 0 ? 15000 : 30000) };
     this.busy = true; this.failed = false; this.target = 'stream'; this.candidate = candidate; this.hooks.changed?.(); return candidate;
   }
   private current(candidate: Candidate) {
@@ -109,11 +124,11 @@ export class StreamFallback {
       try {
         if (!this.current(candidate)) return;
         if (event.data instanceof ArrayBuffer) {
-          if (this.role !== 'receiver' || event.data.byteLength !== 32768 || candidate.bytes + event.data.byteLength > PROBE_BYTES) throw Error();
+          if (this.role !== 'receiver' || event.data.byteLength !== 32768 || candidate.bytes + event.data.byteLength > candidate.probeBytes) throw Error();
           candidate.bytes += event.data.byteLength; return;
         }
         const message = JSON.parse(event.data);
-        if (message.type === 'stream-probe-end' && this.role === 'receiver' && candidate.bytes === PROBE_BYTES) channel.send(JSON.stringify({ type: 'stream-probe-ok' }));
+        if (message.type === 'stream-probe-end' && this.role === 'receiver' && candidate.bytes === candidate.probeBytes) channel.send(JSON.stringify({ type: 'stream-probe-ok' }));
         else if (message.type === 'stream-probe-ok' && this.role === 'sender') candidate.acknowledged?.();
         else if (this.role === 'sender' && candidate.committing && message.type === 'visibility') {
           // The receiver installs the file protocol one signaling RTT earlier.
@@ -132,21 +147,31 @@ export class StreamFallback {
     return channel;
   }
   private async prepare(oldBps: number, reconnect: boolean, manual = false) {
-    if (this.closed || this.busy || this.hooks.stopped() || this.tried && !reconnect && !manual) return;
+    const before = this.hooks.progress();
+    if (this.closed || this.busy || this.hooks.stopped() || this.tried && !reconnect && !manual && before.connected) return;
     if (this.used.size >= 128) { if (reconnect) this.restore(); return; }
-    this.tried = true;
     const session = [...crypto.getRandomValues(new Uint8Array(32))].map(n => n.toString(16).padStart(2, '0')).join('');
-    const candidate = this.begin(session, this.hooks.epoch());
+    const benchmark = !reconnect && !manual && before.connected;
+    const automaticConnect = !reconnect && !manual && !before.connected;
+    // Failed initial setup must not consume the later slow-transfer benchmark
+    // if native ICE eventually succeeds on a different path.
+    this.tried = !automaticConnect;
+    if (automaticConnect) this.connectAttempts++;
+    const probeBytes = this.quickSupported && !benchmark ? 0 : PROBE_BYTES;
+    const candidate = this.begin(session, this.hooks.epoch(), probeBytes, automaticConnect);
     try {
-      await this.hooks.send({ type: 'stream-prepare', session, epoch: candidate.epoch });
+      await this.hooks.send({ type: 'stream-prepare', session, epoch: candidate.epoch, ...(probeBytes === 0 ? { probeBytes: 0 } : {}) });
       const channel = await this.open(candidate), start = performance.now();
       const probed = new Promise<void>(resolve => { candidate.acknowledged = resolve; });
-      for (let i = 0; i < PROBE_BYTES / 32768; i++) channel.send(new ArrayBuffer(32768));
+      for (let i = 0; i < probeBytes / 32768; i++) channel.send(new ArrayBuffer(32768));
       channel.send(JSON.stringify({ type: 'stream-probe-end' }));
       await probed;
       if (!this.current(candidate)) return;
       const state = this.hooks.progress();
-      if (state.hidden || this.preference === 'direct' || !reconnect && !manual && !streamWorthTrying(oldBps, performance.now() - start, state.total - state.bytes)) { this.abort(candidate, false); return; }
+      if (state.hidden || this.preference === 'direct' || benchmark && !streamWorthTrying(oldBps, performance.now() - start, state.total - state.bytes) || automaticConnect && state.connected) {
+        if (automaticConnect && state.connected) this.tried = false;
+        this.abort(candidate, false); return;
+      }
       const activated = new Promise<void>(resolve => { candidate.activated = resolve; });
       candidate.committing = true;
       await this.hooks.send({ type: 'stream-activate', session, epoch: candidate.epoch }); await activated;
@@ -155,7 +180,8 @@ export class StreamFallback {
       await this.hooks.activate(channel, candidate.epoch + 1);
       if (this.closed || this.hooks.stopped()) { channel.close(); return; }
       for (const data of candidate.early) channel.onmessage?.(new MessageEvent('message', { data }));
-      this.active = true; this.busy = false; this.trial = this.preference ? undefined : { at: Date.now(), bytes: this.hooks.progress().bytes, oldBps };
+      this.active = true; this.busy = false; this.trial = this.preference ? undefined : { at: Date.now(), bytes: this.hooks.progress().bytes, oldBps: benchmark ? oldBps : 0 };
+      this.connectAttempts = 0; this.retryAt = 0;
       this.hooks.changed?.(); this.monitor(true);
     } catch {
       if (candidate.cancelled) return;
@@ -169,15 +195,18 @@ export class StreamFallback {
     if (this.closed || this.hooks.stopped() || !this.supported || !valid(message.session) || message.epoch !== this.hooks.epoch()) return;
     if (message.type === 'stream-prepare' && this.role === 'receiver') {
       if (this.busy || this.used.has(message.session) || this.used.size >= 128) return;
-      const candidate = this.begin(message.session, message.epoch);
-      try { await this.open(candidate); } catch { this.abort(candidate); }
+      if (message.probeBytes !== undefined && message.probeBytes !== PROBE_BYTES && !(message.probeBytes === 0 && this.quickSupported)) return;
+      const candidate = this.begin(message.session, message.epoch, message.probeBytes ?? PROBE_BYTES);
+      // Never hold the ordered signaling queue while waiting for the peer's
+      // socket. A failure/cancel or a fresh offer must be handled immediately.
+      void this.open(candidate).catch(() => this.abort(candidate));
       return;
     }
     const candidate = this.candidate;
     if (!candidate || candidate.session !== message.session || candidate.epoch !== message.epoch) return;
     if (message.type === 'stream-unavailable') { this.abort(candidate); return; }
     if (message.type === 'stream-activated' && this.role === 'sender') { candidate.activated?.(); return; }
-    if (message.type === 'stream-activate' && this.role === 'receiver' && candidate.bytes === PROBE_BYTES && candidate.channel?.readyState === 'open') {
+    if (message.type === 'stream-activate' && this.role === 'receiver' && candidate.bytes === candidate.probeBytes && candidate.channel?.readyState === 'open') {
       const channel = candidate.channel; this.finish(candidate, true);
       try {
         await this.hooks.activate(channel, candidate.epoch + 1);
@@ -195,6 +224,7 @@ export class StreamFallback {
     if (this.candidate !== candidate) return;
     candidate.cancelled = true;
     this.finish(candidate); this.failed = failed; candidate.channel?.close();
+    if (failed && candidate.automaticConnect) this.retryAt = this.observedAt + (this.connectAttempts === 1 ? 3000 : 6000);
     candidate.acknowledged?.(); candidate.activated?.();
     if (!this.closed) void this.hooks.send({ type: 'stream-unavailable', session: candidate.session, epoch: candidate.epoch }).catch(() => {});
     if (this.active && !this.closed) this.restore();

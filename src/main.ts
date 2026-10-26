@@ -516,7 +516,7 @@ function events(event: TransferEvent) {
   } else if (event.type === 'compression') {
     compressionState = event.data; renderCurrentCompression();
   } else if (event.type === 'pairing') {
-    status(event.data, event.data === '配对信息已交换，正在寻找直连路径' ? '请保持手机在发送页面；VPN 需要允许本地网络和 WebRTC。' : '请让发送方保持页面打开，手机不要锁屏。');
+    status(event.data, event.data === '配对信息已交换，正在寻找直连路径' ? '请保持手机在发送页面；VPN 需要允许本地网络和 WebRTC。' : event.data === '直连暂未建立，正在连接加密转发' ? '正在通过加密转发建立连接，请保持双方页面打开。' : '请让发送方保持页面打开，手机不要锁屏。');
   } else if (event.type === 'background') {
     backgroundNote(event.data);
   } else if (event.type === 'connected') {
