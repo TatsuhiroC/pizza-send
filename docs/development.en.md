@@ -41,6 +41,8 @@ npm test
 
 Verify locally before pushing a production branch. The frontend and signaling service are deployed separately; a frontend update does not deploy the Worker. GitHub Actions checks and Cloudflare Pages builds run independently.
 
+GitHub Actions uses the official preinstalled browser image matching the locked Playwright version, while keeping all checks. Update the workflow's image version and digest when upgrading Playwright. This image is used only for CI and is not shipped with the website.
+
 ## Connection troubleshooting
 
 Refresh both pages, create a new link, keep the sending page open and leave the phone unlocked. First try the same Wi-Fi with both VPNs off, then compare. Sharing Wi-Fi does not guarantee a direct connection: a VPN must still allow local networking and WebRTC / UDP.

@@ -41,6 +41,8 @@ npm test
 
 先完成本地检查，再推送用于正式发布的分支。前端和配对服务分别部署；仅更新前端不会自动更新 Worker。GitHub Actions 的检查与 Cloudflare Pages 的构建彼此独立。
 
+GitHub Actions 使用与锁定 Playwright 版本一致的官方预装浏览器镜像，避免冷启动时重复安装系统依赖；仍运行上述完整检查。升级 Playwright 时，应同步更新工作流中的镜像版本与摘要。该镜像仅用于 CI，不进入网站产物。
+
 ## 连接排查
 
 双方刷新并创建新链接，保持发送页面打开、手机解锁。可以先在同一 Wi-Fi 且双方关闭 VPN 时测试，再比较 VPN 下的结果。同一 Wi-Fi 不保证一定直连；VPN 仍需允许局域网和 WebRTC / UDP。
