@@ -30,10 +30,14 @@ jobs:
       - run: npm run build
       - run: npm run signal:check
       - run: npm run test:headers
-      - run: npm run test:webkit
-      - run: npm test
+      # The container user differs from the checkout owner. Trust only this
+      # ephemeral workspace, never all repositories or a host-wide path.
+      - name: Trust the checked-out CI workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - run: npm run build:site
       - run: npm run test:site
+      - run: npm run test:webkit
+      - run: npm test
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
