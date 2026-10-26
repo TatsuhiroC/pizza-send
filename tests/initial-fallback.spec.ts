@@ -115,7 +115,9 @@ test('failed initial setup does not disable later slow-link evaluation after dir
 });
 
 test('an unanswered quick handshake times out after fifteen seconds and releases pending receiver work', async ({ page }) => {
-  await page.goto('./'); await page.clock.install();
+  await page.goto('./');
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
+  await page.clock.pauseAt(new Date('2026-01-01T00:00:01Z'));
   await page.evaluate(async () => {
     const { StreamFallback } = await import('/src/stream-fallback.ts');
     const state = window as any; state.__quickCloses = 0;
