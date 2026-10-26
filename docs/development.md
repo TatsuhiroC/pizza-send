@@ -2,7 +2,7 @@
 
 [← 返回项目首页](../README.md) · [English](development.en.md)
 
-前端使用 Vite + TypeScript，部署到 Cloudflare Pages；Worker + Durable Objects 处理配对消息及可选的加密流式转发，STUN 帮助发现连接地址。文件优先通过 WebRTC 在浏览器之间直传；[加密流式兜底](stream-relay.md)默认关闭，启用后先探测收益再切换。TURN 接入已移除。
+前端使用 Vite + TypeScript，部署到 Cloudflare Pages；Worker + Durable Objects 处理配对消息及加密流式转发，STUN 帮助发现连接地址。文件优先通过 WebRTC 在浏览器之间直传；[加密流式兜底](stream-relay.md)自动切换前先探测收益，也支持手动选择路线。TURN 接入已移除。项目的 Worker 部署配置启用备用通道；自行部署时可将 `STREAM_RELAY_ENABLED` 设为 `"0"` 关闭。
 
 ## 本地开发
 

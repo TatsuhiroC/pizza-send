@@ -42,7 +42,7 @@ Share files. Drop a folder on a computer to package it as a ZIP. Pair by QR. Rec
 - **Keep both pages open.** Automatic pairing can reconnect; refreshing or closing loses unfinished transfers. Phone locking may interrupt them.
 - **Save what you receive.** Browser copies have a ten-minute expiry and may be reclaimed sooner. Your downloaded copies stay.
 - **Size depends on the receiver.** Space and browser quota set the limit. Without disk storage, total reception is capped at 256 MiB.
-- **Direct first, measure before switching.** Direct connections use DTLS. The encrypted streaming fallback is off by default and, when enabled, requires a measured benefit before switching. Files are not stored on the server. Restricted networks may still block connections. Links grant access: share them only with people you trust.
+- **Direct first, measure before switching.** Direct connections use DTLS. The fallback uses AES-GCM encryption in the browser; automatic switching requires a measured benefit, and you can also choose a route manually. Files are not stored on the server. Restricted networks may still block connections. Links grant access: share them only with people you trust.
 
 ## A little more
 

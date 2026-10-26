@@ -14,7 +14,7 @@
 ## 实现与验证 · Design & validation
 
 - [安全加固](security-hardening.md) · [网页安全头](web-security-headers.md)
-- [加密流式兜底（候选、默认关闭）](stream-relay.md)
+- [加密流式兜底与手动路线选择](stream-relay.md)
 - [传输优化与慢网压缩审查](transfer-upgrade-review.md)
 - [压缩触发条件与估算公式](transfer-compression.md)
 - [接收端校验优化](transfer-receive-hash.md)

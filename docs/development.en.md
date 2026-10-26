@@ -2,7 +2,7 @@
 
 [← Project home](../README.en.md) · [简体中文](development.md)
 
-The Vite + TypeScript frontend runs on Cloudflare Pages. A Worker with Durable Objects handles pairing messages and the optional encrypted streaming relay; STUN helps discover connection addresses. Files travel directly between browsers over WebRTC first. The [streaming fallback](stream-relay.md) is off by default and requires a measured benefit before switching. TURN integration has been removed.
+The Vite + TypeScript frontend runs on Cloudflare Pages. A Worker with Durable Objects handles pairing messages and the encrypted streaming relay; STUN helps discover connection addresses. Files travel directly between browsers over WebRTC first. The [streaming fallback](stream-relay.md) measures the benefit before automatic switching and also supports manual route selection. TURN integration has been removed. The project's Worker deployment configuration enables the fallback; self-hosters can set `STREAM_RELAY_ENABLED` to `"0"` to disable it.
 
 ## Local development
 
