@@ -31,6 +31,33 @@ test('untrusted stream controls cannot open a channel; native renegotiation defe
   })).toEqual({ denied: true, opens: 1, deferred: true });
 });
 
+test('a cancelled relay ticket request cannot create a late socket', async ({ page }) => {
+  await page.goto('./');
+  let release!: () => void, arrived!: () => void;
+  const gate = new Promise<void>(resolve => release = resolve), requested = new Promise<void>(resolve => arrived = resolve);
+  await page.route('https://relay-ticket.invalid/**', async route => {
+    arrived(); await gate; await route.fulfill({ json: { ticket: 'e'.repeat(64) } });
+  });
+  try {
+    await page.evaluate(async () => {
+      const { Signaling, signalKey } = await import('/src/protocol.ts');
+      const state = window as any;
+      state.__routeCurrent = true; state.__routeSockets = 0;
+      const Socket = window.WebSocket;
+      window.WebSocket = class extends Socket { constructor(url: string | URL, protocols?: string | string[]) { state.__routeSockets++; super(url, protocols); } };
+      const signal: any = state.__routeSignal = new Signaling(await signalKey('a'.repeat(64)), async () => {}, () => {});
+      signal.endpoint = 'wss://relay-ticket.invalid/rooms/' + 'b'.repeat(64) + '?role=sender&client=' + 'c'.repeat(64) + '&token=' + 'd'.repeat(64);
+      signal.role = 'sender';
+      state.__lateTicketResult = signal.stream('a'.repeat(64), 'f'.repeat(64), () => state.__routeCurrent).then((channel: any) => { channel.close(); return 'opened'; }, () => 'cancelled');
+    });
+    await requested;
+    await page.evaluate(() => { (window as any).__routeCurrent = false; });
+    release();
+    expect(await page.evaluate(() => (window as any).__lateTicketResult)).toBe('cancelled');
+    expect(await page.evaluate(() => (window as any).__routeSockets)).toBe(0);
+  } finally { release(); await page.evaluate(() => (window as any).__routeSignal?.close()); }
+});
+
 for (const scenario of ['slow', 'initial', 'manual']) test(scenario === 'initial' ? 'initial direct ICE failure opens encrypted WSS without a TURN stage' : scenario === 'manual' ? 'either peer can choose direct and return to encrypted relay without resetting file progress' : 'a slow long transfer probes encrypted WSS without a TURN stage and resumes the original file', async ({ page, context, browserName }) => {
   const blocked = scenario === 'initial', manual = scenario === 'manual';
   test.skip(browserName === 'webkit', 'The initial native DataChannel comparison uses Chromium.');

@@ -87,3 +87,34 @@ test('an explicitly selected relay is not automatically replaced because it is s
   peer.monitor(true, 40000); expect(restores).toBe(0);
   peer.choose('direct'); peer.monitor(true, 42000); expect(restores).toBe(1); peer.close();
 });
+
+for (const result of ['resolve', 'reject'] as const) test(`a cancelled preparation cannot disturb its replacement when old signaling ${result}s late`, async () => {
+  let release!: () => void, reject!: (error: Error) => void;
+  const pendingOpens: ((channel: any) => void)[] = [];
+  const delayed = new Promise<void>((resolve, fail) => { release = resolve; reject = fail; });
+  let first = true, opens = 0;
+  const peer: any = new StreamFallback('sender', {
+    epoch: () => 0, progress: () => ({ bytes: 0, total: 1e9, active: true, hidden: false, connected: true }), stopped: () => false,
+    send: async (message: any) => { if (message.type === 'stream-prepare' && first) { first = false; await delayed; } },
+    open: async () => { opens++; return new Promise(resolve => { pendingOpens.push(resolve); }); },
+    activate: async () => { throw Error('Unexpected activation'); }, restore: () => { throw Error('Unexpected restore'); }
+  });
+  peer.supported = true;
+  const old = peer.prepare(0, false, true);
+  peer.choose('direct'); peer.choose('stream');
+  const replacement = peer.prepare(0, false, true);
+  try {
+    await expect.poll(() => opens).toBe(1);
+    const candidate = peer.candidate;
+    if (result === 'resolve') release(); else reject(Error('Late signaling failure'));
+    // Allow the obsolete continuation and its catch handler to run.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(opens).toBe(1);
+    expect(peer.candidate).toBe(candidate);
+    expect(peer.busy).toBe(true);
+  } finally {
+    peer.close(); release();
+    for (const finish of pendingOpens) finish({ close() {} });
+    await Promise.all([old, replacement]);
+  }
+});

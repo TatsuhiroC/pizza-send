@@ -1,6 +1,32 @@
 import { test, expect } from './fixtures';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+
+test('late path statistics cannot overwrite a replacement route or report after close', async ({ page }) => {
+  await page.goto('./');
+  const results = await page.evaluate(async () => {
+    const { Transfer } = await import('/src/protocol.ts');
+    const result: Record<string, string[]> = {};
+    for (const state of ['unchanged', 'stream', 'native', 'closed']) {
+      const paths: string[] = [];
+      const transfer: any = new Transfer({ signalUrl: '', iceServers: [], memoryLimitBytes: 1048576 }, 'receiver', event => { if (event.type === 'path') paths.push(event.data); });
+      let release!: (report: any) => void;
+      transfer.pc.getStats = () => new Promise(resolve => { release = resolve; });
+      const describing = transfer.describePath();
+      if (state === 'stream') await transfer.replaceTransport({ readyState: 'open', bufferedAmount: 0, close() {}, send() {} } as any);
+      else if (state === 'native') await transfer.replaceTransport();
+      else if (state === 'closed') transfer.close(false);
+      release(new Map([
+        ['transport', { type: 'transport', selectedCandidatePairId: 'pair' }],
+        ['pair', { localCandidateId: 'local', remoteCandidateId: 'remote' }],
+        ['local', { candidateType: 'host' }], ['remote', { candidateType: 'host' }]
+      ]));
+      await describing; transfer.close(false); result[state] = paths;
+    }
+    return result;
+  });
+  expect(results).toEqual({ unchanged: ['网络直连'], stream: ['加密服务器转发'], native: [], closed: [] });
+});
 import { sanitizedConnectionStats, sanitizedPeerDiagnostics, watchConnectionDiagnostics } from '../src/connection-diagnostics';
 
 test('native counters use an allowlist and never retain addresses or identifiers', () => {

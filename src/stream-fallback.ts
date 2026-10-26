@@ -6,14 +6,14 @@ export type TransferRoute = 'direct' | 'stream';
 export type RouteState = { available: boolean; current: TransferRoute; target: TransferRoute; busy: boolean; manual: boolean; failed: boolean; recovering?: boolean };
 type Hooks = {
   epoch(): number; progress(): Progress; stopped(): boolean;
-  open(session: string): Promise<StreamChannel>;
+  open(session: string, current: () => boolean): Promise<StreamChannel>;
   send(message: unknown): Promise<void>;
   activate(channel: StreamChannel, epoch: number): Promise<void>;
   restore(): void;
   changed?(): void;
 };
 type Candidate = { session: string; epoch: number; channel?: StreamChannel; bytes: number;
-  timer: ReturnType<typeof setTimeout>; acknowledged?: () => void; activated?: () => void; committing?: boolean; early: string[]; earlyBytes: number };
+  timer: ReturnType<typeof setTimeout>; acknowledged?: () => void; activated?: () => void; committing?: boolean; cancelled?: boolean; early: string[]; earlyBytes: number };
 const PROBE_BYTES = 256 * 1024;
 const valid = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 
@@ -97,7 +97,10 @@ export class StreamFallback {
     return !this.closed && !this.hooks.stopped() && this.candidate === candidate && this.hooks.epoch() === candidate.epoch;
   }
   private async open(candidate: Candidate) {
-    const channel = await this.hooks.open(candidate.session);
+    // A canceled signaling wait may finish after a newer attempt has started.
+    // Do not obtain a socket for it: the server replaces same-role sockets.
+    if (!this.current(candidate)) throw Error('Stale stream candidate');
+    const channel = await this.hooks.open(candidate.session, () => this.current(candidate));
     if (!this.current(candidate)) { channel.close(); throw Error('Stale stream candidate'); }
     candidate.channel = channel;
     channel.onmessage = event => {
@@ -153,6 +156,7 @@ export class StreamFallback {
       this.active = true; this.busy = false; this.trial = this.preference ? undefined : { at: Date.now(), bytes: this.hooks.progress().bytes, oldBps };
       this.hooks.changed?.(); this.monitor(true);
     } catch {
+      if (candidate.cancelled) return;
       this.abort(candidate); this.busy = false;
       if (!this.active) candidate.channel?.close();
       if (reconnect && this.active) this.restore();
@@ -187,6 +191,7 @@ export class StreamFallback {
   }
   private abort(candidate: Candidate, failed = true) {
     if (this.candidate !== candidate) return;
+    candidate.cancelled = true;
     this.finish(candidate); this.failed = failed; candidate.channel?.close();
     candidate.acknowledged?.(); candidate.activated?.();
     if (!this.closed) void this.hooks.send({ type: 'stream-unavailable', session: candidate.session, epoch: candidate.epoch }).catch(() => {});

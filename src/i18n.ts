@@ -294,7 +294,7 @@ const messages: Record<string, string> = {
   '请在支持 WebRTC 的现代浏览器中，通过 HTTPS 打开本站。': 'Open this site over HTTPS in a modern browser that supports WebRTC.',
   '文件列表无效（最多 100 个文件）': 'Invalid file list (up to 100 files)', '文件信息无效': 'Invalid file information', '文件总大小超出支持范围': 'The total file size exceeds the supported range',
   '这不是有效的 PizzaSend 配对码': 'This is not a valid PizzaSend pairing code', '配对信息过大': 'Pairing information is too large', '配对码类型不正确': 'Incorrect pairing code type',
-  '连接已中断，请重新创建传输。': 'Connection interrupted. Start a new transfer.', '设备直连': 'Device-to-device', '网络直连': 'Direct network connection', '加密服务器转发': 'Encrypted server relay',
+  '连接已中断，请重新创建传输。': 'Connection interrupted. Start a new transfer.', '网络直连': 'Direct network connection', '加密服务器转发': 'Encrypted server relay',
   '接收队列超出安全限制': 'The receive queue exceeds its safety limit', '对方已结束传输，或页面已关闭。': 'The other device ended the transfer or closed its page.',
   '连接已关闭': 'Connection closed', '对方长时间没有响应，请重新传输': 'The other device is not responding. Start a new transfer.',
   '接收到不符合文件信息的数据': 'Received data does not match the file information', '控制信息过大': 'Control message is too large', '重复的下载请求': 'Duplicate download request',

@@ -312,7 +312,9 @@ export class Transfer {
     this.wake();
   }
   private async describePath() {
-    const stats = await this.pc.getStats();
+    const pc = this.pc, generation = this.generation;
+    const stats = await pc.getStats();
+    if (this.stopped || pc !== this.pc || generation !== this.generation || this.streamTransport) return;
     stats.forEach(s => {
       if (s.type === 'transport' && s.selectedCandidatePairId) {
         const pair = stats.get(s.selectedCandidatePairId);
@@ -989,11 +991,11 @@ export class Signaling {
     }
     throw Error('配对服务已断开');
   }
-  async stream(secret: string, session: string) {
-    if (this.closed || !this.endpoint) throw Error('加密转发暂时不可用');
+  async stream(secret: string, session: string, current = () => true) {
+    if (this.closed || !this.endpoint || !current()) throw Error('加密转发暂时不可用');
     const room = new URL(this.endpoint).pathname.split('/').at(-1)!;
     const [url, cipher] = await Promise.all([ticketURL(this.endpoint, session), StreamCipher.create(secret, room, session, this.role as 'sender' | 'receiver')]);
-    if (this.closed) throw Error('加密转发暂时不可用');
+    if (this.closed || !current()) throw Error('加密转发暂时不可用');
     return new StreamChannel(url, cipher);
   }
   async send(message: unknown, connectedOnly = false) {
@@ -1049,7 +1051,7 @@ export class AutoPair {
     if (secret) this.streamFallback = new StreamFallback(transfer.role, {
       epoch: () => this.epoch, stopped: () => this.closed || transfer.stopped || transfer.completed,
       progress: () => ({ ...transfer.routeProgress(), connected: transfer.transportConnected && !transfer.recovering }),
-      open: session => this.signal.stream(secret, session), send: message => this.signal.send(message),
+      open: (session, current) => this.signal.stream(secret, session, current), send: message => this.signal.send(message),
       activate: async (channel, epoch) => {
         if (this.closed || transfer.stopped || transfer.completed || epoch !== this.epoch + 1) throw Error('Stale stream activation');
         this.negotiating = true;
