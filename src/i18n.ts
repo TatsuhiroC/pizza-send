@@ -1,7 +1,6 @@
 export type Language = 'zh' | 'en';
 type Params = Record<string, string | number>;
 const messages: Record<string, string> = {
-  '正在尝试加密中继连接': 'Trying an encrypted relay connection',
   '连接诊断（仅本机与传输对端）': 'Connection diagnostics (this device and the transfer peer only)',
   '诊断链接会记录速度、缓冲和连接类型，并向当前传输对端附带匿名计数；不含文件内容、文件名、IP 地址或分享密钥，不上传到服务器。': 'Diagnostic links record speed, buffers and connection types, and attach anonymous counters for the current transfer peer. No file contents, names, IP addresses or share keys are included. Reports are not uploaded to a server.',
   '导出诊断记录': 'Export diagnostics',
@@ -202,11 +201,11 @@ const messages: Record<string, string> = {
   '大文件能传吗？': 'Can I send large files?',
   '桌面 Chrome / Edge 接收单个文件时支持直接保存。多文件或 Safari 等浏览器先在本机磁盘暂存，再选择保存到设备；大小取决于设备空间和浏览器额度，保存时可能同时占用两份空间。不支持写盘时仍限制为总计 256 MB。': 'Desktop Chrome / Edge can save a single file directly. Multiple files and Safari reception use temporary disk storage on this device, then offer actions to save to your device. Capacity depends on free space and browser quota; saving may use space for two copies. Browsers without disk storage remain limited to 256 MB in total.',
   '所有网络都能连上吗？': 'Will every network connect?',
-  '优先直连；连接失败，或持续低速且预计等待较长时，会尝试加密中继。部分受限网络仍可能无法连接。': 'Direct connections first. An encrypted relay is tried if connecting fails, or speed stays low with a long estimated wait. Some restricted networks may still block connections.',
+  '优先直连；启用加密转发后，连接失败或持续低速且预计等待较长时，会先测试替代路线，更快才切换。部分受限网络仍可能无法连接。': 'Direct connections first. When streaming relay is enabled, a failed or persistently slow connection with a long wait triggers a route test. Switching requires a measured benefit. Some restricted networks may still block connections.',
   '可以断点续传吗？': 'Can I resume an interrupted transfer?',
   '自动配对支持页面保持打开时断线重连、从已接收位置续传。刷新或关闭页面后不能续传；手动配对暂不支持自动重连。': 'Automatic pairing can reconnect and resume from received bytes while both pages stay open. Refreshing or closing a page loses the session. Manual pairing does not reconnect automatically.',
   '“加密”意味着什么？': 'What does “encrypted” mean?',
-  '直连和 TURN 使用 DTLS；额外流式兜底若启用，则在浏览器中用 AES-GCM 加密，服务器只转发密文、不保存文件。配对信息也在浏览器里加密，密钥放在链接片段中。使用网页仍需要信任本站程序代码。': 'Direct and TURN paths use DTLS. When enabled, the extra streaming fallback uses AES-GCM in the browser; the server forwards ciphertext without storing files. Pairing information is also encrypted, with its key in the link fragment. You still need to trust the site’s code.',
+  '直连使用 DTLS；额外流式兜底若启用，则在浏览器中用 AES-GCM 加密，服务器只转发密文、不保存文件。配对信息也在浏览器里加密，密钥放在链接片段中。使用网页仍需要信任本站程序代码。': 'Direct connections use DTLS. When enabled, the extra streaming fallback uses AES-GCM in the browser; the server forwards ciphertext without storing files. Pairing information is also encrypted, with its key in the link fragment. You still need to trust the site’s code.',
   '连接设置': 'Connection settings', '配对服务地址': 'Pairing service URL', 'STUN 服务地址': 'STUN server URL', '保存设置': 'Save settings',
   '没有配对服务时，可用手动配对码连接。STUN 只帮助建立连接，不中转文件。': 'Use manual pairing codes without a pairing service. STUN helps establish connections; it does not relay files.',
   '🍕 一点披萨精神，一份直接的分享。': '🍕 A little pizza spirit. A direct connection.',
@@ -284,7 +283,7 @@ const messages: Record<string, string> = {
   '请在支持 WebRTC 的现代浏览器中，通过 HTTPS 打开本站。': 'Open this site over HTTPS in a modern browser that supports WebRTC.',
   '文件列表无效（最多 100 个文件）': 'Invalid file list (up to 100 files)', '文件信息无效': 'Invalid file information', '文件总大小超出支持范围': 'The total file size exceeds the supported range',
   '这不是有效的 PizzaSend 配对码': 'This is not a valid PizzaSend pairing code', '配对信息过大': 'Pairing information is too large', '配对码类型不正确': 'Incorrect pairing code type',
-  '连接已中断，请重新创建传输。': 'Connection interrupted. Start a new transfer.', '设备直连': 'Device-to-device', '网络直连': 'Direct network connection', 'TURN 中继': 'TURN relay', '加密服务器转发': 'Encrypted server relay',
+  '连接已中断，请重新创建传输。': 'Connection interrupted. Start a new transfer.', '设备直连': 'Device-to-device', '网络直连': 'Direct network connection', '加密服务器转发': 'Encrypted server relay',
   '接收队列超出安全限制': 'The receive queue exceeds its safety limit', '对方已结束传输，或页面已关闭。': 'The other device ended the transfer or closed its page.',
   '连接已关闭': 'Connection closed', '对方长时间没有响应，请重新传输': 'The other device is not responding. Start a new transfer.',
   '接收到不符合文件信息的数据': 'Received data does not match the file information', '控制信息过大': 'Control message is too large', '重复的下载请求': 'Duplicate download request',

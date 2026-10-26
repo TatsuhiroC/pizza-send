@@ -9,7 +9,6 @@ import { TransferFlow } from './transfer-flow';
 import { StreamChannel, type DataChannel } from './stream-channel';
 import { StreamCipher } from './stream-cipher';
 import { StreamFallback } from './stream-fallback';
-import { TurnFallbackPolicy, readTurnCredentials, type TurnCredentials } from './turn-fallback';
 import { watchConnectionDiagnostics, type DiagnosticHandle } from './connection-diagnostics';
 import { COMPRESSION, BLOCK_BYTES, SAMPLE_BYTES, SlowLink, compressionEstimate, sampleCompression, supportsCompression, gzip, gunzip, type CompressionSample, type CompressionStatus } from './compression';
 import { createTemporarySession, beginTemporaryFile, writeTemporaryFile, finishTemporaryFile, completeTemporarySession, discardTemporaryPartial } from './received-storage';
@@ -206,9 +205,7 @@ export class Transfer {
   private fileConfirmed = -1;
   private outputs: { info: FileInfo; url: string }[] = [];
   private diagnostics?: DiagnosticHandle;
-  private relayServers?: RTCIceServer[];
-  configureRelay(credentials?: TurnCredentials) { this.relayServers = credentials?.iceServers; }
-  relayProgress() {
+  routeProgress() {
     return { bytes: this.role === 'sender' ? this.acknowledged : this.received,
       total: this.manifest.reduce((n, file) => n + file.size, 0),
       active: this.accepted && !this.localHidden && !this.peerHidden && !this.stopped && !this.completed,
@@ -232,7 +229,7 @@ export class Transfer {
     window.addEventListener('online', this.networkChanged);
   }
   private createPeer() {
-    const pc = new RTCPeerConnection(this.relayServers ? { iceServers: this.relayServers, iceTransportPolicy: 'relay' } : { iceServers: this.config.iceServers });
+    const pc = new RTCPeerConnection({ iceServers: this.config.iceServers });
     pc.onicecandidate = event => {
       if (pc === this.pc && !this.stopped) this.candidate?.(event.candidate?.toJSON() ?? null);
     };
@@ -311,7 +308,7 @@ export class Transfer {
         const pair = stats.get(s.selectedCandidatePairId);
         const local = pair && stats.get(pair.localCandidateId);
         const remote = pair && stats.get(pair.remoteCandidateId);
-        if (local && remote) this.emit({ type: 'path', data: [local.candidateType, remote.candidateType].includes('relay') ? 'TURN 中继' : '网络直连' });
+        if (local && remote) this.emit({ type: 'path', data: '网络直连' });
       }
     });
   }
@@ -981,16 +978,6 @@ export class Signaling {
     }
     throw Error('配对服务已断开');
   }
-  async turn(): Promise<TurnCredentials> {
-    if (this.closed || !this.endpoint) throw Error('中继暂时不可用');
-    const url = new URL(this.endpoint);
-    url.protocol = url.protocol === 'ws:' ? 'http:' : 'https:';
-    const response = await retryPairingRequest(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'turn' }) });
-    if (!response.ok || this.closed) throw Error('中继暂时不可用');
-    const credentials = await readTurnCredentials(response);
-    if (this.closed) throw Error('中继暂时不可用');
-    return credentials;
-  }
   async stream(secret: string, session: string) {
     if (this.closed || !this.endpoint) throw Error('加密转发暂时不可用');
     const room = new URL(this.endpoint).pathname.split('/').at(-1)!;
@@ -1041,25 +1028,13 @@ export class AutoPair {
   private candidateTimer?: ReturnType<typeof setTimeout>;
   private waitingTimer?: ReturnType<typeof setTimeout>;
   private retry: ReturnType<typeof setInterval>;
-  private relayMonitor: ReturnType<typeof setInterval>;
-  private relayPolicy = new TurnFallbackPolicy();
-  private relaySupported = false;
-  private relayTried = false;
-  private relayRequested = false;
-  private relayActive = false;
-  private relayPreparing = false;
-  private relayRestartPending = false;
-  private relayAttemptAt = -Infinity;
-  private relayCredentials?: TurnCredentials;
-  private relayReadyTimer?: ReturnType<typeof setTimeout>;
-  private relayTrialTimer?: ReturnType<typeof setTimeout>;
-  private disconnectedSince = 0;
+  private routeMonitor: ReturnType<typeof setInterval>;
   private streamFallback?: StreamFallback;
   constructor(private transfer: Transfer, key: CryptoKey, private onError: (message: string) => void, secret?: string) {
     this.signal = new Signaling(key, (message, authenticated) => this.handle(message, authenticated), onError);
     if (secret) this.streamFallback = new StreamFallback(transfer.role, {
       epoch: () => this.epoch, stopped: () => this.closed || transfer.stopped || transfer.completed,
-      progress: () => ({ ...transfer.relayProgress(), connected: transfer.transportConnected && !transfer.recovering }),
+      progress: () => ({ ...transfer.routeProgress(), connected: transfer.transportConnected && !transfer.recovering }),
       open: session => this.signal.stream(secret, session), send: message => this.signal.send(message),
       activate: async (channel, epoch) => {
         if (this.closed || transfer.stopped || transfer.completed || epoch !== this.epoch + 1) throw Error('Stale stream activation');
@@ -1088,53 +1063,10 @@ export class AutoPair {
         if (Date.now() - this.finishedAt > 180000) this.close();
       } else if (transfer.recovering) void this.recover();
     }, 6000);
-    this.relayMonitor = setInterval(() => this.monitorRelay(), 2000);
+    this.routeMonitor = setInterval(() => this.monitorRoute(), 2000);
   }
-  private monitorRelay() {
-    const t = this.transfer, now = Date.now(), state = t.relayProgress();
-    this.streamFallback?.monitor(this.relayTried && !this.relayPreparing && !this.relayRestartPending && !this.negotiating);
-    if (this.streamFallback?.active || this.streamFallback?.busy) return;
-    if (this.closed || t.stopped || t.completed || !this.offered || !this.relaySupported || state.hidden) {
-      this.relayPolicy.reset(); this.disconnectedSince = 0; return;
-    }
-    // Refresh only an active relay. Direct connections never request credentials.
-    if (this.relayActive) {
-      if (this.relayRestartPending && !this.negotiating) { this.relayRestartPending = false; this.lastAttempt = 0; t.requestRecovery(); }
-      if (t.channel?.readyState === 'open' && t.pc.connectionState === 'connected' && !t.recovering) clearTimeout(this.relayTrialTimer);
-      if (t.role === 'sender' && this.relayCredentials && this.relayCredentials.expiresAt - now < 4 * 60000 && !this.relayPreparing) void this.prepareRelay(true);
-      return;
-    }
-    if (this.relayTried || this.relayRequested) return;
-    const connected = t.channel?.readyState === 'open' && t.pc.connectionState === 'connected' && !t.recovering;
-    if (connected) this.disconnectedSince = 0;
-    else this.disconnectedSince ||= now;
-    // Recovery pauses count toward the user's actual wait. Otherwise repeated
-    // reconnects on a bad path would reset observation forever and evade TURN.
-    const slow = this.relayPolicy.update(now, state.bytes, state.total, state.active);
-    if (!slow && (!this.disconnectedSince || now - this.disconnectedSince < 15000)) return;
-    if (t.role === 'sender') void this.prepareRelay();
-    else {
-      this.relayRequested = true;
-      void this.signal.send({ type: 'relay-request', epoch: this.epoch }).catch(() => {});
-    }
-  }
-  private async prepareRelay(refresh = false) {
-    const t = this.transfer;
-    if (this.relayPreparing || this.closed || t.stopped || t.completed || (this.relayTried && !refresh) || Date.now() - this.relayAttemptAt < 60000) return;
-    this.relayPreparing = true; this.relayTried = true;
-    this.relayAttemptAt = Date.now();
-    const epoch = this.epoch;
-    try {
-      const credentials = await this.signal.turn();
-      if (this.closed || t.stopped || t.completed || epoch !== this.epoch) {
-        if (epoch !== this.epoch) this.relayTried = false;
-        this.relayPreparing = false; return;
-      }
-      this.relayCredentials = credentials;
-      await this.signal.send({ type: 'relay-prepare', epoch });
-      clearTimeout(this.relayReadyTimer);
-      this.relayReadyTimer = setTimeout(() => { this.relayPreparing = false; }, 15000);
-    } catch { this.relayPreparing = false; /* A credential outage must not interrupt a working direct channel. */ }
+  private monitorRoute() {
+    this.streamFallback?.monitor(this.offered && !this.negotiating && !this.closed);
   }
   async connect(endpoint: string, room: string, role: string, token: string) {
     if (role === 'receiver') this.waitingTimer = setTimeout(() => {
@@ -1157,7 +1089,7 @@ export class AutoPair {
     }, 100);
   }
   private async sendDescription(type: 'offer' | 'answer', description: RTCSessionDescriptionInit) {
-    await this.signal.send({ type, epoch: this.epoch, description, relaySupport: true, ...(this.streamFallback ? { streamSupport: 1 } : {}), ...(this.relayActive ? { relay: true } : {}) });
+    await this.signal.send({ type, epoch: this.epoch, description, ...(this.streamFallback ? { streamSupport: 1 } : {}) });
     this.descriptionSent = true; this.scheduleCandidates();
   }
   private async applyCandidates() {
@@ -1179,28 +1111,7 @@ export class AutoPair {
     // DTLS fingerprints instead of merely relaying encrypted peer negotiation.
     if (!authenticated && !['signal-ready', 'peer-ready', 'peer-left', 'receiver-left', 'ended'].includes(message?.type)) return;
     if (typeof message?.type === 'string' && message.type.startsWith('stream-')) { await this.streamFallback?.handle(message); return; }
-    if (message.type === 'relay-request' && t.role === 'sender' && message.epoch === this.epoch) {
-      void this.prepareRelay();
-    } else if (message.type === 'relay-prepare' && t.role === 'receiver' && message.epoch === this.epoch) {
-      try {
-        const epoch = this.epoch, credentials = await this.signal.turn();
-        if (this.closed || t.stopped || t.completed || epoch !== this.epoch) return;
-        this.relayCredentials = credentials;
-        await this.signal.send({ type: 'relay-ready', epoch });
-      } catch { await this.signal.send({ type: 'relay-unavailable', epoch: this.epoch }); }
-    } else if (message.type === 'relay-ready' && t.role === 'sender' && message.epoch === this.epoch && this.relayPreparing && this.relayCredentials) {
-      clearTimeout(this.relayReadyTimer); this.relayPreparing = false; this.relayActive = true;
-      if (t.completed) return;
-      t.configureRelay(this.relayCredentials); this.relayRestartPending = true; this.monitorRelay();
-      clearTimeout(this.relayTrialTimer);
-      this.relayTrialTimer = setTimeout(() => {
-        if (this.closed || t.stopped || t.completed || (t.channel?.readyState === 'open' && !t.recovering)) return;
-        // A blocked TURN endpoint must not trap a previously usable direct share.
-        this.relayActive = false; t.configureRelay(); this.lastAttempt = 0; t.requestRecovery();
-      }, 25000);
-    } else if (message.type === 'relay-unavailable' && t.role === 'sender' && message.epoch === this.epoch) {
-      clearTimeout(this.relayReadyTimer); this.relayPreparing = false;
-    } else if (message.type === 'signal-ready') {
+    if (message.type === 'signal-ready') {
       if (!this.offered && t.role === 'receiver') t.pairingStage(message.peerPresent ? '找到发送方，正在交换连接信息' : '等待发送方回到页面');
     } else if (message.type === 'peer-ready') {
       if (t.role === 'sender' && !this.offered) {
@@ -1226,26 +1137,19 @@ export class AutoPair {
         if (this.lastAnswer) await this.sendDescription('answer', t.pc.localDescription?.toJSON() ?? this.lastAnswer);
         return;
       }
-      this.relaySupported = message.relaySupport === true;
       if (this.streamFallback) { this.streamFallback.supported = message.streamSupport === 1; this.streamFallback.useNative(); }
-      if (message.relay === true) {
-        if (!this.relayCredentials || this.relayCredentials.expiresAt < Date.now() + 60000) this.relayCredentials = await this.signal.turn();
-        if (this.closed || t.stopped || t.completed) return;
-        this.relayActive = true; t.configureRelay(this.relayCredentials);
-      } else { this.relayActive = false; t.configureRelay(); }
       if (this.offered) { t.pauseRecovery(); this.resetCandidates(); await t.replaceTransport(); }
       clearTimeout(this.waitingTimer);
       this.offered = true; this.epoch = message.epoch;
-      t.pairingStage(this.relayActive ? '正在尝试加密中继连接' : '配对信息已交换，正在寻找直连路径');
+      t.pairingStage('配对信息已交换，正在寻找直连路径');
       this.lastAnswer = await t.answer(message.description, true);
       await this.applyCandidates();
       await this.sendDescription('answer', this.lastAnswer);
     } else if (message.type === 'answer' && t.role === 'sender') {
       if (message.epoch === this.epoch && t.pc.signalingState === 'have-local-offer') {
-        this.relaySupported = message.relaySupport === true;
         if (this.streamFallback) this.streamFallback.supported = message.streamSupport === 1;
         await t.finish(message.description); await this.applyCandidates();
-        t.pairingStage(this.relayActive ? '正在尝试加密中继连接' : '配对信息已交换，正在寻找直连路径');
+        t.pairingStage('配对信息已交换，正在寻找直连路径');
       }
     } else if (message.type === 'candidates') {
       if (message.epoch !== this.epoch || !Array.isArray(message.candidates) || message.candidates.length > 16) return;
@@ -1304,5 +1208,5 @@ export class AutoPair {
     } catch { /* Preserve the checkpoint and retry until the recovery deadline. */ }
     finally { this.negotiating = false; }
   }
-  close() { this.closed = true; this.streamFallback?.close(); this.sourceFailureAck?.(); this.sourceFailureAck = undefined; clearInterval(this.retry); clearInterval(this.relayMonitor); clearTimeout(this.relayReadyTimer); clearTimeout(this.relayTrialTimer); clearTimeout(this.candidateTimer); clearTimeout(this.waitingTimer); this.signal.close(); }
+  close() { this.closed = true; this.streamFallback?.close(); this.sourceFailureAck?.(); this.sourceFailureAck = undefined; clearInterval(this.retry); clearInterval(this.routeMonitor); clearTimeout(this.candidateTimer); clearTimeout(this.waitingTimer); this.signal.close(); }
 }

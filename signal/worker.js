@@ -226,7 +226,6 @@ export class Room extends DurableObject {
       let body;
       try { body = await readBody(request.clone(), 2048); } catch { return new Response('Invalid request', { status: 400 }); }
       if (body?.type === 'connect') return this.issueTicket(role, client);
-      if (body?.type === 'turn') return this.issueTurn(role, client);
       if (body?.type === 'stream-connect') {
         const code = this.streamAccess(url, state, role, client, body.session);
         if (code) return Response.json({ error: 'Stream unavailable', code }, { status: 409 });
@@ -279,72 +278,6 @@ export class Room extends DurableObject {
       const value = token(); tickets.push({ hash: await digest(value), role, client, purpose, session, expires: now + 30000 });
       await storage.put('tickets', tickets.slice(-8)); return Response.json({ ticket: value });
     });
-  }
-  async issueTurn(role, client) {
-    const unavailable = (code = 'relay-unavailable') => Response.json({ error: 'Relay temporarily unavailable', code }, { status: 503 });
-    if (!validToken(client)) return new Response('Invalid client', { status: 400 });
-    // Credentials are for an already paired child room, never an anonymous
-    // visitor or the parent invitation. Normal authentication/rate limits apply.
-    const state = await this.ctx.storage.get('room');
-    if (!state || state.ended || state.expiresAt <= Date.now()) return new Response('Session expired', { status: 410 });
-    if (state.multi || !state.senderClient || !state.receiverClient || state[role + 'Client'] !== client) return new Response('Session unavailable', { status: 409 });
-    if (!/^[a-f0-9]{32}$/i.test(this.runtime.TURN_KEY_ID || '') || !this.runtime.TURN_KEY_TOKEN) return unavailable('relay-not-configured');
-    if (typeof this.runtime.TURN_KEY_TOKEN !== 'string' || !/^[\x21-\x7e]{20,4096}$/.test(this.runtime.TURN_KEY_TOKEN)) return unavailable('relay-key-format');
-    // Serialize issuance per role, including across concurrent requests. Persist
-    // the attempt before calling the provider so a restart cannot cause a storm.
-    this.turnPending ??= new Map();
-    if (this.turnPending.has(role)) {
-      try { return Response.json(await this.turnPending.get(role)); } catch { return unavailable(); }
-    }
-    let failure = 'relay-unavailable';
-    const task = (async () => {
-      const key = 'turn-' + role, now = Date.now(), cache = await this.ctx.storage.get(key);
-      if (cache?.client === client && cache.expiresAt > now + 5 * 60000) return cache.credentials;
-      if (cache?.attemptAt > now - 30000) { failure = 'relay-retry-limited'; throw Error('Relay retry limited'); }
-      await this.ctx.storage.put(key, { attemptAt: now });
-      failure = 'relay-fetch';
-      const result = await fetch('https://rtc.live.cloudflare.com/v1/turn/keys/' + this.runtime.TURN_KEY_ID + '/credentials/generate-ice-servers', {
-        method: 'POST', headers: { 'Authorization': 'Bearer ' + this.runtime.TURN_KEY_TOKEN, 'content-type': 'application/json' },
-        body: JSON.stringify({ ttl: 3600 }), signal: AbortSignal.timeout(8000), redirect: 'manual'
-      });
-      if (!result.ok) { failure = 'relay-upstream-' + result.status; await result.body?.cancel(); throw Error('Relay unavailable'); }
-      failure = 'relay-response';
-      const data = await readBody(result, 16384);
-      const entries = Array.isArray(data?.iceServers) ? data.iceServers : data?.iceServers && typeof data.iceServers === 'object' ? [data.iceServers] : [];
-      if (!entries.length || entries.length > 4) throw Error('Invalid relay configuration');
-      const iceServers = entries.filter(server => {
-        const urls = typeof server?.urls === 'string' ? [server.urls] : server?.urls;
-        return Array.isArray(urls) && urls.some(url => typeof url === 'string' && /^turns?:/.test(url));
-      }).map(server => {
-        const urls = [...new Set((typeof server.urls === 'string' ? [server.urls] : server.urls).filter(url => !/^stun:stun\.cloudflare\.com:(3478|53)$/.test(url) && !/^turn:turn\.cloudflare\.com:53\?transport=(udp|tcp)$/.test(url)))];
-        // Some API responses only include the primary ports. Cloudflare also
-        // supports the same credentials over TLS 443 for UDP-blocked networks.
-        if (!urls.includes('turns:turn.cloudflare.com:443?transport=tcp')) urls.push('turns:turn.cloudflare.com:443?transport=tcp');
-        if (!urls.length || urls.length > 8 || !urls.every(url => typeof url === 'string' && /^turns?:turn\.cloudflare\.com:(3478|443|5349|80)\?transport=(udp|tcp)$/.test(url)) ||
-          typeof server.username !== 'string' || !server.username.length || server.username.length > 1024 ||
-          typeof server.credential !== 'string' || !server.credential.length || server.credential.length > 1024) throw Error('Invalid relay configuration');
-        return { urls, username: server.username, credential: server.credential };
-      });
-      if (!iceServers.length) throw Error('Invalid relay configuration');
-      // Even an unexpected provider response must never echo the management
-      // secret to a participant. Only temporary ICE credentials may leave here.
-      if (JSON.stringify(iceServers).includes(this.runtime.TURN_KEY_TOKEN)) throw Error('Invalid relay configuration');
-      const current = await this.ctx.storage.get('room');
-      if (!current || current.ended || current.expiresAt <= Date.now() || current[role + 'Client'] !== client) { failure = 'relay-session-ended'; throw Error('Session ended'); }
-      const credentials = { iceServers, expiresAt: now + 3600000 };
-      await this.ctx.storage.put(key, { client, attemptAt: now, expiresAt: credentials.expiresAt, credentials });
-      return credentials;
-    })();
-    this.turnPending.set(role, task);
-    try { return Response.json(await task); }
-    catch (error) {
-      if (failure === 'relay-fetch') {
-        if (['TimeoutError', 'AbortError'].includes(error?.name)) failure = 'relay-timeout';
-        else if (/header|character/i.test(error?.message || '')) failure = 'relay-request-format';
-      }
-      securityEvent(failure); return unavailable(failure);
-    }
-    finally { this.turnPending.delete(role); }
   }
   async consumeTicket(value, role, client, purpose = 'signal', session = '') {
     if (!validToken(value) || !validToken(client)) return false;

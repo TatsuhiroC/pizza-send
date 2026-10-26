@@ -54,3 +54,13 @@ test('an activated candidate that does not improve actual file progress returns 
     peer.monitor(true, 30000); peer.monitor(true, 32000); peer.close(); expect(restores).toBe(scenario.expected);
   }
 });
+
+test('direct connection retries do not reset the disconnected fallback observation forever', async () => {
+  let opened = 0;
+  const peer = new StreamFallback('sender', { epoch: () => 0, progress: () => ({ bytes: 0, total: 1e9, active: false, hidden: false, connected: false }), stopped: () => false,
+    open: async () => { opened++; throw Error('Fixture unavailable'); }, send: async () => {}, activate: async () => {}, restore: () => {} });
+  peer.supported = true;
+  for (let ms = 0; ms <= 18000; ms += 2000) peer.monitor(ms % 6000 !== 0, 1e7 + ms);
+  peer.monitor(true, 1e7 + 20000);
+  await expect.poll(() => opened).toBe(1); peer.close();
+});

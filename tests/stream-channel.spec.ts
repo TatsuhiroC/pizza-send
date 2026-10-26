@@ -86,7 +86,7 @@ for (const scenario of ['complete', 'resume', 'initial']) test(`encrypted WebSoc
     await expect.poll(() => receiver.evaluate(() => (window as any).__streamTransfer.manifest.length)).toBe(3);
     await receiver.evaluate(() => (window as any).__streamTransfer.accept());
     if (resume) {
-      await expect.poll(() => receiver.evaluate(() => (window as any).__streamTransfer.relayProgress().bytes)).toBeGreaterThanOrEqual(262144);
+      await expect.poll(() => receiver.evaluate(() => (window as any).__streamTransfer.routeProgress().bytes)).toBeGreaterThanOrEqual(262144);
       for (const current of [page, receiver]) await current.evaluate(() => { const transfer = (window as any).__streamTransfer; transfer.pauseRecovery(); transfer.channel.close(); });
       await page.evaluate(() => { (window as any).__slowRead = false; });
       await replace('d'.repeat(64));

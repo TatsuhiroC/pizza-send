@@ -1,4 +1,4 @@
-import { TurnFallbackPolicy } from './turn-fallback';
+import { RouteFallbackPolicy } from './route-policy';
 import type { StreamChannel } from './stream-channel';
 
 type Progress = { bytes: number; total: number; active: boolean; hidden: boolean; connected: boolean };
@@ -22,7 +22,7 @@ export function streamWorthTrying(oldBps: number, probeMs: number, remaining: nu
   return rate >= Math.max(32768, oldBps * 1.5) && (!oldBps || remaining / rate + 5 < remaining / oldBps - 10);
 }
 
-// A distinct fallback, not a TURN transport. Probe authenticated ciphertext
+// Probe authenticated ciphertext on a separate TCP path
 // while the old route continues; switch only after a measured benefit.
 export class StreamFallback {
   supported = false;
@@ -31,7 +31,7 @@ export class StreamFallback {
   private closed = false;
   private tried = false;
   private candidate?: Candidate;
-  private policy = new TurnFallbackPolicy();
+  private policy = new RouteFallbackPolicy();
   private samples: { at: number; bytes: number }[] = [];
   private disconnectedAt = 0;
   private trial?: { at: number; bytes: number; oldBps: number };
@@ -51,11 +51,12 @@ export class StreamFallback {
       }
       return;
     }
-    if (!allowed || this.tried) { this.policy.reset(); this.samples = []; this.disconnectedAt = 0; return; }
+    if (this.tried) { this.policy.reset(); this.samples = []; this.disconnectedAt = 0; return; }
     if (state.connected) this.disconnectedAt = 0; else this.disconnectedAt ||= now;
     this.samples.push({ at: now, bytes: state.bytes });
     while (this.samples.length > 1 && this.samples[1].at <= now - 10000) this.samples.shift();
     const slow = this.policy.update(now, state.bytes, state.total, state.active);
+    if (!allowed) return; // Observe recovery pauses, but do not race native negotiation.
     if (!slow && (!this.disconnectedAt || now - this.disconnectedAt < 15000)) return;
     const first = this.samples[0], oldBps = state.connected && now > first.at ? Math.max(0, state.bytes - first.bytes) * 1000 / (now - first.at) : 0;
     void this.prepare(oldBps, false);
