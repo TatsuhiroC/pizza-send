@@ -11,14 +11,16 @@ async function setup(context: BrowserContext) {
     state.__pcs = []; state.__sockets = []; state.__starts = []; state.__sentBytes = 0;
     state.RTCPeerConnection = class extends Peer { constructor(config: any) { super(config); state.__pcs.push(this); } };
     state.WebSocket = class extends Socket { constructor(url: string, protocols?: string | string[]) { super(url, protocols); state.__sockets.push(this); } };
-    const send = RTCDataChannel.prototype.send;
-    RTCDataChannel.prototype.send = function(data: any) {
+    state.__recordFileSend = (data: any) => {
       if (data instanceof ArrayBuffer) state.__sentBytes += data.byteLength;
       else if (typeof data === 'string') {
         const message = JSON.parse(data);
         if (message.type === 'file-start') state.__starts.push(message);
       }
-      return send.call(this, data);
+    };
+    const send = RTCDataChannel.prototype.send;
+    RTCDataChannel.prototype.send = function(data: any) {
+      state.__recordFileSend(data); return send.call(this, data);
     } as any;
     // Slow only fixture reads, leaving enough time to interrupt a real transfer.
     const arrayBuffer = Blob.prototype.arrayBuffer;
@@ -32,6 +34,13 @@ async function setup(context: BrowserContext) {
 }
 async function begin(sender: Page, receiver: Page, buffer: Buffer, multiple = false) {
   await sender.goto('./');
+  // A faster recovery may legitimately use WSS. Count the same file protocol
+  // on either route so the test still requires two actual nonzero resumes.
+  await sender.evaluate(async () => {
+    const { StreamChannel } = await import('/src/stream-channel.ts');
+    const send = StreamChannel.prototype.send;
+    StreamChannel.prototype.send = function(data) { (window as any).__recordFileSend(data); return send.call(this, data); };
+  });
   const files = [{ name: 'resume.bin', mimeType: 'application/octet-stream', buffer }];
   if (multiple) {
     files.unshift({ name: 'empty.txt', mimeType: 'text/plain', buffer: Buffer.alloc(0) });
@@ -49,6 +58,7 @@ async function interrupt(page: Page, sockets = false) {
   await page.evaluate(sockets => {
     const state = window as any;
     state.__pcs.at(-1).close();
+    for (const socket of state.__sockets) if (new URL(socket.url).searchParams.get('transport') === 'stream') socket.close();
     if (sockets) for (const socket of state.__sockets) if (socket.url.includes('/rooms/')) socket.close();
   }, sockets);
 }
