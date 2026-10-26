@@ -1,6 +1,8 @@
+import { storageKey } from './app-environment';
 export type Language = 'zh' | 'en';
 type Params = Record<string, string | number>;
 const messages: Record<string, string> = {
+  '测试版本': 'Test version', '返回正式版': 'Open stable version', '测试版 · {version}': 'Test · {version}',
   '正在加载连接配置…': 'Loading connection settings…',
   '重试加载连接配置': 'Retry loading connection settings',
   '连接配置加载失败，请重试，或在连接设置中指定配对服务。': 'Connection settings could not be loaded. Retry, or choose a pairing service in connection settings.',
@@ -309,7 +311,7 @@ const messages: Record<string, string> = {
 };
 function initialLanguage(): Language {
   try {
-    const saved = localStorage.getItem('pizza-send-language');
+    const saved = localStorage.getItem(storageKey('pizza-send-language'));
     if (saved === 'zh' || saved === 'en') return saved;
   } catch { /* Detection still works when browser storage is unavailable. */ }
   const preferred = navigator.languages?.length ? navigator.languages : [navigator.language];
@@ -375,6 +377,6 @@ function refreshLanguage() {
 }
 export function toggleLanguage() {
   language = language === 'zh' ? 'en' : 'zh';
-  try { localStorage.setItem('pizza-send-language', language); } catch {}
+  try { localStorage.setItem(storageKey('pizza-send-language'), language); } catch {}
   refreshLanguage();
 }

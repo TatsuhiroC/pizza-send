@@ -1,3 +1,4 @@
+import { storageDirectory } from './app-environment';
 import { safeName } from './file-name';
 import { configure, ZipWriter } from '@zip.js/zip.js/lib/zip-core-custom.js';
 import { readSource, validSourceSegment, type DroppedSource } from './source-files';
@@ -5,7 +6,7 @@ import { readSource, validSourceSegment, type DroppedSource } from './source-fil
 // Only the writer and STORE method are used. No compression engine, external
 // worker, WASM, network request or whole-file buffering is needed.
 configure({ useWebWorkers: false, chunkSize: 262144 });
-const ROOT = 'pizzasend-source-archives-v1';
+const ROOT = storageDirectory('pizzasend-source-archives-v1');
 type Folder = Extract<DroppedSource, { kind: 'folder' }>;
 type Access = { write(data: Uint8Array, options: { at: number }): number; flush(): void; close(): void };
 type SyncFile = FileSystemFileHandle & { createSyncAccessHandle(): Promise<Access> };

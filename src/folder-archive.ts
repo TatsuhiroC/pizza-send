@@ -1,6 +1,7 @@
+import { storageDirectory } from './app-environment';
 import type { DroppedSource } from './source-files';
 
-export const ARCHIVE_ROOT = 'pizzasend-source-archives-v1';
+export const ARCHIVE_ROOT = storageDirectory('pizzasend-source-archives-v1');
 export const archiveLock = (id: string) => ARCHIVE_ROOT + ':' + id;
 const validID = (id: string) => /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/.test(id);
 const releases = new Map<File, () => void>();

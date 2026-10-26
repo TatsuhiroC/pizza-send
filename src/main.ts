@@ -1,3 +1,4 @@
+import { TEST_BUILD, TEST_REVISION, storageKey } from './app-environment';
 import { challenge, cancelChallenge } from './challenge';
 import { parcelHero as heroPizza } from './parcel';
 import { completionSymbol, DeliveryMotion } from './transfer-motion';
@@ -46,6 +47,7 @@ const icon = (name: string) => {
 };
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = [
+  TEST_BUILD ? '<aside class="test-banner" aria-label="测试版本"><span id="test-label"></span><a href="/">返回正式版</a></aside>' : '',
   '<header class="header"><a class="brand" href="./"><img src="./pizza.svg" alt="" width="38" height="38"/><span>PizzaSend<small>文件快传</small></span></a><div class="header-right"><span class="version">第二片 · v0.2</span><button id="language-toggle" class="language-toggle" type="button"><span data-language="zh">中</span><span class="language-divider" aria-hidden="true">/</span><span data-language="en">EN</span></button><a class="github" href="https://github.com/TatsuhiroC/pizza-send" target="_blank" rel="noopener">GitHub ↗</a></div></header>',
   '<main><section class="intro"><div class="eyebrow"><span></span>好东西，直接分享。</div><h1>文件送到，<br/><span>热乎刚好。</span>'+heroPizza+'</h1><p>不用安装，不用注册。<br class="mobile-break"/>打开网页，把文件直接送到另一台设备。</p></section>',
   '<section class="transfer-card" aria-label="文件传输"><div class="card-top"><div class="tabs" role="tablist" aria-label="传输角色"><button id="send-tab" class="tab active" role="tab" aria-selected="true">'+icon('upload')+'发送文件</button><button id="receive-tab" class="tab" role="tab" aria-selected="false">'+icon('down')+'接收文件</button></div><span class="secure">'+icon('lock')+'加密直传</span></div>',
@@ -68,6 +70,7 @@ app.innerHTML = [
 ].join('');
 mountConnectionDiagnostics(app);
 registerStatic(app);
+if (TEST_BUILD) setText(document.getElementById('test-label')!, '测试版 · {version}', { version: TEST_REVISION });
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const deliveryMotion = new DeliveryMotion(document.querySelector<HTMLElement>('.hero-pizza')!, $('transfer-complete'));
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
@@ -1059,7 +1062,7 @@ $('save-settings').onclick = () => run(async () => {
     if (parsed.username || parsed.password || parsed.search || parsed.hash) throw Error('配对地址不能包含凭据或额外参数');
   }
   if (stun && !/^stuns?:[^\s]+$/.test(stun)) throw Error('请输入有效的 stun: 或 stuns: 地址');
-  localStorage.setItem('pizza-send-signal', url); localStorage.setItem('pizza-send-stun', stun);
+  localStorage.setItem(storageKey('pizza-send-signal'), url); localStorage.setItem(storageKey('pizza-send-stun'), stun);
   config.iceServers = stun ? [{ urls: stun }] : [];
   configurationVersion++; configurationController?.abort(); configurationController = undefined; configurationTask = undefined;
   configurationLoading = false; configurationReady = true;
@@ -1074,7 +1077,7 @@ window.addEventListener('beforeunload', event => {
 window.addEventListener('pagehide', () => { sessionRevision++; storedRevision++; storedRefreshRequested = false; checkingAbort?.abort(); configurationVersion++; configurationController?.abort(); screenAwake.setActive(false); cancelAllDownloads(); clearTimeout(storedRetry); closeScanner(); senderGroup?.close(); leaveReceiverGroup(); signaling?.close(); transfer?.close(false); suspendTemporaryStorage(); stopSourceArchives(); });
 window.addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
 function readPreference(key: string) {
-  try { return localStorage.getItem(key); } catch { return null; }
+  try { return localStorage.getItem(storageKey(key)); } catch { return null; }
 }
 function originalSharePending() {
   const params = new URLSearchParams(originalHash.slice(1));
