@@ -10,6 +10,7 @@ export type DiagnosticInput = {
   sent: number; acknowledged: number; received: number; buffered: number; queued: number; window: number;
   sourceBytes: number; sourceMs: number; sinkBytes: number; sinkMs: number;
   completed: boolean; stopped: boolean; recovering: boolean; hidden: boolean; peerHidden: boolean;
+  transport?: 'webrtc' | 'websocket'; connectionOpen?: boolean;
 };
 type Row = Native & { atMs: number };
 type Trace = { id: number; role: string; ended: boolean; samples: Row[]; peer?: Record<string, number>; peerAtMs?: number };
@@ -39,6 +40,7 @@ export function sanitizedConnectionStats(report: RTCStatsReport): Native {
   if (pair) {
     const local = report.get(pair.localCandidateId), remote = report.get(pair.remoteCandidateId);
     result.protocol = choice(local?.protocol, ['udp', 'tcp']);
+    if (local?.candidateType === 'relay') result.relayProtocol = choice(local?.relayProtocol, ['udp', 'tcp', 'tls', 'dtls']);
     result.localCandidate = choice(local?.candidateType, ['host', 'srflx', 'prflx', 'relay']);
     result.remoteCandidate = choice(remote?.candidateType, ['host', 'srflx', 'prflx', 'relay']);
     result.localAddressKind = addressKind(local?.address);
@@ -82,13 +84,14 @@ function append(reader: Reader, input: DiagnosticInput, now: number) {
   const atMs = Math.round(now - reader.origin), elapsed = input.started ? Math.max(1, now - input.started) : 0;
   const recentBps = previous && atMs - previous.atMs >= 500 ? Math.round(Math.max(0, confirmed - Number(previous.confirmed || 0)) * 1000 / (atMs - previous.atMs)) : previous?.recentBps;
   const row: Row = {
-    ...reader.native, atMs, generation: integer(input.generation), confirmed: integer(confirmed), sent: integer(input.sent),
+    ...(input.transport === 'websocket' ? {} : reader.native), atMs, generation: integer(input.generation), confirmed: integer(confirmed), sent: integer(input.sent),
     averageBps: elapsed ? Math.round(confirmed * 1000 / elapsed) : 0, recentBps,
     buffered: integer(input.buffered), inFlight: integer(Math.max(0, input.sent - input.acknowledged)), queued: integer(input.queued), window: integer(input.window),
     sourceBytes: integer(input.sourceBytes), sourceReadAndHashMs: integer(input.sourceMs), sinkBytes: integer(input.sinkBytes), sinkHashAndWriteMs: integer(input.sinkMs),
     hidden: Number(input.hidden), peerHidden: Number(input.peerHidden), recovering: Number(input.recovering), completed: Number(input.completed),
-    connection: choice(input.pc.connectionState, ['new', 'connecting', 'connected', 'disconnected', 'failed', 'closed']),
-    ice: choice(input.pc.iceConnectionState, ['new', 'checking', 'connected', 'completed', 'disconnected', 'failed', 'closed']),
+    transport: input.transport || 'webrtc',
+    connection: input.transport === 'websocket' ? input.connectionOpen ? 'connected' : 'closed' : choice(input.pc.connectionState, ['new', 'connecting', 'connected', 'disconnected', 'failed', 'closed']),
+    ice: input.transport === 'websocket' ? 'not-applicable' : choice(input.pc.iceConnectionState, ['new', 'checking', 'connected', 'completed', 'disconnected', 'failed', 'closed']),
     nativeAgeMs: reader.nativeAt ? Math.round(now - reader.nativeAt) : undefined
   };
   reader.trace.samples.push(row);
@@ -98,12 +101,13 @@ function sample() {
   for (const reader of readers.values()) {
     const input = reader.read(), pc = input.pc, now = performance.now();
     if (reader.nativePeer !== pc) { reader.nativePeer = pc; reader.native = {}; reader.nativeAt = 0; }
+    if (input.transport === 'websocket') { reader.native = {}; reader.nativeAt = 0; }
     append(reader, input, now);
     if (input.completed || input.stopped) { reader.trace.ended = true; readers.delete(reader.trace.id); continue; }
-    if ((reader.pending && reader.pendingPeer === pc) || pc.connectionState === 'closed') continue;
+    if (input.transport === 'websocket' || (reader.pending && reader.pendingPeer === pc) || pc.connectionState === 'closed') continue;
     const pending = {}; reader.pending = pending; reader.pendingPeer = pc;
     void Promise.resolve().then(() => pc.getStats()).then(report => {
-      if (readers.get(reader.trace.id) !== reader || reader.read().pc !== pc) return;
+      if (readers.get(reader.trace.id) !== reader || reader.read().pc !== pc || reader.read().transport === 'websocket') return;
       reader.native = sanitizedConnectionStats(report); reader.nativeAt = performance.now();
     }).catch(() => {}).finally(() => { if (reader.pending === pending) { reader.pending = undefined; reader.pendingPeer = undefined; } });
   }
@@ -135,9 +139,10 @@ export function watchConnectionDiagnostics(read: () => DiagnosticInput): Diagnos
       if (!readers.has(trace.id) || now - reader.lastPeerAt < PEER_INTERVAL_MS) return;
       reader.lastPeerAt = now;
       const value = read();
+      const native = value.transport === 'websocket' ? {} : reader.native;
       return sanitizedPeerDiagnostics({ v: 1, g: value.generation, s: value.sent, a: value.acknowledged, r: value.received, b: value.buffered, q: value.queued,
         rb: value.sourceBytes, rm: value.sourceMs, wb: value.sinkBytes, wm: value.sinkMs,
-        bs: reader.native.pairBytesSent, br: reader.native.pairBytesReceived, ps: reader.native.pairPacketsSent, pr: reader.native.pairPacketsReceived,
+        bs: native.pairBytesSent, br: native.pairBytesReceived, ps: native.pairPacketsSent, pr: native.pairPacketsReceived,
         h: Number(value.hidden), x: Number(value.recovering) });
     },
     receive(value) {

@@ -12,7 +12,12 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
+    # Keep this official browser image aligned with package-lock.json. Avoid
+    # reinstalling WebKit's system dependencies on each fresh hosted runner.
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble@sha256:06a9939e57531807f8d5fd76ce44b53165ffb7d7501d87ab10e285c20b1e971f
+      options: --ipc=host
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -20,9 +25,10 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+      - name: Verify preinstalled browsers
+        run: node -e "for (const name of ['chromium', 'webkit']) require('node:fs').accessSync(require('@playwright/test')[name].executablePath())"
       - run: npm run build
       - run: npm run signal:check
-      - run: npx playwright install --with-deps chromium webkit
       - run: npm run test:headers
       - run: npm run test:webkit
       - run: npm test

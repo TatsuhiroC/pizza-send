@@ -17,7 +17,7 @@ PizzaSend is an open-source file transfer tool for your browser. Move photos, vi
 <table width="100%">
   <thead><tr><th align="left">Feature</th><th align="left">What you get</th></tr></thead>
   <tbody>
-    <tr><td><strong>Direct</strong></td><td>DTLS over WebRTC. Files stay off the pairing server.</td></tr>
+    <tr><td><strong>Encrypted</strong></td><td>Direct first, encrypted relay when needed. No server file storage.</td></tr>
     <tr><td><strong>Original</strong></td><td>Names and bytes stay intact, checked with SHA-256.</td></tr>
     <tr><td><strong>Together</strong></td><td>One link, up to 10 people, each with their own progress.</td></tr>
   </tbody>
@@ -33,7 +33,7 @@ Share files. Drop a folder on a computer to package it as a ZIP. Pair by QR. Rec
 
 ## Behind the transfer
 
-- **Lightweight pairing, direct delivery.** Cloudflare helps peers connect, with connection information encrypted in the browser using AES-256-GCM. Files travel over a WebRTC DataChannel protected by DTLS, without being stored on a server.
+- **Lightweight pairing, direct delivery.** Cloudflare helps peers connect, with connection information encrypted in the browser using AES-256-GCM. Files prefer DTLS-protected WebRTC. An [additional encrypted streaming fallback](docs/stream-relay.md), disabled by default, targets some slow paths. Neither route stores files on a server.
 - **Write as you receive.** Browsers with disk support save chunks and verify them with incremental SHA-256, reducing memory pressure for large files. Receivers prefer WebAssembly for hashing, with an automatic JavaScript fallback.
 - **Adapt to the connection.** Receiver feedback adjusts the sending window; automatic pairing can resume from confirmed progress after a disconnect. Slow-link compression estimates include compression and decompression time. It is offered only when worthwhile and restores the original files on receipt.
 
@@ -42,7 +42,7 @@ Share files. Drop a folder on a computer to package it as a ZIP. Pair by QR. Rec
 - **Keep both pages open.** Automatic pairing can reconnect; refreshing or closing loses unfinished transfers. Phone locking may interrupt them.
 - **Save what you receive.** Browser copies have a ten-minute expiry and may be reclaimed sooner. Your downloaded copies stay.
 - **Size depends on the receiver.** Space and browser quota set the limit. Without disk storage, total reception is capped at 256 MiB.
-- **Direct first, relay as fallback.** Cloudflare TURN is tried if connecting fails, or speed stays low with a long ETA. DTLS still encrypts files; the relay does not store them. Restricted networks may still block connections. Links grant access: share them only with people you trust.
+- **Direct first, measure before switching.** Direct connections use DTLS. The fallback uses AES-GCM encryption in the browser; automatic switching requires a measured benefit, and you can also choose a route manually. Files are not stored on the server. Restricted networks may still block connections. Links grant access: share them only with people you trust.
 
 ## A little more
 

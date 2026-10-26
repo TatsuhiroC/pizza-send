@@ -2,7 +2,7 @@
 
 [← 返回项目首页](../README.md) · [English](development.en.md)
 
-前端使用 Vite + TypeScript，部署到 Cloudflare Pages；Worker + Durable Objects 仅处理配对消息，STUN 帮助发现连接地址。文件优先通过 WebRTC 在浏览器之间直传，失败或持续低速且 ETA 较长时尝试 TURN 中继，详见 [中继说明](turn-fallback.md)。
+前端使用 Vite + TypeScript，部署到 Cloudflare Pages；Worker + Durable Objects 处理配对消息及加密流式转发，STUN 帮助发现连接地址。文件优先通过 WebRTC 在浏览器之间直传；[加密流式兜底](stream-relay.md)自动切换前先探测收益，也支持手动选择路线。TURN 接入已移除。项目的 Worker 部署配置启用备用通道；自行部署时可将 `STREAM_RELAY_ENABLED` 设为 `"0"` 关闭。
 
 ## 本地开发
 
@@ -40,6 +40,8 @@ npm test
 ```
 
 先完成本地检查，再推送用于正式发布的分支。前端和配对服务分别部署；仅更新前端不会自动更新 Worker。GitHub Actions 的检查与 Cloudflare Pages 的构建彼此独立。
+
+GitHub Actions 使用与锁定 Playwright 版本一致的官方预装浏览器镜像，避免冷启动时重复安装系统依赖；仍运行上述完整检查。升级 Playwright 时，应同步更新工作流中的镜像版本与摘要。该镜像仅用于 CI，不进入网站产物。
 
 ## 连接排查
 

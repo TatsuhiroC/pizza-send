@@ -2,7 +2,7 @@
 
 [← Project home](../README.en.md) · [简体中文](development.md)
 
-The Vite + TypeScript frontend runs on Cloudflare Pages. A Worker with Durable Objects handles pairing messages; STUN helps discover connection addresses. Files travel directly between browsers over WebRTC first; TURN is a fallback for failed connections or sustained low speed with a long ETA. See [relay details](turn-fallback.md).
+The Vite + TypeScript frontend runs on Cloudflare Pages. A Worker with Durable Objects handles pairing messages and the encrypted streaming relay; STUN helps discover connection addresses. Files travel directly between browsers over WebRTC first. The [streaming fallback](stream-relay.md) measures the benefit before automatic switching and also supports manual route selection. TURN integration has been removed. The project's Worker deployment configuration enables the fallback; self-hosters can set `STREAM_RELAY_ENABLED` to `"0"` to disable it.
 
 ## Local development
 
@@ -40,6 +40,8 @@ npm test
 ```
 
 Verify locally before pushing a production branch. The frontend and signaling service are deployed separately; a frontend update does not deploy the Worker. GitHub Actions checks and Cloudflare Pages builds run independently.
+
+GitHub Actions uses the official preinstalled browser image matching the locked Playwright version, while keeping all checks. Update the workflow's image version and digest when upgrading Playwright. This image is used only for CI and is not shipped with the website.
 
 ## Connection troubleshooting
 

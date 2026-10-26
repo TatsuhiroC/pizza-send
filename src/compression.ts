@@ -41,12 +41,12 @@ export async function gzip(data: ArrayBuffer): Promise<ArrayBuffer> {
 
 // Three separate samples avoid recommending compression based only on an easy
 // header or a zero-filled prefix. Keep the least favorable measured result.
-export async function sampleCompression(file: File, offset: number): Promise<CompressionSample | undefined> {
+export async function sampleCompression(file: File, offset: number, signal?: AbortSignal): Promise<CompressionSample | undefined> {
   if (file.size - offset < 8 * 1048576) return;
   const starts = [offset, Math.floor((offset + file.size - SAMPLE_BYTES) / 2), file.size - SAMPLE_BYTES];
   let ratio = 0, compressBps = Infinity, encoded = new ArrayBuffer(0);
   for (const start of starts) {
-    const raw = await readSource(file, start, start + SAMPLE_BYTES);
+    const raw = await readSource(file, start, start + SAMPLE_BYTES, undefined, { signal });
     const at = performance.now(), compressed = await gzip(raw);
     compressBps = Math.min(compressBps, SAMPLE_BYTES * 1000 / Math.max(1, performance.now() - at));
     const fraction = compressed.byteLength / SAMPLE_BYTES;

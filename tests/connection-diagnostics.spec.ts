@@ -1,6 +1,32 @@
 import { test, expect } from './fixtures';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+
+test('late path statistics cannot overwrite a replacement route or report after close', async ({ page }) => {
+  await page.goto('./');
+  const results = await page.evaluate(async () => {
+    const { Transfer } = await import('/src/protocol.ts');
+    const result: Record<string, string[]> = {};
+    for (const state of ['unchanged', 'stream', 'native', 'closed']) {
+      const paths: string[] = [];
+      const transfer: any = new Transfer({ signalUrl: '', iceServers: [], memoryLimitBytes: 1048576 }, 'receiver', event => { if (event.type === 'path') paths.push(event.data); });
+      let release!: (report: any) => void;
+      transfer.pc.getStats = () => new Promise(resolve => { release = resolve; });
+      const describing = transfer.describePath();
+      if (state === 'stream') await transfer.replaceTransport({ readyState: 'open', bufferedAmount: 0, close() {}, send() {} } as any);
+      else if (state === 'native') await transfer.replaceTransport();
+      else if (state === 'closed') transfer.close(false);
+      release(new Map([
+        ['transport', { type: 'transport', selectedCandidatePairId: 'pair' }],
+        ['pair', { localCandidateId: 'local', remoteCandidateId: 'remote' }],
+        ['local', { candidateType: 'host' }], ['remote', { candidateType: 'host' }]
+      ]));
+      await describing; transfer.close(false); result[state] = paths;
+    }
+    return result;
+  });
+  expect(results).toEqual({ unchanged: ['网络直连'], stream: ['加密服务器转发'], native: [], closed: [] });
+});
 import { sanitizedConnectionStats, sanitizedPeerDiagnostics, watchConnectionDiagnostics } from '../src/connection-diagnostics';
 
 test('native counters use an allowlist and never retain addresses or identifiers', () => {
@@ -26,9 +52,37 @@ test('peer counters reject invalid numbers and drop arbitrary properties', () =>
   expect(sanitizedPeerDiagnostics({ ...base, v: 99 })).toBeUndefined();
   expect(sanitizedPeerDiagnostics([])).toBeUndefined();
 });
+test('TURN client TLS transport is distinct from the relay candidate UDP protocol', () => {
+  const report = new Map([
+    ['transport', { type: 'transport', selectedCandidatePairId: 'pair' }],
+    ['pair', { localCandidateId: 'local', remoteCandidateId: 'remote' }],
+    ['local', { protocol: 'udp', candidateType: 'relay', relayProtocol: 'tls', address: 'private-address', url: 'private-url' }],
+    ['remote', { candidateType: 'relay' }]
+  ]);
+  const clean = sanitizedConnectionStats(report as any);
+  expect(clean).toMatchObject({ protocol: 'udp', relayProtocol: 'tls' }); expect(JSON.stringify(clean)).not.toContain('private-');
+});
 
 test('ordinary module imports do not read the transfer or start collecting', () => {
   expect(watchConnectionDiagnostics(() => { throw Error('ordinary transfers must not be sampled'); })).toBeUndefined();
+});
+test('a WebSocket handoff drops old native counters even if the trace closes before another sample', async ({ page }) => {
+  await page.goto('./?connection-debug=1'); await page.clock.install();
+  const result = await page.evaluate(async () => {
+    const { watchConnectionDiagnostics, connectionDiagnosticReport } = await import('/src/connection-diagnostics.ts');
+    const pc = { connectionState: 'connected', iceConnectionState: 'connected', getStats: async () => new Map([
+      ['transport', { type: 'transport', selectedCandidatePairId: 'pair' }], ['pair', { bytesSent: 100, bytesReceived: 200 }]
+    ]) };
+    const input: any = { pc, role: 'sender', generation: 0, started: performance.now(), sent: 100, acknowledged: 0, received: 0, buffered: 0, queued: 0, window: 524288, sourceBytes: 100, sourceMs: 1, sinkBytes: 0, sinkMs: 0, completed: false, stopped: false, recovering: false, hidden: false, peerHidden: false };
+    (window as any).__streamDiag = { input, handle: watchConnectionDiagnostics(() => input), report: connectionDiagnosticReport }; return true;
+  });
+  expect(result).toBe(true); await page.clock.fastForward(2000);
+  const final = await page.evaluate(() => {
+    const { input, handle, report } = (window as any).__streamDiag; input.transport = 'websocket'; input.connectionOpen = true; input.generation++;
+    const packet = handle.packet(); handle.close(); return { packet, row: report().traces[0].samples.at(-1) };
+  });
+  expect(final.row).toMatchObject({ transport: 'websocket', connection: 'connected', ice: 'not-applicable' });
+  expect(final.row).not.toHaveProperty('pairBytesSent'); expect(final.packet).not.toHaveProperty('bs');
 });
 
 test('peer attachments are throttled and completed transfers stop sampling automatically', async ({ page }) => {

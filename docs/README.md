@@ -14,6 +14,7 @@
 ## 实现与验证 · Design & validation
 
 - [安全加固](security-hardening.md) · [网页安全头](web-security-headers.md)
+- [加密流式兜底与手动路线选择](stream-relay.md)
 - [传输优化与慢网压缩审查](transfer-upgrade-review.md)
 - [压缩触发条件与估算公式](transfer-compression.md)
 - [接收端校验优化](transfer-receive-hash.md)
@@ -22,6 +23,8 @@
 
 ## 维护记录 · Maintenance
 
+- [全代码审查与旧连接回调修复：2026-10-26](review-2026-10-26.md)
+- [24 日功能逐项恢复与新路线兼容：2026-10-26](restoration-2026-10-26.md)
 - [回退后的独立功能恢复范围：2026-10-25](independent-restoration-2026-10-25.md)
 - [体积、复杂度与重复工作审查：2026-10-24（历史）](lightweight-review.md)
 - [创建准备优化与全仓审查：2026-10-24（历史）](startup-preparation-review.md)
