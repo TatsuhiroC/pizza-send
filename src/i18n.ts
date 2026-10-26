@@ -1,6 +1,8 @@
+import { storageKey } from './app-environment';
 export type Language = 'zh' | 'en';
 type Params = Record<string, string | number>;
 const messages: Record<string, string> = {
+  '测试版本': 'Test version', '返回正式版': 'Open stable version', '测试版 · {version}': 'Test · {version}',
   '正在加载连接配置…': 'Loading connection settings…',
   '重试加载连接配置': 'Retry loading connection settings',
   '连接配置加载失败，请重试，或在连接设置中指定配对服务。': 'Connection settings could not be loaded. Retry, or choose a pairing service in connection settings.',
@@ -169,6 +171,8 @@ const messages: Record<string, string> = {
   '配对信息无效': 'Invalid pairing information',
   '文件快传': 'File transfer',
   '网络切换，正在恢复连接': 'Network changed. Reconnecting',
+  '直连暂时不可用，已恢复加密转发。': 'Direct connection unavailable. Encrypted relay restored.',
+  '备用连接已失效': 'The standby connection is no longer available.',
   '已接收的进度会保留，请保持双方页面打开。正在寻找可用的连接路径。': 'Received data is preserved. Keep both pages open while a new connection is found.',
   '等待网络恢复': 'Waiting for the network',
   '连接已恢复，继续传输': 'Reconnected. Resuming transfer',
@@ -307,7 +311,7 @@ const messages: Record<string, string> = {
 };
 function initialLanguage(): Language {
   try {
-    const saved = localStorage.getItem('pizza-send-language');
+    const saved = localStorage.getItem(storageKey('pizza-send-language'));
     if (saved === 'zh' || saved === 'en') return saved;
   } catch { /* Detection still works when browser storage is unavailable. */ }
   const preferred = navigator.languages?.length ? navigator.languages : [navigator.language];
@@ -373,6 +377,6 @@ function refreshLanguage() {
 }
 export function toggleLanguage() {
   language = language === 'zh' ? 'en' : 'zh';
-  try { localStorage.setItem('pizza-send-language', language); } catch {}
+  try { localStorage.setItem(storageKey('pizza-send-language'), language); } catch {}
   refreshLanguage();
 }

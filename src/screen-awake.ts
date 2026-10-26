@@ -1,3 +1,4 @@
+import { storageKey } from './app-environment';
 type Lock = EventTarget & { released: boolean; release(): Promise<void> };
 type WakeAPI = { request(type: 'screen'): Promise<Lock> };
 export type AwakeState = 'idle' | 'off' | 'unsupported' | 'requesting' | 'held' | 'released';
@@ -15,7 +16,7 @@ export class ScreenAwake {
   get isEnabled() { return this.enabled; }
   private visible = () => { this.sync(); };
   constructor(private changed: () => void) {
-    try { this.enabled = localStorage.getItem('pizza-send-keep-awake') !== 'off'; } catch {}
+    try { this.enabled = localStorage.getItem(storageKey('pizza-send-keep-awake')) !== 'off'; } catch {}
     document.addEventListener('visibilitychange', this.visible);
   }
   setActive(active: boolean) {
@@ -24,7 +25,7 @@ export class ScreenAwake {
   }
   setEnabled(enabled: boolean) {
     this.enabled = enabled;
-    try { localStorage.setItem('pizza-send-keep-awake', enabled ? 'on' : 'off'); } catch {}
+    try { localStorage.setItem(storageKey('pizza-send-keep-awake'), enabled ? 'on' : 'off'); } catch {}
     this.sync();
   }
   retry() { this.sync(); }

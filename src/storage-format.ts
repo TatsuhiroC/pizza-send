@@ -1,6 +1,7 @@
+import { storageDirectory } from './app-environment';
 import type { FileInfo } from './protocol';
 
-export const STORAGE_ROOT = 'pizzasend-received-v1';
+export const STORAGE_ROOT = storageDirectory('pizzasend-received-v1');
 export const RETENTION_MS = 10 * 60 * 1000;
 export const validSession = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/.test(value);
 export const storageLock = (id: string) => STORAGE_ROOT + ':' + id;

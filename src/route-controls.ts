@@ -8,7 +8,7 @@ export function renderRouteControls(container: HTMLElement, state: RouteState | 
   container.dataset.route = state.current; container.dataset.busy = String(state.busy);
   setText(container.querySelector('legend')!, '传输路线');
   setText(container.querySelector('.route-message')!, state.busy || state.recovering ? state.target === 'direct' ? '正在切回直连，已接收进度会保留。' : '正在连接加密转发，已接收进度会保留。' :
-    state.failed ? '加密转发暂时不可用，继续使用直连。' : state.current === 'stream' ? '当前使用加密转发' : '当前使用直连');
+    state.failed ? '加密转发暂时不可用，继续使用直连。' : state.directFailed && state.current === 'stream' ? '直连暂时不可用，已恢复加密转发。' : state.current === 'stream' ? '当前使用加密转发' : '当前使用直连');
   setText(container.querySelector('.route-hint')!, state.manual ? '已手动选择，本次传输不再自动切换。' : '可以切换路线，已接收进度会保留。');
   for (const route of ['direct', 'stream'] as const) {
     const button = container.querySelector<HTMLButtonElement>('[data-route="' + route + '"]')!;
