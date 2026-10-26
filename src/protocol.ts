@@ -8,6 +8,7 @@ import { downloadType } from './download';
 import { TransferFlow } from './transfer-flow';
 import { StreamChannel, type DataChannel } from './stream-channel';
 import { StreamCipher } from './stream-cipher';
+import { StandbyTransport, standbyNonce } from './standby-transport';
 import { StreamFallback, type RouteState, type TransferRoute } from './stream-fallback';
 import { watchConnectionDiagnostics, type DiagnosticHandle } from './connection-diagnostics';
 import { COMPRESSION, BLOCK_BYTES, SAMPLE_BYTES, SlowLink, compressionEstimate, sampleCompression, supportsCompression, gzip, gunzip, type CompressionSample, type CompressionStatus } from './compression';
@@ -90,6 +91,11 @@ export class Transfer {
   pc: RTCPeerConnection;
   channel?: DataChannel;
   private streamTransport = false;
+  private standby?: { route: TransferRoute; transport: StandbyTransport };
+  private standbyEnabled = false;
+  enableStandby(enabled: boolean) { this.standbyEnabled = enabled; if (!enabled) { this.standby?.transport.close(); this.standby = undefined; } }
+  hasStandby(route: TransferRoute) { return this.standby?.route === route && this.standby.transport.open; }
+  probeStandby(route: TransferRoute) { return this.hasStandby(route) ? this.standby!.transport.probe() : Promise.resolve(false); }
   get transportConnected() { return this.channel?.readyState === 'open' && (this.streamTransport || this.pc.connectionState === 'connected'); }
   files: File[] = [];
   manifest: FileInfo[] = [];
@@ -240,6 +246,10 @@ export class Transfer {
   }
   private createPeer() {
     const pc = new RTCPeerConnection({ iceServers: this.config.iceServers });
+    this.bindPeer(pc);
+    return pc;
+  }
+  private bindPeer(pc: RTCPeerConnection) {
     pc.onicecandidate = event => {
       if (pc === this.pc && !this.stopped) this.candidate?.(event.candidate?.toJSON() ?? null);
     };
@@ -257,7 +267,6 @@ export class Transfer {
       }
     };
     pc.ondatachannel = event => { if (pc === this.pc) this.attach(event.channel); };
-    return pc;
   }
   requestRecovery() {
     if (this.stopped || this.completed || this.failing) return;
@@ -275,30 +284,42 @@ export class Transfer {
     }
   }
   private transportQueue = Promise.resolve();
-  replaceTransport(stream?: StreamChannel) {
-    const task = this.transportQueue.then(() => this.replaceTransportNow(stream));
+  replaceTransport(stream?: StreamChannel, reuse?: TransferRoute) {
+    const task = this.transportQueue.then(() => this.replaceTransportNow(stream, reuse));
     this.transportQueue = task.catch(() => {});
     return task;
   }
-  private async replaceTransportNow(stream?: StreamChannel) {
+  private async replaceTransportNow(stream?: StreamChannel, reuse?: TransferRoute) {
+    const spare = reuse && this.standby?.route === reuse && this.standby.transport.open ? this.standby.transport : undefined;
+    if (reuse && !spare) throw Error('备用连接已失效');
+    if (spare) { spare.take(); this.standby = undefined; }
+    const route = stream || reuse === 'stream' ? 'stream' : 'direct';
+    const wasStream = this.streamTransport;
     this.generation++; this.sourceReads.abort(); this.sourceReads = new AbortController();
     clearTimeout(this.connectTimer); clearTimeout(this.disconnectedTimer); clearInterval(this.heartbeat);
     const channel = this.channel;
     if (channel) channel.onclose = channel.onerror = channel.onmessage = channel.onopen = channel.onbufferedamountlow = null;
     this.pc.onconnectionstatechange = null; this.pc.ondatachannel = null; this.pc.onicecandidate = null;
-    channel?.close(); this.pc.close(); this.channel = undefined; this.wake();
+    if (this.standbyEnabled && channel && channel.readyState === 'open' && (wasStream || this.pc.connectionState === 'connected') && (wasStream ? 'stream' : 'direct') !== route) {
+      this.standby?.transport.close();
+      this.standby = { route: wasStream ? 'stream' : 'direct', transport: new StandbyTransport(channel, wasStream ? undefined : this.pc) };
+    } else channel?.close();
+    if (this.pc !== spare?.pc && this.pc !== this.standby?.transport.pc) this.pc.close();
+    this.channel = undefined; this.wake();
     // Finish writes already received on the old connection before reporting the offset.
     this.flushBinary(this.generation - 1);
     await this.queue;
     this.encodedBlock = undefined;
     this.resetCompressionAdvice();
-    if (this.stopped) throw new TransportInterrupted();
-    this.streamTransport = !!stream;
-    if (stream) {
-      this.attach(stream);
+    if (this.stopped) { spare?.close(); throw new TransportInterrupted(); }
+    this.streamTransport = route === 'stream';
+    const ready = stream || spare?.channel;
+    if (ready) {
+      if (spare?.pc) { this.pc = spare.pc; this.bindPeer(this.pc); }
+      this.attach(ready);
       // A candidate is opened and tested before replacing the old transport.
-      queueMicrotask(() => { if (!this.stopped && this.channel === stream && stream.readyState === 'open') stream.onopen?.(new Event('open')); });
-      this.emit({ type: 'path', data: '加密服务器转发' });
+      queueMicrotask(() => { if (!this.stopped && this.channel === ready && ready.readyState === 'open') ready.onopen?.(new Event('open')); });
+      this.emit({ type: 'path', data: this.streamTransport ? '加密服务器转发' : '网络直连' });
     } else {
       this.pc = this.createPeer();
       if (this.role === 'sender') this.attach(this.pc.createDataChannel('pizza-send-v2', { ordered: true }));
@@ -532,6 +553,8 @@ export class Transfer {
     }
     if (data.length > 65536) throw Error('控制信息过大');
     const message = JSON.parse(data);
+    if (message.type === 'standby-ping' && standbyNonce(message.nonce)) { this.reply({ type: 'standby-pong', nonce: message.nonce }, generation); return; }
+    if (message.type === 'standby-pong') return;
     if (message.type === 'ping') {
       this.diagnostics?.receive(message.metrics);
       const metrics = this.diagnostics?.packet(); this.reply({ type: 'pong', ...(metrics ? { metrics } : {}) }, generation); return;
@@ -626,7 +649,7 @@ export class Transfer {
       if (!this.compressionSupport) this.compressionFile = -1;
       this.resumedGeneration = generation;
       this.restored(); this.progress(true);
-      if (complete) { this.completed = true; clearInterval(this.heartbeat); this.emit({ type: 'done' }); }
+      if (complete) { this.completed = true; this.enableStandby(false); clearInterval(this.heartbeat); this.emit({ type: 'done' }); }
       else if (accepted) this.startSending(file, offset);
     } else if (message.type === 'accept' && this.role === 'sender') {
       // A save picker can return before the replacement channel's manifest.
@@ -674,11 +697,11 @@ export class Transfer {
       if (this.incoming || this.receivedFiles !== this.manifest.length) throw Error('文件传输未完整结束');
       if (this.temporary) await completeTemporarySession(this.temporary);
       if (this.stopped) return;
-      this.completed = true; clearInterval(this.heartbeat); this.progress(true); this.reply({ type: 'complete' }, generation);
+      this.completed = true; this.enableStandby(false); clearInterval(this.heartbeat); this.progress(true); this.reply({ type: 'complete' }, generation);
       this.emit({ type: 'done' });
     } else if (message.type === 'complete' && this.role === 'sender') {
       if (this.fileConfirmed !== this.manifest.length - 1) throw Error('文件尚未保存完整');
-      this.completed = true; clearInterval(this.heartbeat); this.progress(true); this.emit({ type: 'done' });
+      this.completed = true; this.enableStandby(false); clearInterval(this.heartbeat); this.progress(true); this.emit({ type: 'done' });
     } else if (message.type === 'cancel') { this.fail(message.reason === 'source-unavailable' ? '发送方无法读取原文件，请让对方重新选择本机原文件后再试。' : '对方已取消传输。'); }
     else throw Error('收到不支持的传输消息');
   }
@@ -859,7 +882,7 @@ export class Transfer {
       this.temporary = undefined;
     }
     this.incoming = undefined; this.handles = []; this.files = [];
-    this.channel?.close(); this.pc.close(); this.wake();
+    this.channel?.close(); this.pc.close(); this.standby?.transport.close(); this.standby = undefined; this.wake();
     for (const output of this.outputs) URL.revokeObjectURL(output.url);
   }
 }
@@ -1021,6 +1044,9 @@ export class Signaling {
 
 // The sender is the only offerer, so simultaneous network changes cannot create
 // competing offers. Each new connection has a monotonically increasing epoch.
+export const DIRECT_SWITCH_MS = 8000;
+type WarmSwitch = { session: string; route: TransferRoute; epoch: number; timer: ReturnType<typeof setTimeout>;
+  ready?: (ok: boolean) => void; activated?: (ok: boolean) => void; prepared?: boolean };
 export class AutoPair {
   private signal: Signaling;
   private epoch = 0;
@@ -1046,6 +1072,9 @@ export class AutoPair {
   private routeSnapshot = '';
   private pendingRoute?: TransferRoute;
   private routeRequestTimer?: ReturnType<typeof setTimeout>;
+  private warm?: WarmSwitch;
+  private directTrial?: { timer: ReturnType<typeof setTimeout>; attempted: boolean };
+  private warmSupported = false;
   constructor(private transfer: Transfer, key: CryptoKey, private onError: (message: string) => void, secret?: string) {
     this.signal = new Signaling(key, (message, authenticated) => this.handle(message, authenticated), onError);
     if (secret) this.streamFallback = new StreamFallback(transfer.role, {
@@ -1083,6 +1112,8 @@ export class AutoPair {
     this.routeMonitor = setInterval(() => this.monitorRoute(), 2000);
   }
   private monitorRoute() {
+    if (this.directTrial && !this.streamFallback?.active && this.transfer.transportConnected && !this.transfer.recovering) this.clearDirectTrial();
+    if (this.warm || this.pendingRoute) { this.reportRoute(); return; }
     this.streamFallback?.monitor(this.offered && !this.negotiating && !this.closed);
     this.reportRoute();
   }
@@ -1090,7 +1121,7 @@ export class AutoPair {
     const fallback = this.streamFallback, t = this.transfer;
     if (!fallback || this.closed || t.stopped || t.completed) return;
     const state = { ...fallback.state };
-    state.busy ||= !!this.pendingRoute || this.negotiating;
+    state.busy ||= !!this.pendingRoute || !!this.warm || this.negotiating && !this.directTrial;
     state.recovering = t.recovering;
     if (this.pendingRoute) state.target = this.pendingRoute;
     const snapshot = JSON.stringify(state);
@@ -1099,7 +1130,7 @@ export class AutoPair {
   async chooseRoute(route: TransferRoute) {
     const fallback = this.streamFallback;
     if (!fallback?.state.available || this.closed || this.transfer.stopped || this.transfer.completed ||
-      fallback.busy || this.pendingRoute || this.negotiating || !['direct', 'stream'].includes(route)) throw Error('暂时无法切换路线，请稍后重试。');
+      fallback.busy || this.pendingRoute || this.warm || this.negotiating && !this.directTrial || !['direct', 'stream'].includes(route)) throw Error('暂时无法切换路线，请稍后重试。');
     this.pendingRoute = route; this.reportRoute();
     try {
       if (this.transfer.role === 'sender') await this.commitRouteChoice(route);
@@ -1115,10 +1146,87 @@ export class AutoPair {
       if (!this.closed && !this.transfer.stopped && !this.transfer.completed) throw error;
     }
   }
-  private async commitRouteChoice(route: TransferRoute) {
-    await this.signal.send({ type: 'stream-choice', route }, true);
+  private clearDirectTrial() {
+    clearTimeout(this.directTrial?.timer); this.directTrial = undefined;
+  }
+  private async commitRouteChoice(route: TransferRoute, directFailed = false) {
     if (this.closed || this.transfer.stopped || this.transfer.completed) return;
-    this.pendingRoute = undefined; this.streamFallback?.choose(route); this.monitorRoute();
+    if (this.pendingRoute && this.pendingRoute !== route || this.warm) return;
+    // Supersede a cold native attempt, including any signaling wait. Its late
+    // continuation must not send SDP over a newly restored stream connection.
+    if (this.directTrial && route === 'stream') { this.revision++; this.clearDirectTrial(); this.negotiating = false; }
+    this.pendingRoute = route; this.reportRoute();
+    try {
+      await this.signal.send({ type: 'stream-choice', route, epoch: this.epoch, directFailed }, true);
+      if (this.closed || this.transfer.stopped || this.transfer.completed) return;
+      const reused = await this.tryWarm(route);
+      if (this.closed || this.transfer.stopped || this.transfer.completed) return;
+      if (!reused) await this.signal.send({ type: 'stream-choice', route, epoch: this.epoch, directFailed }, true);
+      if (!reused && route === 'direct' && this.streamFallback?.active) {
+        this.clearDirectTrial();
+        this.directTrial = { attempted: false, timer: setTimeout(() => {
+          if (this.transfer.transportConnected && !this.transfer.recovering) { this.clearDirectTrial(); return; }
+          void this.commitRouteChoice('stream', true).catch(() => this.onError('暂时无法切换路线，请稍后重试。'));
+        }, DIRECT_SWITCH_MS) };
+      }
+      this.streamFallback?.choose(route, directFailed);
+    } finally { this.pendingRoute = undefined; this.monitorRoute(); }
+  }
+  private clearWarm(candidate: WarmSwitch) {
+    if (this.warm !== candidate) return;
+    this.warm = undefined; clearTimeout(candidate.timer); candidate.ready?.(false); candidate.activated?.(false);
+  }
+  private async tryWarm(route: TransferRoute) {
+    const t = this.transfer;
+    if (!this.warmSupported || !t.hasStandby(route)) return false;
+    const candidate: WarmSwitch = { session: randomToken(), route, epoch: this.epoch, timer: setTimeout(() => this.clearWarm(candidate), DIRECT_SWITCH_MS) };
+    this.warm = candidate; this.reportRoute();
+    const ready = new Promise<boolean>(resolve => { candidate.ready = resolve; });
+    const activated = new Promise<boolean>(resolve => { candidate.activated = resolve; });
+    let complete = false;
+    try {
+      await this.signal.send({ type: 'stream-warm-prepare', session: candidate.session, route, epoch: candidate.epoch }, true);
+      const [local, remote] = await Promise.all([t.probeStandby(route), ready]);
+      if (!local || !remote || this.warm !== candidate || this.closed || t.stopped || t.completed) return false;
+      t.pauseRecovery(); this.epoch++; this.lastOffer = this.lastAnswer = undefined; this.resetCandidates();
+      await this.signal.send({ type: 'stream-warm-activate', session: candidate.session, route, epoch: candidate.epoch }, true);
+      if (!await activated || this.warm !== candidate || this.closed || t.stopped || t.completed) return false;
+      await t.replaceTransport(undefined, route);
+      this.streamFallback?.useRoute(route); complete = true; return true;
+    } catch { return false; }
+    finally {
+      this.clearWarm(candidate);
+      if (!complete && !this.closed) void this.signal.send({ type: 'stream-warm-cancel', session: candidate.session, route, epoch: candidate.epoch }, true).catch(() => {});
+    }
+  }
+  private async handleWarm(message: any) {
+    const t = this.transfer;
+    if (!this.warmSupported || !/^[a-f0-9]{64}$/.test(message.session) || !['direct', 'stream'].includes(message.route)) return;
+    if (message.type === 'stream-warm-prepare' && t.role === 'receiver') {
+      if (this.warm || message.epoch !== this.epoch) return;
+      const candidate: WarmSwitch = { session: message.session, route: message.route, epoch: message.epoch,
+        timer: setTimeout(() => this.clearWarm(candidate), DIRECT_SWITCH_MS) };
+      this.warm = candidate; this.reportRoute();
+      const ok = await t.probeStandby(candidate.route);
+      if (this.warm !== candidate || this.closed || t.stopped || t.completed) return;
+      candidate.prepared = ok;
+      await this.signal.send({ type: 'stream-warm-ready', session: candidate.session, route: candidate.route, epoch: candidate.epoch, ready: ok }, true);
+      if (!ok) { this.clearWarm(candidate); this.reportRoute(); }
+      return;
+    }
+    const candidate = this.warm;
+    if (!candidate || message.session !== candidate.session || message.route !== candidate.route || message.epoch !== candidate.epoch) return;
+    if (message.type === 'stream-warm-cancel') { this.clearWarm(candidate); this.reportRoute(); }
+    else if (message.type === 'stream-warm-ready' && t.role === 'sender') candidate.ready?.(message.ready === true);
+    else if (message.type === 'stream-warm-activated' && t.role === 'sender') candidate.activated?.(true);
+    else if (message.type === 'stream-warm-activate' && t.role === 'receiver' && candidate.prepared && this.epoch === candidate.epoch) {
+      t.pauseRecovery(); this.epoch++; this.lastOffer = this.lastAnswer = undefined; this.resetCandidates();
+      try {
+        await t.replaceTransport(undefined, candidate.route);
+        this.streamFallback?.useRoute(candidate.route);
+        await this.signal.send({ type: 'stream-warm-activated', session: candidate.session, route: candidate.route, epoch: candidate.epoch }, true);
+      } finally { this.clearWarm(candidate); this.reportRoute(); }
+    }
   }
   async connect(endpoint: string, room: string, role: string, token: string) {
     if (role === 'receiver') this.waitingTimer = setTimeout(() => {
@@ -1141,7 +1249,7 @@ export class AutoPair {
     }, 100);
   }
   private async sendDescription(type: 'offer' | 'answer', description: RTCSessionDescriptionInit) {
-    await this.signal.send({ type, epoch: this.epoch, description, ...(this.streamFallback ? { streamSupport: 1 } : {}) });
+    await this.signal.send({ type, epoch: this.epoch, description, ...(this.streamFallback ? { streamSupport: 1, warmSupport: 1 } : {}) });
     this.descriptionSent = true; this.scheduleCandidates();
   }
   private async applyCandidates() {
@@ -1168,10 +1276,14 @@ export class AutoPair {
         if (!this.closed && !t.stopped && !t.completed) this.onError('暂时无法切换路线，请稍后重试。');
       });
       else if (message.type === 'stream-choice' && t.role === 'receiver') {
-        clearTimeout(this.routeRequestTimer); this.pendingRoute = undefined; this.streamFallback.choose(message.route); this.reportRoute();
+        if (Number.isInteger(message.epoch) && message.epoch > this.epoch) {
+          this.epoch = message.epoch; this.lastOffer = this.lastAnswer = undefined; this.resetCandidates();
+        }
+        clearTimeout(this.routeRequestTimer); this.pendingRoute = undefined; this.streamFallback.choose(message.route, message.directFailed === true); this.reportRoute();
       }
       return;
     }
+    if (typeof message?.type === 'string' && message.type.startsWith('stream-warm-')) { await this.handleWarm(message); return; }
     if (typeof message?.type === 'string' && message.type.startsWith('stream-')) { await this.streamFallback?.handle(message); return; }
     if (message.type === 'signal-ready') {
       if (!this.offered && t.role === 'receiver') t.pairingStage(message.peerPresent ? '找到发送方，正在交换连接信息' : '等待发送方回到页面');
@@ -1200,6 +1312,7 @@ export class AutoPair {
         return;
       }
       if (this.streamFallback) { this.streamFallback.supported = message.streamSupport === 1; this.streamFallback.useNative(); }
+      this.warmSupported = message.warmSupport === 1; t.enableStandby(this.warmSupported);
       if (this.offered) { t.pauseRecovery(); this.resetCandidates(); await t.replaceTransport(); }
       clearTimeout(this.waitingTimer);
       this.offered = true; this.epoch = message.epoch;
@@ -1210,6 +1323,7 @@ export class AutoPair {
     } else if (message.type === 'answer' && t.role === 'sender') {
       if (message.epoch === this.epoch && t.pc.signalingState === 'have-local-offer') {
         if (this.streamFallback) this.streamFallback.supported = message.streamSupport === 1;
+        this.warmSupported = message.warmSupport === 1; t.enableStandby(this.warmSupported);
         await t.finish(message.description); await this.applyCandidates();
         t.pairingStage('配对信息已交换，正在寻找直连路径');
       }
@@ -1246,6 +1360,8 @@ export class AutoPair {
   private async recover() {
     const t = this.transfer;
     if (this.closed || t.stopped || t.completed || this.negotiating || this.streamFallback?.busy || Date.now() - this.lastAttempt < 10000) return;
+    if (this.warm || this.pendingRoute) return;
+    if (this.directTrial) { if (this.directTrial.attempted) return; this.directTrial.attempted = true; }
     if (this.streamFallback?.active) {
       this.lastAttempt = Date.now();
       if (t.role === 'receiver') await this.signal.send({ type: 'restart-request' }).catch(() => {});
@@ -1268,7 +1384,7 @@ export class AutoPair {
         await this.sendDescription('offer', this.lastOffer);
       }
     } catch { /* Preserve the checkpoint and retry until the recovery deadline. */ }
-    finally { this.negotiating = false; }
+    finally { if (revision === this.revision) this.negotiating = false; }
   }
-  close() { this.closed = true; this.pendingRoute = undefined; this.streamFallback?.close(); this.sourceFailureAck?.(); this.sourceFailureAck = undefined; clearInterval(this.retry); clearInterval(this.routeMonitor); clearTimeout(this.routeRequestTimer); clearTimeout(this.candidateTimer); clearTimeout(this.waitingTimer); this.signal.close(); }
+  close() { this.closed = true; this.pendingRoute = undefined; this.clearDirectTrial(); if (this.warm) this.clearWarm(this.warm); this.streamFallback?.close(); this.sourceFailureAck?.(); this.sourceFailureAck = undefined; clearInterval(this.retry); clearInterval(this.routeMonitor); clearTimeout(this.routeRequestTimer); clearTimeout(this.candidateTimer); clearTimeout(this.waitingTimer); this.signal.close(); }
 }

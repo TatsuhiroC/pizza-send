@@ -169,6 +169,8 @@ const messages: Record<string, string> = {
   '配对信息无效': 'Invalid pairing information',
   '文件快传': 'File transfer',
   '网络切换，正在恢复连接': 'Network changed. Reconnecting',
+  '直连暂时不可用，已恢复加密转发。': 'Direct connection unavailable. Encrypted relay restored.',
+  '备用连接已失效': 'The standby connection is no longer available.',
   '已接收的进度会保留，请保持双方页面打开。正在寻找可用的连接路径。': 'Received data is preserved. Keep both pages open while a new connection is found.',
   '等待网络恢复': 'Waiting for the network',
   '连接已恢复，继续传输': 'Reconnected. Resuming transfer',

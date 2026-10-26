@@ -3,7 +3,7 @@ import type { StreamChannel } from './stream-channel';
 
 type Progress = { bytes: number; total: number; active: boolean; hidden: boolean; connected: boolean };
 export type TransferRoute = 'direct' | 'stream';
-export type RouteState = { available: boolean; current: TransferRoute; target: TransferRoute; busy: boolean; manual: boolean; failed: boolean; recovering?: boolean };
+export type RouteState = { available: boolean; current: TransferRoute; target: TransferRoute; busy: boolean; manual: boolean; failed: boolean; recovering?: boolean; directFailed?: boolean };
 type Hooks = {
   epoch(): number; progress(): Progress; stopped(): boolean;
   open(session: string, current: () => boolean): Promise<StreamChannel>;
@@ -43,10 +43,12 @@ export class StreamFallback {
   private manualAttempted = false;
   private target: TransferRoute = 'stream';
   private failed = false;
+  private directFailed = false;
   constructor(private role: 'sender' | 'receiver', private hooks: Hooks) {}
   get state(): RouteState { return { available: this.supported && this.used.size > 0, current: this.active ? 'stream' : 'direct', target: this.target,
-    busy: this.busy, manual: !!this.preference, failed: this.failed }; }
-  choose(route: TransferRoute) {
+    busy: this.busy, manual: !!this.preference, failed: this.failed, directFailed: this.directFailed }; }
+  choose(route: TransferRoute, directFailed = false) {
+    this.directFailed = directFailed;
     this.preference = route; this.manualAttempted = false; this.trial = undefined; this.failed = false; this.target = route;
     if (this.role === 'sender' && route === 'direct' && this.candidate && !this.candidate.committing) this.abort(this.candidate, false);
     this.hooks.changed?.();
@@ -200,5 +202,6 @@ export class StreamFallback {
   }
   private restore() { this.active = false; this.target = 'direct'; this.trial = undefined; this.hooks.restore(); this.hooks.changed?.(); }
   useNative() { this.active = false; this.target = 'direct'; this.trial = undefined; if (this.candidate) this.abort(this.candidate); this.hooks.changed?.(); }
+  useRoute(route: TransferRoute) { this.active = route === 'stream'; this.target = route; this.trial = undefined; this.hooks.changed?.(); }
   close() { this.closed = true; if (this.candidate) this.abort(this.candidate); }
 }
