@@ -42,6 +42,9 @@ test('route choices remain visible, keep focus and translate without overflowing
   await page.evaluate(() => (window as any).__showRoute({ current: 'direct', failed: true }));
   await expect(controls).toBeVisible(); await expect(stream).toBeEnabled();
   await expect(controls.locator('.route-message')).toContainText('unavailable');
+  await page.evaluate(() => (window as any).__showRoute({ current: 'direct', failed: true, connected: false }));
+  await expect(controls.locator('.route-message')).toContainText('Not connected yet');
+  await expect(stream).toBeEnabled();
 });
 
 test('route choices are hidden until needed and after the transfer ends', async ({ page }) => {

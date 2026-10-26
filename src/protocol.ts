@@ -1125,7 +1125,13 @@ export class AutoPair {
     state.recovering = t.recovering;
     if (this.pendingRoute) state.target = this.pendingRoute;
     const snapshot = JSON.stringify(state);
-    if (snapshot !== this.routeSnapshot) { this.routeSnapshot = snapshot; t.reportRoute(state); }
+    if (snapshot !== this.routeSnapshot) {
+      this.routeSnapshot = snapshot; t.reportRoute(state);
+      if (!state.connected && state.target === 'stream') {
+        if (state.busy) t.pairingStage('直连暂未建立，正在连接加密转发');
+        else if (state.failed) t.pairingStage('暂未连通，正在继续寻找连接路径');
+      }
+    }
   }
   async chooseRoute(route: TransferRoute) {
     const fallback = this.streamFallback;
@@ -1249,7 +1255,7 @@ export class AutoPair {
     }, 100);
   }
   private async sendDescription(type: 'offer' | 'answer', description: RTCSessionDescriptionInit) {
-    await this.signal.send({ type, epoch: this.epoch, description, ...(this.streamFallback ? { streamSupport: 1, warmSupport: 1 } : {}) });
+    await this.signal.send({ type, epoch: this.epoch, description, ...(this.streamFallback ? { streamSupport: 1, warmSupport: 1, quickRelaySupport: 1 } : {}) });
     this.descriptionSent = true; this.scheduleCandidates();
   }
   private async applyCandidates() {
@@ -1312,6 +1318,7 @@ export class AutoPair {
         return;
       }
       if (this.streamFallback) { this.streamFallback.supported = message.streamSupport === 1; this.streamFallback.useNative(); }
+      if (this.streamFallback) this.streamFallback.quickSupported = message.quickRelaySupport === 1;
       this.warmSupported = message.warmSupport === 1; t.enableStandby(this.warmSupported);
       if (this.offered) { t.pauseRecovery(); this.resetCandidates(); await t.replaceTransport(); }
       clearTimeout(this.waitingTimer);
@@ -1323,8 +1330,10 @@ export class AutoPair {
     } else if (message.type === 'answer' && t.role === 'sender') {
       if (message.epoch === this.epoch && t.pc.signalingState === 'have-local-offer') {
         if (this.streamFallback) this.streamFallback.supported = message.streamSupport === 1;
+        if (this.streamFallback) this.streamFallback.quickSupported = message.quickRelaySupport === 1;
         this.warmSupported = message.warmSupport === 1; t.enableStandby(this.warmSupported);
         await t.finish(message.description); await this.applyCandidates();
+        this.streamFallback?.negotiated();
         t.pairingStage('配对信息已交换，正在寻找直连路径');
       }
     } else if (message.type === 'candidates') {

@@ -58,9 +58,9 @@ test('a cancelled relay ticket request cannot create a late socket', async ({ pa
   } finally { release(); await page.evaluate(() => (window as any).__routeSignal?.close()); }
 });
 
-for (const scenario of ['slow', 'initial', 'manual', 'failed-direct', 'cancel-direct']) test(scenario === 'initial' ? 'initial direct ICE failure opens encrypted WSS without a TURN stage' : scenario === 'manual' ? 'either peer reuses both warm routes without new relay tickets or resetting progress' : scenario === 'failed-direct' ? 'unreachable direct selection restores the warm encrypted relay after eight seconds' : scenario === 'cancel-direct' ? 'either peer can cancel a stalled direct attempt and immediately reuse encrypted relay' : 'a slow long transfer probes encrypted WSS without a TURN stage and resumes the original file', async ({ page, context, browserName }) => {
+for (const scenario of ['slow', 'initial', 'initial-retry', 'manual', 'failed-direct', 'cancel-direct']) test(scenario === 'initial-retry' ? 'initial relay failure automatically retries without blocking signaling or requiring a button' : scenario === 'initial' ? 'initial direct ICE failure opens encrypted WSS without a TURN stage' : scenario === 'manual' ? 'either peer reuses both warm routes without new relay tickets or resetting progress' : scenario === 'failed-direct' ? 'unreachable direct selection restores the warm encrypted relay after eight seconds' : scenario === 'cancel-direct' ? 'either peer can cancel a stalled direct attempt and immediately reuse encrypted relay' : 'a slow long transfer probes encrypted WSS without a TURN stage and resumes the original file', async ({ page, context, browserName }) => {
   const failedDirect = scenario === 'failed-direct' || scenario === 'cancel-direct';
-  const blocked = scenario === 'initial' || failedDirect, manual = scenario === 'manual';
+  const blocked = scenario === 'initial' || scenario === 'initial-retry' || failedDirect, manual = scenario === 'manual';
   test.skip(browserName === 'webkit', 'The initial native DataChannel comparison uses Chromium.');
   let streamTickets = 0, relayTickets = 0, ciphertextFrames = 0;
   const streams = new Map<string, WebSocketRoute>(), errors: string[] = [];
@@ -68,7 +68,9 @@ for (const scenario of ['slow', 'initial', 'manual', 'failed-direct', 'cancel-di
     const request = route.request(), body = request.method() === 'POST' ? request.postDataJSON() : undefined;
     if (body?.type === 'turn') { relayTickets++; await route.fulfill({ status: 503, json: { error: 'Unavailable in fixture' } }); }
     else if (body?.type === 'stream-connect') {
-      streamTickets++; expect(request.headers().authorization).toMatch(/^Bearer [a-f0-9]{64}$/);
+      streamTickets++;
+      if (scenario === 'initial-retry' && streamTickets === 1) { await route.fulfill({ status: 503, json: { error: 'Transient fixture failure' } }); return; }
+      expect(request.headers().authorization).toMatch(/^Bearer [a-f0-9]{64}$/);
       await route.fulfill({ json: { ticket: 'e'.repeat(64) } });
     } else await route.fallback();
   });
@@ -146,7 +148,9 @@ for (const scenario of ['slow', 'initial', 'manual', 'failed-direct', 'cancel-di
   }, { manual });
   await page.goto('./'); await instrument(page); await page.locator('#file-input').setInputFiles({ name: 'generated-original-video.mp4', mimeType: 'video/mp4', buffer });
   await page.locator('#start-send').click(); await expect(page.locator('#share-box')).toBeVisible();
-  await receiver.goto(await page.locator('#share-link').inputValue()); await expect(receiver.locator('#accept-files')).toBeVisible({ timeout: 60000 });
+  await receiver.goto(await page.locator('#share-link').inputValue());
+  if (blocked) await expect.poll(() => streamTickets, { timeout: 9000 }).toBeGreaterThan(0);
+  await expect(receiver.locator('#accept-files')).toBeVisible({ timeout: 25000 });
   await instrument(receiver); if (!blocked) expect(streamTickets).toBe(0); await receiver.locator('#accept-files').click();
   try {
     if (manual) {
@@ -186,7 +190,7 @@ for (const scenario of ['slow', 'initial', 'manual', 'failed-direct', 'cancel-di
     expect(createHash('sha256').update(await readFile((await download.path())!)).digest('hex')).toBe(createHash('sha256').update(buffer).digest('hex'));
     if (manual || failedDirect) expect(await receiver.evaluate(() => (window as any).__streamTrace.filter((entry: any) => entry.type === 'file-start' && entry.offset > 0).length)).toBeGreaterThanOrEqual(manual ? 2 : 1);
     if (manual) for (const route of ['direct', 'stream']) expect(await receiver.evaluate(route => (window as any).__streamTrace.some((entry: any) => entry.action === 'replaceTransportNow' && entry.reuse === route), route)).toBe(true);
-    expect(streamTickets).toBe(2); expect(relayTickets).toBe(0); expect(ciphertextFrames).toBeGreaterThan(8); expect(errors).toEqual([]);
+    expect(streamTickets).toBe(scenario === 'initial-retry' ? 4 : 2); expect(relayTickets).toBe(0); expect(ciphertextFrames).toBeGreaterThan(8); expect(errors).toEqual([]);
   } catch (error) {
     console.log('SAFE_STREAM_FIXTURE', JSON.stringify({ streamTickets, relayTickets, ciphertextFrames, errors,
       sender: await page.evaluate(() => (window as any).__streamTrace), receiver: await receiver.evaluate(() => (window as any).__streamTrace) }));
