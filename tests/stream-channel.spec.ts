@@ -30,9 +30,8 @@ test('stream credits prove receipt of the server marker after ordered decryption
 
 // This bridge models the server's opaque forwarding only. Backend admission,
 // ticket binding, expiry and bounded credits have separate security tests.
-for (const scenario of ['complete', 'resume', 'initial', 'batch-complete', 'batch-resume', 'batch-initial', 'batch-compression']) test(`encrypted WebSocket file protocol: ${scenario}`, async ({ page, context }) => {
-  const batch = scenario.startsWith('batch-'), mode = scenario.replace('batch-', '');
-  const resume = mode === 'resume', compression = mode === 'compression';
+for (const scenario of ['complete', 'resume', 'initial']) test(`encrypted WebSocket carries the complete file protocol${scenario === 'resume' ? ' across a mid-file reconnect' : scenario === 'initial' ? ' after initial connection failure' : ''}`, async ({ page, context }) => {
+  const resume = scenario === 'resume';
   const sockets = new Map<string, WebSocketRoute>(), errors: string[] = [];
   let frames = 0, exposed = false;
   await context.routeWebSocket('ws://127.0.0.1:8787/stream-fixture/**', socket => {
@@ -50,13 +49,12 @@ for (const scenario of ['complete', 'resume', 'initial', 'batch-complete', 'batc
   for (const [role, current] of [['sender', page], ['receiver', receiver]] as const) {
     current.on('pageerror', error => errors.push(error.message));
     await current.goto('./');
-    await current.evaluate(async ({ role, resume, compression }) => {
+    await current.evaluate(async ({ role, resume }) => {
       const { Transfer } = await import('/src/protocol.ts');
       const state = window as any; state.__events = []; state.__recoveries = 0; state.__slowRead = resume;
-      const handle = (Transfer.prototype as any).handle; state.__records = []; state.__compressionFixture = compression;
+      const handle = (Transfer.prototype as any).handle; state.__records = [];
       (Transfer.prototype as any).handle = function(data: any, generation: number) {
-        if (typeof data === 'string') { const message = JSON.parse(data); state.__records.push({ type: message.type, generation, offset: message.offset, bytes: message.bytes });
-          if (state.__compressionFixture && message.type === 'ack' && message.bytes >= 1048576) this.compressionWireSpeed = 1e12; }
+        if (typeof data === 'string') { const message = JSON.parse(data); state.__records.push({ type: message.type, generation, offset: message.offset, bytes: message.bytes }); }
         return handle.call(this, data, generation);
       };
       Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true });
@@ -70,26 +68,22 @@ for (const scenario of ['complete', 'resume', 'initial', 'batch-complete', 'batc
           Blob.prototype.arrayBuffer = async function() { if (state.__slowRead && this.size <= 32768) await new Promise(resolve => setTimeout(resolve, 10)); return read.call(this); };
         }
       }
-    }, { role, resume, compression });
+    }, { role, resume });
   }
   const replace = async (session: string) => {
-    for (const [role, current] of [['sender', page], ['receiver', receiver]] as const) await current.evaluate(async ({ role, session, batch }) => {
+    for (const [role, current] of [['sender', page], ['receiver', receiver]] as const) await current.evaluate(async ({ role, session }) => {
       const { StreamCipher } = await import('/src/stream-cipher.ts');
       const { StreamChannel } = await import('/src/stream-channel.ts');
-      (window as any).__candidate = new StreamChannel('ws://127.0.0.1:8787/stream-fixture/channel?' + new URLSearchParams({ role, session }), await StreamCipher.create('a'.repeat(64), 'b'.repeat(64), session, role), batch);
-    }, { role, session, batch });
+      (window as any).__candidate = new StreamChannel('ws://127.0.0.1:8787/stream-fixture/channel?' + new URLSearchParams({ role, session }), await StreamCipher.create('a'.repeat(64), 'b'.repeat(64), session, role));
+    }, { role, session });
     for (const current of [receiver, page]) await current.evaluate(async () => {
       const state = window as any; await state.__candidate.ready; await state.__streamTransfer.replaceTransport(state.__candidate);
     });
   };
   try {
-    if (mode === 'initial') for (const current of [page, receiver]) await current.evaluate(() => (window as any).__streamTransfer.pauseRecovery());
+    if (scenario === 'initial') for (const current of [page, receiver]) await current.evaluate(() => (window as any).__streamTransfer.pauseRecovery());
     await replace('c'.repeat(64));
     await expect.poll(() => receiver.evaluate(() => (window as any).__streamTransfer.manifest.length)).toBe(3);
-    if (compression) await page.evaluate(() => {
-      const transfer = (window as any).__streamTransfer;
-      transfer.compressionFile = 0; transfer.compressionWireSpeed = 1024; transfer.compressionDecodeBps = 100 * 1048576;
-    });
     await receiver.evaluate(() => (window as any).__streamTransfer.accept());
     if (resume) {
       await expect.poll(() => receiver.evaluate(() => (window as any).__streamTransfer.routeProgress().bytes)).toBeGreaterThanOrEqual(262144);
@@ -113,8 +107,7 @@ for (const scenario of ['complete', 'resume', 'initial', 'batch-complete', 'batc
     const original = Buffer.alloc(8 * 1048576 + 17); for (let i = 0; i < original.length; i++) original[i] = i % 251;
     const expected = [['private-original-video.mp4', original], ['第二个文件.txt', Buffer.from('second')], ['empty.txt', Buffer.alloc(0)]] as const;
     expect(received.sort((a, b) => a.name.localeCompare(b.name))).toEqual(expected.map(([name, bytes]) => ({ name, size: bytes.length, hash: createHash('sha256').update(bytes).digest('hex') })).sort((a, b) => a.name.localeCompare(b.name)));
-    expect(frames).toBeGreaterThan(batch ? 0 : 256);
-    if (compression) expect(await receiver.evaluate(() => (window as any).__records.some((message: any) => message.type === 'compressed-block'))).toBe(true); expect(exposed).toBe(false); expect(errors).toEqual([]);
+    expect(frames).toBeGreaterThan(256); expect(exposed).toBe(false); expect(errors).toEqual([]);
     if (resume) expect(await receiver.evaluate(() => (window as any).__events.some((event: any) => event.type === 'resumed'))).toBe(true);
   } catch (error) {
     const snapshots = [];

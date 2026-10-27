@@ -1,5 +1,4 @@
 import { StreamCipher, MAX_STREAM_FRAME } from './stream-cipher';
-import { encodeStreamBatch, decodeStreamBatch, STREAM_BATCH_BYTES, STREAM_BATCH_RECORDS, STREAM_RECORD_BYTES, STREAM_BATCH_DELAY_MS } from './stream-batch';
 
 // The file protocol needs an ordered, reliable byte channel. It does not need
 // to imitate RTCPeerConnection or change its acknowledgements / save logic.
@@ -40,11 +39,8 @@ export class StreamChannel implements DataChannel {
   private controls = 0;
   private timeout: ReturnType<typeof setTimeout>;
   private drain?: ReturnType<typeof setTimeout>;
-  private batchTimer?: ReturnType<typeof setTimeout>;
-  private pending: ArrayBuffer[] = [];
-  private pendingBytes = 0;
-  get bufferedAmount() { return this.outgoing + this.socket.bufferedAmount + (this.pending.length ? this.pendingBytes + 32 + this.pending.length * 4 : 0); }
-  constructor(url: string, private cipher: StreamCipher, readonly batching = false) {
+  get bufferedAmount() { return this.outgoing + this.socket.bufferedAmount; }
+  constructor(url: string, private cipher: StreamCipher) {
     this.ready = new Promise<void>((resolve, reject) => { this.resolve = resolve; this.reject = reject; });
     void this.ready.catch(() => {});
     this.socket = new WebSocket(url); this.socket.binaryType = 'arraybuffer';
@@ -81,52 +77,22 @@ export class StreamChannel implements DataChannel {
         if (this.readyState !== 'open') return;
         const data = await cipher.decrypt(frame);
         if (this.readyState !== 'open') return;
-        const records = this.batching && data instanceof ArrayBuffer ? decodeStreamBatch(data) : [data];
-        for (const record of records) {
-          if (this.readyState !== 'open') return;
-          this.onmessage?.(new MessageEvent('message', { data: record }));
-        }
+        this.onmessage?.(new MessageEvent('message', { data }));
         this.receivedWire += frame.byteLength;
       }).catch(() => this.fail()).finally(() => { this.incoming -= frame.byteLength; this.records--; });
     };
   }
   send(value: string | ArrayBuffer) {
-    if (this.batching && value instanceof ArrayBuffer) {
-      const newBatch = !this.pending.length || this.pendingBytes + value.byteLength > STREAM_BATCH_BYTES;
-      const additional = value.byteLength + 4 + (newBatch ? 32 : 0);
-      if (this.readyState !== 'open' || value.byteLength > STREAM_RECORD_BYTES || this.bufferedAmount + additional > 2 * 1048576) throw Error('Stream backpressure');
-      if (this.pendingBytes + value.byteLength > STREAM_BATCH_BYTES) this.flushBatch();
-      this.pending.push(value.slice(0)); this.pendingBytes += value.byteLength;
-      if (this.pendingBytes >= STREAM_BATCH_BYTES || this.pending.length >= STREAM_BATCH_RECORDS) this.flushBatch();
-      else if (this.batchTimer === undefined) this.batchTimer = setTimeout(() => {
-        this.batchTimer = undefined;
-        try { this.flushBatch(); } catch { this.fail(); }
-      }, STREAM_BATCH_DELAY_MS);
-      this.watchDrain(); return;
-    }
     const size = (typeof value === 'string' ? new TextEncoder().encode(value).byteLength : value.byteLength) + 24;
     if (this.readyState !== 'open' || size > MAX_STREAM_FRAME || this.bufferedAmount + size > 2 * 1048576) throw Error('Stream backpressure');
-    // Controls, file boundaries and standby pings never wait for a batch timer.
-    this.flushBatch();
     const copy = typeof value === 'string' ? value : value.slice(0);
-    this.enqueue(copy);
-    this.watchDrain();
-  }
-  private flushBatch() {
-    clearTimeout(this.batchTimer); this.batchTimer = undefined;
-    if (!this.pending.length || this.readyState !== 'open') return;
-    const frame = encodeStreamBatch(this.pending);
-    this.pending = []; this.pendingBytes = 0;
-    this.enqueue(frame);
-  }
-  private enqueue(copy: string | ArrayBuffer) {
-    const size = (typeof copy === 'string' ? new TextEncoder().encode(copy).byteLength : copy.byteLength) + 24;
     this.outgoing += size;
     this.sendQueue = this.sendQueue.then(async () => {
       if (this.readyState !== 'open') return;
       const frame = await this.cipher.encrypt(copy);
       if (this.readyState === 'open') this.socket.send(frame);
     }).catch(() => this.fail()).finally(() => { this.outgoing -= size; });
+    this.watchDrain();
   }
   private watchDrain() {
     if (this.drain || this.readyState !== 'open') return;
@@ -143,8 +109,7 @@ export class StreamChannel implements DataChannel {
   }
   close() {
     if (this.readyState === 'closed') return;
-    this.readyState = 'closed'; clearTimeout(this.timeout); clearTimeout(this.drain); clearTimeout(this.batchTimer);
-    this.pending = []; this.pendingBytes = 0;
+    this.readyState = 'closed'; clearTimeout(this.timeout); clearTimeout(this.drain);
     this.reject(Error('加密转发暂时不可用'));
     this.socket.onmessage = this.socket.onerror = this.socket.onclose = null;
     this.socket.close(); this.onclose?.(new Event('close'));

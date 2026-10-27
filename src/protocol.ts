@@ -1016,12 +1016,12 @@ export class Signaling {
     }
     throw Error('配对服务已断开');
   }
-  async stream(secret: string, session: string, current = () => true, batching = false) {
+  async stream(secret: string, session: string, current = () => true) {
     if (this.closed || !this.endpoint || !current()) throw Error('加密转发暂时不可用');
     const room = new URL(this.endpoint).pathname.split('/').at(-1)!;
     const [url, cipher] = await Promise.all([ticketURL(this.endpoint, session), StreamCipher.create(secret, room, session, this.role as 'sender' | 'receiver')]);
     if (this.closed || !current()) throw Error('加密转发暂时不可用');
-    return new StreamChannel(url, cipher, batching);
+    return new StreamChannel(url, cipher);
   }
   async send(message: unknown, connectedOnly = false) {
     const task = this.sendQueue.then(async () => {
@@ -1077,13 +1077,12 @@ export class AutoPair {
   private warm?: WarmSwitch;
   private directTrial?: { timer: ReturnType<typeof setTimeout>; attempted: boolean };
   private warmSupported = false;
-  private batchSupported = false;
   constructor(private transfer: Transfer, key: CryptoKey, private onError: (message: string) => void, secret?: string) {
     this.signal = new Signaling(key, (message, authenticated) => this.handle(message, authenticated), onError);
     if (secret) this.streamFallback = new StreamFallback(transfer.role, {
       epoch: () => this.epoch, stopped: () => this.closed || transfer.stopped || transfer.completed,
       progress: () => ({ ...transfer.routeProgress(), connected: transfer.transportConnected && !transfer.recovering }),
-      open: (session, current) => this.signal.stream(secret, session, current, this.batchSupported), send: message => this.signal.send(message),
+      open: (session, current) => this.signal.stream(secret, session, current), send: message => this.signal.send(message),
       activate: async (channel, epoch) => {
         if (this.closed || transfer.stopped || transfer.completed || epoch !== this.epoch + 1) throw Error('Stale stream activation');
         this.negotiating = true;
@@ -1258,7 +1257,7 @@ export class AutoPair {
     }, 100);
   }
   private async sendDescription(type: 'offer' | 'answer', description: RTCSessionDescriptionInit) {
-    await this.signal.send({ type, epoch: this.epoch, description, ...(type === 'answer' ? { peerInfo: localPeerInfo() } : {}), ...(this.streamFallback ? { streamSupport: 1, warmSupport: 1, quickRelaySupport: 1, streamBatchSupport: 1 } : {}) });
+    await this.signal.send({ type, epoch: this.epoch, description, ...(type === 'answer' ? { peerInfo: localPeerInfo() } : {}), ...(this.streamFallback ? { streamSupport: 1, warmSupport: 1, quickRelaySupport: 1 } : {}) });
     this.descriptionSent = true; this.scheduleCandidates();
   }
   private async applyCandidates() {
@@ -1322,7 +1321,6 @@ export class AutoPair {
       }
       if (this.streamFallback) { this.streamFallback.supported = message.streamSupport === 1; this.streamFallback.useNative(); }
       if (this.streamFallback) this.streamFallback.quickSupported = message.quickRelaySupport === 1;
-      this.batchSupported = message.streamSupport === 1 && message.streamBatchSupport === 1;
       this.warmSupported = message.warmSupport === 1; t.enableStandby(this.warmSupported);
       if (this.offered) { t.pauseRecovery(); this.resetCandidates(); await t.replaceTransport(); }
       clearTimeout(this.waitingTimer);
@@ -1336,7 +1334,6 @@ export class AutoPair {
         const peerInfo = readPeerInfo(message.peerInfo);
         if (this.streamFallback) this.streamFallback.supported = message.streamSupport === 1;
         if (this.streamFallback) this.streamFallback.quickSupported = message.quickRelaySupport === 1;
-        this.batchSupported = message.streamSupport === 1 && message.streamBatchSupport === 1;
         this.warmSupported = message.warmSupport === 1; t.enableStandby(this.warmSupported);
         await t.finish(message.description); await this.applyCandidates();
         if (peerInfo) t.reportPeerInfo(peerInfo);
@@ -1351,7 +1348,6 @@ export class AutoPair {
       }
       this.remoteCandidates.push(...message.candidates); await this.applyCandidates();
     } else if (message.type === 'receiver-left' && t.role === 'sender') {
-      this.batchSupported = false;
       this.revision++; this.signal.expectNewPeer();
       if (t.hasAccepted) { t.fail('接收方已结束传输，请创建新链接。'); return; }
       this.negotiating = true;
