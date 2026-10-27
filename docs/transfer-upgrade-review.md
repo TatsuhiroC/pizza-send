@@ -66,4 +66,4 @@
 
 本轮未新增真实手机/VPN 开关的速度实测，未完成 10/20 GiB 压缩网络传输测试。之前的实机成功记录不能替代本轮对照。
 
-审查完成时尚未更新公开网站。[结构化验证记录](../benchmarks/results/2026-10-17-transfer-upgrade-review.json)包含源码摘要、线上基线证据、逐次耗时和检查状态。完整本机输出在项目旁 `pizza-send-throughput-verification/review-integration-2026-10-17/`。
+审查完成时尚未更新公开网站。[结构化验证记录](archive/benchmarks/2026-10-17-transfer-upgrade-review.json)包含源码摘要、线上基线证据、逐次耗时和检查状态。完整本机输出在项目旁 `pizza-send-throughput-verification/review-integration-2026-10-17/`。

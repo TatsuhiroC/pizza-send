@@ -7,16 +7,17 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
+    "check:public": "node scripts/check-public.mjs",
     "test": "playwright test",
-    "test:webkit": "playwright test --config playwright.webkit.config.ts",
-    "bench:transfer": "playwright test --config playwright.benchmark.config.ts",
-    "bench:latency": "playwright test --config playwright.latency.config.ts",
+    "test:webkit": "playwright test --config tests/config/webkit.config.ts",
+    "bench:transfer": "playwright test --config tests/config/benchmark.config.ts",
+    "bench:latency": "playwright test --config tests/config/latency.config.ts",
     "signal:dev": "wrangler dev --config signal/wrangler.jsonc --port 8787",
     "signal:deploy": "wrangler deploy --config signal/wrangler.jsonc",
     "signal:check": "wrangler deploy --dry-run --config signal/wrangler.jsonc",
-    "test:headers": "playwright test --config playwright.headers.config.ts",
+    "test:headers": "playwright test --config tests/config/headers.config.ts",
     "build:site": "node scripts/build-site.mjs",
-    "test:site": "playwright test --config playwright.site.config.ts"
+    "test:site": "playwright test --config tests/config/site.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.0",

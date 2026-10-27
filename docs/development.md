@@ -31,6 +31,7 @@ npm run signal:dev
 完整检查还需要 Python 3，用标准库独立核对文件夹 ZIP 的内容与校验值；应用运行和构建不依赖 Python。
 
 ```sh
+npm run check:public
 npm run build
 npx playwright install --with-deps chromium webkit
 npm run signal:check
@@ -42,6 +43,9 @@ npm test
 先完成本地检查，再推送用于正式发布的分支。前端和配对服务分别部署；仅更新前端不会自动更新 Worker。GitHub Actions 的检查与 Cloudflare Pages 的构建彼此独立。
 
 GitHub Actions 使用与锁定 Playwright 版本一致的官方预装浏览器镜像，避免冷启动时重复安装系统依赖；仍运行上述完整检查。升级 Playwright 时，应同步更新工作流中的镜像版本与摘要。该镜像仅用于 CI，不进入网站产物。
+
+
+专用 Playwright 配置集中在 `tests/config/`，根目录只保留默认入口；既有 npm 测试命令不变。历史原始结果位于 `docs/archive/`，不会进入网站构建。
 
 ## 连接排查
 

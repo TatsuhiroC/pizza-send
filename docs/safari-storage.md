@@ -29,7 +29,7 @@ Mac Safari 首次测试窗口出现内容不可见且无法操作的异常，该
 
 新增回归覆盖重复文件名、空文件、Unicode、刷新与离开后返回、确认/取消清理、下载副本保留、跨页面活动文件保护、遗留部分文件清理、空间不足后重试、接收中写盘失败，以及后续文件校验失败时保留前面的完整文件。文件名、取消、消息队列和旧链接安全检查仍通过。
 
-正式容量记录见 [WebKit 原始结果](../experiments/safari-storage/results/production-webkit.json)，实机集成记录见 [Mac Safari 原始结果](../experiments/safari-storage/results/production-safari-mac.json)。先前独立原型见 [验证页说明](../experiments/safari-storage/README.md)。容量和同机时间不能代表真实网络速度、iPhone 内存占用或 VPN 切换效果。
+正式容量记录见 [WebKit 原始结果](archive/safari-storage/production-webkit.json)，实机集成记录见 [Mac Safari 原始结果](archive/safari-storage/production-safari-mac.json)。先前独立原型见 [验证页说明](../experiments/safari-storage/README.md)。容量和同机时间不能代表真实网络速度、iPhone 内存占用或 VPN 切换效果。
 
 ## 长时间传输的配对保活
 

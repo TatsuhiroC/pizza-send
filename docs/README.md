@@ -13,7 +13,7 @@
 
 ## 实现与验证 · Design & validation
 
-- [安全加固](security-hardening.md) · [网页安全头](web-security-headers.md)
+- [安全边界与漏洞报告](../SECURITY.md) · [安全加固](security-hardening.md) · [网页安全头](web-security-headers.md)
 - [加密流式兜底与手动路线选择](stream-relay.md)
 - [传输优化与慢网压缩审查](transfer-upgrade-review.md)
 - [压缩触发条件与估算公式](transfer-compression.md)
@@ -23,6 +23,7 @@
 
 ## 维护记录 · Maintenance
 
+- [仓库整理与公开信息审查：2026-10-27](repository-review-2026-10-27.md)
 - [全代码审查与旧连接回调修复：2026-10-26](review-2026-10-26.md)
 - [24 日功能逐项恢复与新路线兼容：2026-10-26](restoration-2026-10-26.md)
 - [回退后的独立功能恢复范围：2026-10-25](independent-restoration-2026-10-25.md)
@@ -39,3 +40,4 @@
 - [代码审查：2026-10-14](review-2026-10-14.md) · [2026-10-13](review-2026-10-13.md) · [早期审查](review.md)
 - [首版验证](validation.md)
 - 性能实验：[初期测量](transfer-performance.md) · [自动窗口](transfer-adaptive-control.md) · [延迟调查](transfer-latency-investigation.md)
+- [历史测量归档](archive/README.md) · [测试配置说明](../tests/config/README.md)

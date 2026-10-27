@@ -26,7 +26,7 @@
 
 **不能据此承诺所有网络提速。** 读取延迟和确认延迟均由隔离浏览器注入，150 ms 应用确认延迟不是实际 WAN 的完整延迟、丢包与带宽模型。高吞吐延迟确认场景存在约 0.303 秒、21.3% 的回退，已保留原始结果。真实 iPhone、Wi-Fi、VPN 和跨地区效果仍需实机对照。大文件功能验证通过也不等于所有大文件都有表中的提速倍数。
 
-原始数据：[旧版](../benchmarks/results/2026-10-16-before.json)、[本次](../benchmarks/results/2026-10-16-after.json)。
+原始数据：[旧版](archive/benchmarks/2026-10-16-before.json)、[本次](archive/benchmarks/2026-10-16-after.json)。
 
 ## 复现与正确性验证
 

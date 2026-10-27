@@ -115,4 +115,4 @@ npm run test:webkit
 npm run test:headers
 ```
 
-[结构化测量与源码摘要](../benchmarks/results/2026-10-17-slow-link-compression.json)保留最终测量值、测试阶段与源文件 SHA-256。完整本机测试输出另存于项目旁的 `pizza-send-throughput-verification/compression-2026-10-17/`，不随网页发布。
+[结构化测量与源码摘要](archive/benchmarks/2026-10-17-slow-link-compression.json)保留最终测量值、测试阶段与源文件 SHA-256。完整本机测试输出另存于项目旁的 `pizza-send-throughput-verification/compression-2026-10-17/`，不随网页发布。

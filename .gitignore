@@ -1,8 +1,12 @@
 node_modules/
 dist/
 .wrangler/
-.dev.vars
+.dev.vars*
 .env*
+*.pem
+*.key
+*.p12
+*.pfx
 test-results/
 playwright-report/
 .DS_Store

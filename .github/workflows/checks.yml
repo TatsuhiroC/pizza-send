@@ -24,16 +24,17 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+      # The container user differs from the checkout owner. Trust only this
+      # ephemeral workspace before any script reads Git's tracked file list.
+      - name: Trust the checked-out CI workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: npm run check:public
       - run: npm ci
       - name: Verify preinstalled browsers
         run: node -e "for (const name of ['chromium', 'webkit']) require('node:fs').accessSync(require('@playwright/test')[name].executablePath())"
       - run: npm run build
       - run: npm run signal:check
       - run: npm run test:headers
-      # The container user differs from the checkout owner. Trust only this
-      # ephemeral workspace, never all repositories or a host-wide path.
-      - name: Trust the checked-out CI workspace
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - run: npm run build:site
       - run: npm run test:site
       - run: npm run test:webkit

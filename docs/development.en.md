@@ -31,6 +31,7 @@ On first visit, the browser's language priority list selects Chinese or English,
 The full test suite also requires Python 3 to verify folder ZIP contents and checksums with an independent standard-library reader. The application and build do not require Python.
 
 ```sh
+npm run check:public
 npm run build
 npx playwright install --with-deps chromium webkit
 npm run signal:check
@@ -42,6 +43,9 @@ npm test
 Verify locally before pushing a production branch. The frontend and signaling service are deployed separately; a frontend update does not deploy the Worker. GitHub Actions checks and Cloudflare Pages builds run independently.
 
 GitHub Actions uses the official preinstalled browser image matching the locked Playwright version, while keeping all checks. Update the workflow's image version and digest when upgrading Playwright. This image is used only for CI and is not shipped with the website.
+
+
+Specialized Playwright configurations live in `tests/config/`; the root keeps only the default entry. Existing npm test commands are unchanged. Historical raw measurements live in `docs/archive/` and are not part of the website build.
 
 ## Connection troubleshooting
 
