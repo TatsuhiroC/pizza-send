@@ -20,6 +20,7 @@ import { checkSources, droppedSources } from './source-files';
 import { setSignalPreconnect } from './signal-preconnect';
 import { cleanupSourceArchives, packageSources, releaseSourceArchive, stopSourceArchives } from './folder-archive';
 import { remainingTime } from './remaining-time';
+import { fetchWithTimeout } from './request-timeout';
 import { deviceLabel, browserLabel } from './peer-info';
 import type { CompressionStatus } from './compression';
 import { connectionDiagnosticsEnabled, mountConnectionDiagnostics } from './connection-diagnostics';
@@ -76,7 +77,8 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getEleme
 const deliveryMotion = new DeliveryMotion(document.querySelector<HTMLElement>('.hero-pizza')!, $('transfer-complete'));
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 let config: Config = { signalUrl: '', iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }], memoryLimitBytes: 268435456 };
-const transferSupported = typeof window.RTCPeerConnection === 'function' && !!crypto.subtle;
+const transferSupported = !!globalThis.crypto?.subtle && typeof WebSocket === 'function';
+const unsupportedMessage = '当前浏览器缺少安全传输能力，请在新版 Safari、Chrome 或 Edge 中通过 HTTPS 打开完整分享链接。';
 let files: File[] = [];
 let transfer: Transfer | undefined;
 let signaling: AutoPair | undefined;
@@ -101,7 +103,8 @@ let compressionState: CompressionStatus = { active: false };
 const screenAwake = new ScreenAwake(renderAwake);
 let pasting = false;
 let toastTimer: ReturnType<typeof setTimeout>;
-const originalHash = location.hash;
+let originalHash = location.hash;
+let originalShareRevision = 0;
 let sessionRevision = 0;
 let scannerSession = 0;
 let scanFeedback: AbortController | undefined;
@@ -308,6 +311,7 @@ async function openScanner() {
 }
 async function connectValue(input: string) {
   if (busy) return;
+  if (!transferSupported) { notice(unsupportedMessage); return; }
   const revision = ++sessionRevision;
   setBusy(true);
   try { await receiveInput(input, revision); }
@@ -508,8 +512,12 @@ function reset() {
   $('accept-files').hidden = true; $('save-note').hidden = true;
   setText($('cancel'), '结束传输');
   $<HTMLButtonElement>('accept-files').disabled = false;
-  $<HTMLDialogElement>('pair-dialog').close();
-  history.replaceState(null, '', location.pathname + location.search);
+  $<HTMLDialogElement>('pair-dialog').close?.();
+  clearInvitationLocation();
+}
+function clearInvitationLocation() {
+  const url = new URL(location.href); url.hash = ''; url.searchParams.delete('receive');
+  history.replaceState(null, '', url.pathname + url.search);
 }
 function events(event: TransferEvent) {
   if (event.type === 'route') {
@@ -522,9 +530,10 @@ function events(event: TransferEvent) {
     backgroundNote(event.data);
   } else if (event.type === 'connected') {
     $('notice').hidden = true;
-    $<HTMLDialogElement>('pair-dialog').close();
+    $<HTMLDialogElement>('pair-dialog').close?.();
     status(transfer?.role === 'sender' ? '已连接，等待对方确认' : '已连接，准备接收', '请保持双方页面打开。', 'connected');
   } else if (event.type === 'manifest') {
+    clearInvitationLocation();
     const manifest = event.data as FileInfo[];
     $('incoming-files').innerHTML = fileMarkup(manifest);
     $('accept-files').hidden = false; $('save-note').hidden = false;
@@ -579,7 +588,7 @@ function events(event: TransferEvent) {
     $('downloads').innerHTML = ''; $('save-panel').hidden = true; pendingSaveScroll = undefined; $('accept-files').hidden = true;
     notice(event.data); status('传输未完成', '可以结束这次传输，重新配对后再试。', 'error');
     leaveReceiverGroup(); signaling?.close(); signaling = undefined; setText($('cancel'), '重新开始');
-    $<HTMLDialogElement>('pair-dialog').close();
+    $<HTMLDialogElement>('pair-dialog').close?.();
   }
 }
 function currentTemporarySession() {
@@ -769,28 +778,30 @@ function endpoint() {
 }
 function signalFailure(message: string) {
   if (transfer?.completed || transfer?.stopped) return;
-  if (transfer?.transportConnected) toast('配对服务已断开，文件传输继续');
-  else { notice(message); status('配对服务不可用', '可以结束后使用手动配对，或检查连接设置。', 'error'); }
+  const unavailable = /^(配对服务已断开|配对服务连接超时|无法连接配对服务)/.test(message);
+  if (transfer?.transportConnected) toast(unavailable ? '配对服务已断开，文件传输继续' : message);
+  else { notice(message); status(unavailable ? '配对服务不可用' : '连接未完成', unavailable ? '可以结束后使用手动配对，或检查连接设置。' : '可以重试，或检查连接设置。', 'error'); }
 }
 async function automaticSender(t: Transfer) {
   const api = endpoint();
   const secret = randomToken(), credentials = await deriveShare(secret);
   if (transfer !== t || t.stopped) return;
   const options = { v: 2, room: credentials.room, receiverHash: await receiverDigest(credentials.receiver), multi: true, challenge: '' };
-  const create = () => fetch(api + '/rooms', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(options), signal: AbortSignal.timeout(15000), referrerPolicy: 'no-referrer' });
-  let response = await create();
+  const create = () => fetchWithTimeout(api + '/rooms', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(options), referrerPolicy: 'no-referrer' }, 15000,
+    async response => ({ response, payload: await response.json().catch(error => { if (response.ok || response.status === 428) throw error; return {}; }) }));
+  let { response, payload } = await create();
   if (response.status === 428) {
-    const required = await response.json();
+    const required = payload;
     if (transfer !== t || t.stopped) return;
     options.challenge = await challenge(required.siteKey, credentials.room, () => transfer === t && !t.stopped);
     if (transfer !== t || t.stopped) return;
-    response = await create();
+    ({ response, payload } = await create());
   }
   if (!response.ok) {
-    const failure = await response.json().catch(() => ({}));
+    const failure = payload;
     throw Error(response.status === 429 ? '请求过于频繁，请稍后重试或使用手动配对。' : response.status === 503 && failure.error === 'New shares temporarily paused' ? '新分享暂时达到服务限额，请稍后重试或使用手动配对。' : '配对服务暂不可用（' + response.status + '），请使用手动配对');
   }
-  const session = await response.json();
+  const session = payload;
   if (session.v !== 2 || session.room !== credentials.room || !/^[a-f0-9]{64}$/.test(session.sender)) throw Error('配对服务返回信息无效');
   if (transfer !== t || t.stopped) {
     void groupRequest(groupURL(api, session.room, 'sender', session.sender, randomToken()), { type: 'end' }, true).catch(() => {});
@@ -801,6 +812,7 @@ async function automaticSender(t: Transfer) {
     message => { if (senderGroup === group) notice(message); });
   senderGroup = group;
   const url = new URL(location.href); url.search = connectionDiagnosticsEnabled ? '?connection-debug=1' : ''; url.hash = shareFragment(secret);
+  url.searchParams.set('receive', '1');
   clearShare(); shareLink = url.toString(); $<HTMLInputElement>('share-link').value = shareLink;
   await renderShareQR();
   if (transfer !== t || t.stopped) { group.close(); return; }
@@ -840,7 +852,8 @@ async function automaticReceiver(fragment: string, revision: number) {
   signaling = connection;
   await connection.connect(api, pairedRoom, 'receiver', pairedToken);
   if (transfer !== t || t.stopped) { connection.close(); return; }
-  history.replaceState(null, '', location.pathname + location.search);
+  // Keep the invitation until the file manifest arrives. A browser handoff or
+  // reload during negotiation must not turn this into an empty receive page.
 }
 async function manualSender(t: Transfer) {
   status('正在准备配对码', '正在收集直连信息，通常需要几秒钟。');
@@ -1025,7 +1038,7 @@ $('accept-files').onclick = () => run(async () => {
   }
 });
 $('cancel').onclick = reset;
-$('close-dialog').onclick = () => $<HTMLDialogElement>('pair-dialog').close();
+$('close-dialog').onclick = () => $<HTMLDialogElement>('pair-dialog').close?.();
 $('copy-link').onclick = () => run(async () => { await navigator.clipboard.writeText(shareLink); toast('分享链接已复制'); });
 async function renderShareQR() {
   const canvas = $<HTMLCanvasElement>('share-qr'), revision = ++shareQRRevision, link = shareLink;
@@ -1057,7 +1070,7 @@ $('apply-answer').onclick = () => run(async () => {
   if (transfer !== t || t.stopped) return;
   await t.finish(answer);
   if (transfer !== t || t.stopped) return;
-  status('正在建立加密直连', '配对信息已交换，请稍候。'); $<HTMLDialogElement>('pair-dialog').close();
+  status('正在建立加密直连', '配对信息已交换，请稍候。'); $<HTMLDialogElement>('pair-dialog').close?.();
 });
 $('save-settings').onclick = () => run(async () => {
   if (busy) throw Error('请先结束当前传输，再修改连接设置');
@@ -1088,22 +1101,42 @@ function readPreference(key: string) {
 }
 function originalSharePending() {
   const params = new URLSearchParams(originalHash.slice(1));
-  return !busy && sessionRevision === 0 && (originalHash.startsWith('#2.') || params.has('r') || params.has('offer'));
+  return !busy && sessionRevision === originalShareRevision && (originalHash.startsWith('#2.') || params.has('r') || params.has('offer') || !!originalHash && new URLSearchParams(location.search).get('receive') === '1');
+}
+function revealInvitation(revision = sessionRevision) {
+  requestAnimationFrame(() => {
+    if (revision !== sessionRevision || document.hidden || document.querySelector('dialog[open]')) return;
+    const target = $('notice').hidden ? $('session-panel') : $('notice');
+    if (!target.hidden) target.scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'center' });
+  });
 }
 async function connectOriginalShare() {
-  if (!transferSupported) return;
   if (originalSharePending()) {
     view('receiver');
+    const url = new URL(location.href); url.hash = originalHash;
+    $<HTMLTextAreaElement>('receive-code').value = url.toString();
+    if (!transferSupported) { notice(unsupportedMessage); revealInvitation(); return; }
     if (!new URLSearchParams(originalHash.slice(1)).has('offer') && !configurationReady) {
-      if (configurationLoading) status('正在加载连接配置…', '正在准备连接，请稍候。');
+      if (configurationLoading) { status('正在加载连接配置…', '正在准备连接，请稍候。'); revealInvitation(); }
       return;
     }
-    const url = new URL(location.href); url.hash = originalHash;
-    await run(() => connectValue(url.toString()));
+    status('正在连接发送方', '正在准备连接，请稍候。');
+    const connecting = run(() => connectValue(url.toString())); revealInvitation();
+    await connecting; revealInvitation();
+  } else if (!busy && sessionRevision === originalShareRevision && !location.hash && new URLSearchParams(location.search).get('receive') === '1') {
+    view('receiver'); notice('分享链接缺少配对信息，请重新复制完整链接，或扫描发送方当前显示的二维码。'); revealInvitation();
   }
 }
+window.addEventListener('hashchange', () => {
+  const nextHash = location.hash;
+  if (!nextHash || nextHash === originalHash && sessionRevision === originalShareRevision) return;
+  if (busy && transfer && !transfer.stopped && !transfer.completed) { toast('请先结束当前传输，再打开新的分享链接。'); return; }
+  if (busy) reset();
+  originalHash = nextHash; originalShareRevision = sessionRevision;
+  void connectOriginalShare();
+});
 function init(): Promise<void> {
-  if (!transferSupported) { notice('请在支持 WebRTC 的现代浏览器中，通过 HTTPS 打开本站。'); return Promise.resolve(); }
+  if (!transferSupported) { notice(unsupportedMessage); return Promise.resolve(); }
   if (configurationLoading || busy) return configurationTask || Promise.resolve();
   const version = ++configurationVersion, controller = configurationController = new AbortController();
   configurationLoading = true; configurationReady = readPreference('pizza-send-signal') !== null;
@@ -1134,7 +1167,7 @@ function init(): Promise<void> {
       configurationReady = readPreference('pizza-send-signal') !== null;
       if (!configurationReady && !busy) {
         notice('连接配置加载失败，请重试，或在连接设置中指定配对服务。');
-        if (originalSharePending()) status('连接未完成', '可以重试，或检查连接设置。', 'error');
+        if (originalSharePending()) { status('连接未完成', '可以重试，或检查连接设置。', 'error'); revealInvitation(); }
       }
     } finally {
       clearTimeout(timer);
@@ -1154,7 +1187,8 @@ function init(): Promise<void> {
 }
 $('retry-config').onclick = () => { void init(); };
 void cleanupSourceArchives();
-if (!('RTCPeerConnection' in window) || !crypto.subtle) notice('请在支持 WebRTC 的现代浏览器中，通过 HTTPS 打开本站。');
+setBusy(false);
+if (!transferSupported) notice(unsupportedMessage);
 void init();
 void connectOriginalShare();
 

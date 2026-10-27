@@ -2,6 +2,16 @@ import { storageKey } from './app-environment';
 export type Language = 'zh' | 'en';
 type Params = Record<string, string | number>;
 const messages: Record<string, string> = {
+  '加密转发未能建立，请检查网络后重试，或更换新版浏览器。': 'Encrypted relay could not connect. Check the network and retry, or use an updated browser.',
+  '当前浏览器缺少安全传输能力，请在新版 Safari、Chrome 或 Edge 中通过 HTTPS 打开完整分享链接。': 'This browser lacks secure transfer capabilities. Open the complete sharing link over HTTPS in an updated Safari, Chrome, or Edge.',
+  '当前浏览器不支持直连，请使用加密转发或新版浏览器。': 'This browser cannot connect directly. Use encrypted relay or an updated browser.',
+  '一端浏览器不支持直连，请继续使用加密转发。': 'One browser cannot connect directly. Continue using encrypted relay.',
+  '一端浏览器不支持直连，正在建立加密转发': 'One browser cannot connect directly. Connecting through encrypted relay',
+  '一端浏览器不支持直连，使用端到端加密转发。': 'One browser cannot connect directly. Using end-to-end encrypted relay.',
+  '对方网页尚未支持此浏览器的加密转发，请让双方刷新网页后重试。': 'The other page has not enabled encrypted relay for this browser. Refresh both pages and try again.',
+  '对方浏览器不支持加密转发，请让对方刷新网页或更换新版浏览器。': 'The other browser does not support encrypted relay. Ask them to refresh or use an updated browser.',
+  '分享链接缺少配对信息，请重新复制完整链接，或扫描发送方当前显示的二维码。': 'The sharing link is missing pairing information. Copy the complete link again or scan the sender’s current QR code.',
+  '请先结束当前传输，再打开新的分享链接。': 'End the current transfer before opening a new sharing link.',
   '测试版本': 'Test version', '返回正式版': 'Open stable version', '测试版 · {version}': 'Test · {version}',
   '正在加载连接配置…': 'Loading connection settings…',
   '重试加载连接配置': 'Retry loading connection settings',

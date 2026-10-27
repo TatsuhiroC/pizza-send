@@ -105,7 +105,8 @@ test('compact links retain a 256-bit secret, hide credentials from requests, and
   page.on('request', request => { if (request.method() === 'POST' && request.url().endsWith('/rooms')) creation = request.postDataJSON(); });
   const link = await share(page), url = new URL(link);
   expect(url.hash).toMatch(/^#2\.[A-Za-z0-9_-]{43}$/);
-  expect(url.search).toBe('');
+  // Only a public routing hint may leave the fragment; no sharing credential.
+  expect(url.search).toBe('?receive=1');
   const result = await page.evaluate(async fragment => {
     const p = await import('/src/share.ts');
     const credentials = await p.parseShare(fragment);
@@ -165,7 +166,7 @@ test('QR screenshot fallback works after camera permission denial and rejects un
   await receiver.locator('#qr-image-input').setInputFiles({ name: 'unknown.png', mimeType: 'image/png', buffer: await QRCode.toBuffer('https://unknown.example/') });
   await expect(receiver.locator('#scan-status')).toContainText('不是有效的 PizzaSend');
   await expect(receiver.locator('#scan-dialog')).toBeVisible();
-  expect(new URL(receiver.url()).host).toBe('127.0.0.1:5173');
+  expect(new URL(receiver.url()).host).toBe(new URL(page.url()).host);
   await receiver.locator('#qr-image-input').setInputFiles({ name: 'share.png', mimeType: 'image/png', buffer: await QRCode.toBuffer(link, { width: 480, margin: 4 }) });
   await expect(receiver.locator('#scan-dialog')).not.toBeVisible();
   await verifyDownload(page, receiver);
@@ -187,7 +188,7 @@ test('camera button scans real video frames and stops the camera before pairing'
   ] });
   try {
     const receiverContext = await browser.newContext({ acceptDownloads: true, locale: 'zh-CN' }); await setup(receiverContext);
-    const receiver = await receiverContext.newPage(); await receiver.goto('http://127.0.0.1:5173/');
+    const receiver = await receiverContext.newPage(); await receiver.goto(new URL('./', page.url()).toString());
     await receiver.locator('#receive-tab').click(); await receiver.locator('#open-scanner').click();
     await expect(receiver.locator('#accept-files')).toBeVisible({ timeout: 30000 });
     await expect(receiver.locator('#scan-dialog')).not.toBeVisible();

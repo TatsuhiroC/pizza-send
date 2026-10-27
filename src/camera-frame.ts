@@ -12,7 +12,7 @@ export function fitCameraFrame(video: HTMLVideoElement) {
     // Measure the actual heading, instructions and buttons, including wrapping
     // in either language. Reserve their space before sizing the preview.
     const children = [...dialog.children].filter(child => child.getBoundingClientRect().height > 0);
-    const last = children.at(-1)!;
+    const last = children[children.length - 1]!;
     // Use subpixel bounds rather than rounded scrollHeight, so resizing cannot
     // create a one-pixel feedback loop in the observer.
     const otherHeight = last.getBoundingClientRect().bottom - dialog.getBoundingClientRect().top

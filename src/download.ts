@@ -20,5 +20,5 @@ export function downloadType(info: { name: string; type: string }): string {
       !['application/octet-stream', 'binary/octet-stream', 'application/binary'].includes(type)) return type;
   const extension = info.name.includes('.') ? info.name.split('.').pop()!.toLowerCase() : '';
   // Unknown types stay unspecified rather than advertising every file as .bin.
-  return Object.hasOwn(extensionTypes, extension) ? extensionTypes[extension] : '';
+  return Object.prototype.hasOwnProperty.call(extensionTypes, extension) ? extensionTypes[extension] : '';
 }

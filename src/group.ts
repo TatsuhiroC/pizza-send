@@ -18,15 +18,18 @@ export function groupURL(api: string, room: string, role: 'sender' | 'receiver',
 }
 export async function groupRequest(url: string, body?: unknown, keepalive = false) {
   const retryable = !body || (typeof body === 'object' && 'type' in body && body.type === 'join');
-  const response = await (retryable ? retryPairingRequest : authenticatedRequest)(url, { ...(body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}), keepalive, signal: AbortSignal.timeout(10000) });
-  if (!response.ok) {
-    if (response.status === 429) {
-      const reason = await response.text();
-      throw Error(reason.includes('Recipient limit reached') || reason === 'Invitation unavailable' ? '同时接收的人数已达 10 位，请稍后再试。' : '请求过于频繁，请稍后重试或使用手动配对。');
+  const options = { ...(body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}), keepalive };
+  const consume = async (response: Response) => {
+    if (!response.ok) {
+      if (response.status === 429) {
+        const reason = await response.text();
+        throw Error(reason.includes('Recipient limit reached') || reason === 'Invitation unavailable' ? '同时接收的人数已达 10 位，请稍后再试。' : '请求过于频繁，请稍后重试或使用手动配对。');
+      }
+      throw Error(response.status === 410 ? '分享链接已过期或发送方已结束，请创建新链接。' : response.status === 409 ? '分享链接已被另一接收页面占用，请关闭原页面或创建新链接。' : '无法连接配对服务');
     }
-    throw Error(response.status === 410 ? '分享链接已过期或发送方已结束，请创建新链接。' : response.status === 409 ? '分享链接已被另一接收页面占用，请关闭原页面或创建新链接。' : '无法连接配对服务');
-  }
-  return response.json();
+    return response.json();
+  };
+  return retryable ? retryPairingRequest(url, options, consume) : authenticatedRequest(url, options, 10000, consume);
 }
 export class GroupSender {
   private socket?: WebSocket;

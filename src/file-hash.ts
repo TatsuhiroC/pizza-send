@@ -1,3 +1,4 @@
+import './browser-compat';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { createSHA256 } from 'hash-wasm';
 

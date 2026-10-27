@@ -1,3 +1,4 @@
+import { throwIfAborted } from './cancellation';
 import { storageDirectory } from './app-environment';
 import type { DroppedSource } from './source-files';
 
@@ -29,12 +30,12 @@ export function releaseSourceArchive(file: File) { releases.get(file)?.(); relea
 export function stopSourceArchives() { for (const worker of workers) worker.terminate(); workers.clear(); releases.clear(); }
 
 export async function packageSources(sources: DroppedSource[], progress: (done: number, total: number) => void, signal?: AbortSignal): Promise<File[]> {
-  signal?.throwIfAborted();
+  throwIfAborted(signal);
   const folders = sources.filter(source => source.kind === 'folder');
   if (!folders.length) return sources.map(source => (source as Extract<DroppedSource, { kind: 'file' }>).file);
   if (!navigator.storage?.getDirectory || !navigator.locks) throw Error(unavailable);
   await cleanupSourceArchives();
-  signal?.throwIfAborted();
+  throwIfAborted(signal);
   const id = crypto.randomUUID();
   const worker = new Worker(new URL('./folder-archive-worker.ts', import.meta.url), { type: 'module' });
   workers.add(worker);

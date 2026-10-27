@@ -1,3 +1,4 @@
+import './browser-compat';
 import { retryPairingRequest, ticketURL } from './security';
 import { safeName } from './file-name';
 import { localPeerInfo, readPeerInfo, type PeerInfo } from './peer-info';
@@ -89,7 +90,13 @@ export async function unseal(key: CryptoKey, payload: string): Promise<any> {
 class TransportInterrupted extends Error {}
 
 export class Transfer {
-  pc: RTCPeerConnection;
+  private nativePeer?: RTCPeerConnection;
+  get pc(): RTCPeerConnection {
+    if (!this.nativePeer) throw Error('当前浏览器不支持直连，请使用加密转发或新版浏览器。');
+    return this.nativePeer;
+  }
+  set pc(value: RTCPeerConnection) { this.nativePeer = value; }
+  get directSupported() { return !!this.nativePeer; }
   channel?: DataChannel;
   private streamTransport = false;
   private standby?: { route: TransferRoute; transport: StandbyTransport };
@@ -97,7 +104,7 @@ export class Transfer {
   enableStandby(enabled: boolean) { this.standbyEnabled = enabled; if (!enabled) { this.standby?.transport.close(); this.standby = undefined; } }
   hasStandby(route: TransferRoute) { return this.standby?.route === route && this.standby.transport.open; }
   probeStandby(route: TransferRoute) { return this.hasStandby(route) ? this.standby!.transport.probe() : Promise.resolve(false); }
-  get transportConnected() { return this.channel?.readyState === 'open' && (this.streamTransport || this.pc.connectionState === 'connected'); }
+  get transportConnected() { return this.channel?.readyState === 'open' && (this.streamTransport || this.nativePeer?.connectionState === 'connected'); }
   files: File[] = [];
   manifest: FileInfo[] = [];
   stopped = false;
@@ -230,11 +237,13 @@ export class Transfer {
   reportRoute(state: RouteState) { if (!this.stopped && !this.completed) this.emit({ type: 'route', data: state }); }
   reportPeerInfo(data: PeerInfo) { if (!this.stopped && !this.completed) this.emit({ type: 'peer-info', data }); }
   constructor(public config: Config, public role: 'sender' | 'receiver', private emit: (event: TransferEvent) => void) {
-    this.pc = this.createPeer();
+    if (typeof RTCPeerConnection === 'function') {
+      try { this.pc = this.createPeer(); } catch { /* Restricted browsers can still use authenticated encrypted relay. */ }
+    }
     if (this.localHidden) this.localBackgroundUntil = Date.now() + 10 * 60 * 1000;
     document.addEventListener('visibilitychange', this.visibilityChanged);
     this.diagnostics = watchConnectionDiagnostics(() => ({
-      pc: this.pc, role: this.role, generation: this.generation, started: this.started, sent: this.sent, acknowledged: this.acknowledged, received: this.received,
+      pc: this.nativePeer, role: this.role, generation: this.generation, started: this.started, sent: this.sent, acknowledged: this.acknowledged, received: this.received,
       buffered: this.channel?.bufferedAmount || 0, queued: this.receivingQueuedBytes, window: this.flow.windowBytes,
       sourceBytes: this.readBytes, sourceMs: this.readMilliseconds, sinkBytes: this.writeBytes, sinkMs: this.writeMilliseconds,
       completed: this.completed, stopped: this.stopped, recovering: this.recovering, hidden: this.localHidden, peerHidden: this.peerHidden,
@@ -248,15 +257,16 @@ export class Transfer {
   }
   private createPeer() {
     const pc = new RTCPeerConnection({ iceServers: this.config.iceServers });
+    if (typeof pc.createDataChannel !== 'function') { pc.close(); throw Error('WebRTC data channels unavailable'); }
     this.bindPeer(pc);
     return pc;
   }
   private bindPeer(pc: RTCPeerConnection) {
     pc.onicecandidate = event => {
-      if (pc === this.pc && !this.stopped) this.candidate?.(event.candidate?.toJSON() ?? null);
+      if (pc === this.nativePeer && !this.stopped) this.candidate?.(event.candidate?.toJSON() ?? null);
     };
     pc.onconnectionstatechange = () => {
-      if (pc !== this.pc || this.stopped) return;
+      if (pc !== this.nativePeer || this.stopped) return;
       const state = pc.connectionState;
       if (state === 'connected') {
         clearTimeout(this.connectTimer); clearTimeout(this.disconnectedTimer);
@@ -268,7 +278,7 @@ export class Transfer {
         this.disconnectedTimer = setTimeout(() => this.requestRecovery(), this.recovery ? 1500 : 12000);
       }
     };
-    pc.ondatachannel = event => { if (pc === this.pc) this.attach(event.channel); };
+    pc.ondatachannel = event => { if (pc === this.nativePeer) this.attach(event.channel); };
   }
   requestRecovery() {
     if (this.stopped || this.completed || this.failing) return;
@@ -301,12 +311,13 @@ export class Transfer {
     clearTimeout(this.connectTimer); clearTimeout(this.disconnectedTimer); clearInterval(this.heartbeat);
     const channel = this.channel;
     if (channel) channel.onclose = channel.onerror = channel.onmessage = channel.onopen = channel.onbufferedamountlow = null;
-    this.pc.onconnectionstatechange = null; this.pc.ondatachannel = null; this.pc.onicecandidate = null;
-    if (this.standbyEnabled && channel && channel.readyState === 'open' && (wasStream || this.pc.connectionState === 'connected') && (wasStream ? 'stream' : 'direct') !== route) {
+    const pc = this.nativePeer;
+    if (pc) { pc.onconnectionstatechange = null; pc.ondatachannel = null; pc.onicecandidate = null; }
+    if (this.standbyEnabled && channel && channel.readyState === 'open' && (wasStream || pc?.connectionState === 'connected') && (wasStream ? 'stream' : 'direct') !== route) {
       this.standby?.transport.close();
-      this.standby = { route: wasStream ? 'stream' : 'direct', transport: new StandbyTransport(channel, wasStream ? undefined : this.pc) };
+      this.standby = { route: wasStream ? 'stream' : 'direct', transport: new StandbyTransport(channel, wasStream ? undefined : pc) };
     } else channel?.close();
-    if (this.pc !== spare?.pc && this.pc !== this.standby?.transport.pc) this.pc.close();
+    if (pc && pc !== spare?.pc && pc !== this.standby?.transport.pc) pc.close();
     this.channel = undefined; this.wake();
     // Finish writes already received on the old connection before reporting the offset.
     this.flushBinary(this.generation - 1);
@@ -323,6 +334,7 @@ export class Transfer {
       queueMicrotask(() => { if (!this.stopped && this.channel === ready && ready.readyState === 'open') ready.onopen?.(new Event('open')); });
       this.emit({ type: 'path', data: this.streamTransport ? '加密服务器转发' : '网络直连' });
     } else {
+      if (!this.directSupported) throw Error('当前浏览器不支持直连，请使用加密转发或新版浏览器。');
       this.pc = this.createPeer();
       if (this.role === 'sender') this.attach(this.pc.createDataChannel('pizza-send-v2', { ordered: true }));
     }
@@ -399,7 +411,16 @@ export class Transfer {
   prepare(files: File[]) {
     this.files = files;
     this.manifest = validateManifest(files.map((f, id) => ({ id, name: f.name, size: f.size, type: f.type })));
-    this.attach(this.pc.createDataChannel('pizza-send-v2', { ordered: true }));
+    if (this.nativePeer) {
+      const pc = this.nativePeer;
+      let channel: RTCDataChannel;
+      try { channel = pc.createDataChannel('pizza-send-v2', { ordered: true }); }
+      catch {
+        pc.onicecandidate = pc.onconnectionstatechange = pc.ondatachannel = null;
+        pc.close(); this.nativePeer = undefined; return;
+      }
+      this.attach(channel);
+    }
   }
   private control(message: unknown) {
     if (this.channel?.readyState !== 'open') throw new TransportInterrupted('连接已关闭');
@@ -747,7 +768,7 @@ export class Transfer {
   private async sendFiles(firstFile: number, firstOffset: number, generation: number) {
     const sourceOptions = { signal: this.sourceReads.signal, deferTimeout: this.deferSourceTimeout };
     if (!this.started) { this.started = performance.now(); this.emit({ type: 'started' }); }
-    const maxMessage = this.pc.sctp?.maxMessageSize || 65536;
+    const maxMessage = this.nativePeer?.sctp?.maxMessageSize || 65536;
     const chunkSize = Math.min(32768, maxMessage);
     if (chunkSize < 1024) throw Error('对方浏览器的数据通道限制过小');
     for (let id = firstFile; id < this.files.length; id++) {
@@ -884,7 +905,7 @@ export class Transfer {
       this.temporary = undefined;
     }
     this.incoming = undefined; this.handles = []; this.files = [];
-    this.channel?.close(); this.pc.close(); this.standby?.transport.close(); this.standby = undefined; this.wake();
+    this.channel?.close(); this.nativePeer?.close(); this.standby?.transport.close(); this.standby = undefined; this.wake();
     for (const output of this.outputs) URL.revokeObjectURL(output.url);
   }
 }
@@ -925,13 +946,12 @@ export class Signaling {
     const attempt = (async () => {
       const url = new URL(this.endpoint!);
       url.protocol = url.protocol === 'ws:' ? 'http:' : 'https:';
-      const response = await retryPairingRequest(url);
+      const { response, state } = await retryPairingRequest(url, {}, async response => ({ response, state: response.ok ? await response.json() : undefined }));
       if (!response.ok) {
         if ([401, 409, 410].includes(response.status)) { this.closed = true; clearTimeout(this.retry); }
         throw Error(response.status === 409 ? '分享链接已被另一接收页面占用，请关闭原页面或创建新链接。' :
           response.status === 410 ? '分享链接已过期或发送方已结束，请创建新链接。' : '无法连接配对服务');
       }
-      const state = await response.json();
       if (this.closed) throw Error('配对服务已断开');
       const connectionURL = await ticketURL(this.endpoint!);
       if (this.closed) throw Error('配对服务已断开');
@@ -1018,7 +1038,7 @@ export class Signaling {
   }
   async stream(secret: string, session: string, current = () => true) {
     if (this.closed || !this.endpoint || !current()) throw Error('加密转发暂时不可用');
-    const room = new URL(this.endpoint).pathname.split('/').at(-1)!;
+    const room = new URL(this.endpoint).pathname.split('/').pop()!;
     const [url, cipher] = await Promise.all([ticketURL(this.endpoint, session), StreamCipher.create(secret, room, session, this.role as 'sender' | 'receiver')]);
     if (this.closed || !current()) throw Error('加密转发暂时不可用');
     return new StreamChannel(url, cipher);
@@ -1077,6 +1097,33 @@ export class AutoPair {
   private warm?: WarmSwitch;
   private directTrial?: { timer: ReturnType<typeof setTimeout>; attempted: boolean };
   private warmSupported = false;
+  private peerDirectSupported = true;
+  private capabilitiesSent = false;
+  private peerCapabilitiesReceived = false;
+  private capabilitiesTimer?: ReturnType<typeof setTimeout>;
+  private get directAvailable() { return this.transfer.directSupported && this.peerDirectSupported; }
+  private async announceCapabilities(force = false) {
+    if (!this.streamFallback || this.capabilitiesSent && !force) return;
+    await this.signal.send({ type: 'transport-capabilities', v: 1, direct: this.transfer.directSupported,
+      streamSupport: 1, quickRelaySupport: 1, peerInfo: localPeerInfo() }, true);
+    this.capabilitiesSent = true;
+  }
+  private waitForCapabilities() {
+    if (this.transfer.directSupported || this.peerCapabilitiesReceived || this.capabilitiesTimer) return;
+    this.capabilitiesTimer = setTimeout(() => {
+      if (!this.closed && !this.peerCapabilitiesReceived) this.transfer.fail('对方网页尚未支持此浏览器的加密转发，请让双方刷新网页后重试。');
+    }, 15000);
+  }
+  private relayOnly() {
+    if (!this.streamFallback?.supported) throw Error('对方浏览器不支持加密转发，请让对方刷新网页或更换新版浏览器。');
+    this.offered = true; clearTimeout(this.waitingTimer);
+    if (!this.transfer.transportConnected) this.waitingTimer = setTimeout(() => {
+      if (!this.closed && !this.transfer.transportConnected) this.transfer.fail('加密转发未能建立，请检查网络后重试，或更换新版浏览器。');
+    }, 60000);
+    this.streamFallback.requireRelay();
+    this.transfer.pairingStage('一端浏览器不支持直连，正在建立加密转发');
+    this.monitorRoute();
+  }
   constructor(private transfer: Transfer, key: CryptoKey, private onError: (message: string) => void, secret?: string) {
     this.signal = new Signaling(key, (message, authenticated) => this.handle(message, authenticated), onError);
     if (secret) this.streamFallback = new StreamFallback(transfer.role, {
@@ -1123,6 +1170,7 @@ export class AutoPair {
     const fallback = this.streamFallback, t = this.transfer;
     if (!fallback || this.closed || t.stopped || t.completed) return;
     const state = { ...fallback.state };
+    state.directUnavailable = !this.directAvailable;
     state.busy ||= !!this.pendingRoute || !!this.warm || this.negotiating && !this.directTrial;
     state.recovering = t.recovering;
     if (this.pendingRoute) state.target = this.pendingRoute;
@@ -1136,6 +1184,7 @@ export class AutoPair {
     }
   }
   async chooseRoute(route: TransferRoute) {
+    if (route === 'direct' && !this.directAvailable) throw Error('一端浏览器不支持直连，请继续使用加密转发。');
     const fallback = this.streamFallback;
     if (!fallback?.state.available || this.closed || this.transfer.stopped || this.transfer.completed ||
       fallback.busy || this.pendingRoute || this.warm || this.negotiating && !this.directTrial || !['direct', 'stream'].includes(route)) throw Error('暂时无法切换路线，请稍后重试。');
@@ -1159,6 +1208,7 @@ export class AutoPair {
   }
   private async commitRouteChoice(route: TransferRoute, directFailed = false) {
     if (this.closed || this.transfer.stopped || this.transfer.completed) return;
+    if (route === 'direct' && !this.directAvailable) return;
     if (this.pendingRoute && this.pendingRoute !== route || this.warm) return;
     // Supersede a cold native attempt, including any signaling wait. Its late
     // continuation must not send SDP over a newly restored stream connection.
@@ -1261,12 +1311,21 @@ export class AutoPair {
     this.descriptionSent = true; this.scheduleCandidates();
   }
   private async applyCandidates() {
-    const t = this.transfer;
-    if (!t.pc.remoteDescription) return;
+    const t = this.transfer, epoch = this.epoch;
+    if (!this.directAvailable || this.streamFallback?.active) { this.remoteCandidates = []; return; }
+    const pc = t.pc;
+    const stale = () => this.closed || t.stopped || epoch !== this.epoch || t.pc !== pc || pc.signalingState === 'closed';
+    if (stale()) { this.remoteCandidates = []; return; }
+    if (!pc.remoteDescription) return;
     for (const candidate of this.remoteCandidates.splice(0)) {
+      if (stale()) return;
       const id = JSON.stringify(candidate);
       if (this.seenCandidates.has(id)) continue;
-      await t.pc.addIceCandidate(candidate ?? undefined);
+      try { await pc.addIceCandidate(candidate ?? undefined); }
+      catch (error) {
+        if (stale()) return;
+        throw error;
+      }
       this.seenCandidates.add(id);
     }
   }
@@ -1278,8 +1337,18 @@ export class AutoPair {
     // Otherwise a compromised/custom signaling service could inject its own
     // DTLS fingerprints instead of merely relaying encrypted peer negotiation.
     if (!authenticated && !['signal-ready', 'peer-ready', 'peer-left', 'receiver-left', 'ended'].includes(message?.type)) return;
+    if (message.type === 'transport-capabilities') {
+      if (message.v !== 1 || typeof message.direct !== 'boolean' || message.streamSupport !== 1 || !this.streamFallback) return;
+      this.peerDirectSupported = message.direct;
+      this.peerCapabilitiesReceived = true; clearTimeout(this.capabilitiesTimer);
+      this.streamFallback.supported = true; this.streamFallback.quickSupported = message.quickRelaySupport === 1;
+      const peerInfo = readPeerInfo(message.peerInfo); if (peerInfo) t.reportPeerInfo(peerInfo);
+      if (!this.directAvailable) { await this.announceCapabilities(); this.relayOnly(); }
+      return;
+    }
     if (['stream-select', 'stream-choice'].includes(message?.type)) {
       if (!this.streamFallback?.state.available || !['direct', 'stream'].includes(message.route)) return;
+      if (message.route === 'direct' && !this.directAvailable) return;
       if (message.type === 'stream-select' && t.role === 'sender') void this.commitRouteChoice(message.route).catch(() => {
         if (!this.closed && !t.stopped && !t.completed) this.onError('暂时无法切换路线，请稍后重试。');
       });
@@ -1294,8 +1363,12 @@ export class AutoPair {
     if (typeof message?.type === 'string' && message.type.startsWith('stream-warm-')) { await this.handleWarm(message); return; }
     if (typeof message?.type === 'string' && message.type.startsWith('stream-')) { await this.streamFallback?.handle(message); return; }
     if (message.type === 'signal-ready') {
+      if (!t.directSupported) await this.announceCapabilities(true);
+      if (message.peerPresent) this.waitForCapabilities();
       if (!this.offered && t.role === 'receiver') t.pairingStage(message.peerPresent ? '找到发送方，正在交换连接信息' : '等待发送方回到页面');
     } else if (message.type === 'peer-ready') {
+      if (!t.directSupported) { await this.announceCapabilities(true); this.waitForCapabilities(); return; }
+      if (!this.peerDirectSupported) { await this.announceCapabilities(); this.relayOnly(); return; }
       if (t.role === 'sender' && !this.offered) {
         this.offered = true; this.negotiating = true;
         t.pairingStage('找到接收方，正在交换连接信息');
@@ -1315,6 +1388,10 @@ export class AutoPair {
       if (!this.negotiating && this.lastOffer) await this.sendDescription('offer', t.pc.localDescription?.toJSON() ?? this.lastOffer);
     } else if (message.type === 'offer' && t.role === 'receiver') {
       if (!Number.isInteger(message.epoch) || message.epoch < 0 || message.epoch < this.epoch) return;
+      if (!this.directAvailable) {
+        if (this.streamFallback) { this.streamFallback.supported = message.streamSupport === 1; this.streamFallback.quickSupported = message.quickRelaySupport === 1; }
+        await this.announceCapabilities(); this.waitForCapabilities(); this.relayOnly(); return;
+      }
       if (this.offered && message.epoch === this.epoch) {
         if (this.lastAnswer) await this.sendDescription('answer', t.pc.localDescription?.toJSON() ?? this.lastAnswer);
         return;
@@ -1330,6 +1407,7 @@ export class AutoPair {
       await this.applyCandidates();
       await this.sendDescription('answer', this.lastAnswer);
     } else if (message.type === 'answer' && t.role === 'sender') {
+      if (!this.directAvailable) return;
       if (message.epoch === this.epoch && t.pc.signalingState === 'have-local-offer') {
         const peerInfo = readPeerInfo(message.peerInfo);
         if (this.streamFallback) this.streamFallback.supported = message.streamSupport === 1;
@@ -1381,6 +1459,7 @@ export class AutoPair {
       else this.streamFallback.reconnect();
       return;
     }
+    if (!this.directAvailable) { this.monitorRoute(); return; }
     this.negotiating = true;
     const revision = this.revision;
     try {
@@ -1399,5 +1478,5 @@ export class AutoPair {
     } catch { /* Preserve the checkpoint and retry until the recovery deadline. */ }
     finally { if (revision === this.revision) this.negotiating = false; }
   }
-  close() { this.closed = true; this.pendingRoute = undefined; this.clearDirectTrial(); if (this.warm) this.clearWarm(this.warm); this.streamFallback?.close(); this.sourceFailureAck?.(); this.sourceFailureAck = undefined; clearInterval(this.retry); clearInterval(this.routeMonitor); clearTimeout(this.routeRequestTimer); clearTimeout(this.candidateTimer); clearTimeout(this.waitingTimer); this.signal.close(); }
+  close() { this.closed = true; this.pendingRoute = undefined; this.clearDirectTrial(); if (this.warm) this.clearWarm(this.warm); this.streamFallback?.close(); this.sourceFailureAck?.(); this.sourceFailureAck = undefined; clearInterval(this.retry); clearInterval(this.routeMonitor); clearTimeout(this.routeRequestTimer); clearTimeout(this.candidateTimer); clearTimeout(this.waitingTimer); clearTimeout(this.capabilitiesTimer); this.signal.close(); }
 }
