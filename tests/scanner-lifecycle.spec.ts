@@ -172,3 +172,34 @@ test('denied permission never triggers discovery or another capture request', as
     expect(h.errors).toHaveLength(1); expect(h.errors[0]).toContain('未获得相机权限');
   } finally { h.restore(); }
 });
+
+for (const action of ['cancel', 'persistent failure'] as const) test(`frame-read retries stop after ${action} without reopening capture`, async () => {
+  const descriptors = new Map(['document', 'navigator', 'HTMLMediaElement'].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  let reads = 0, captures = 0, stopped = 0;
+  const errors: string[] = [];
+  const canvas = { width: 0, height: 0, getContext: () => ({ drawImage() {}, getImageData() { reads++; throw new DOMException('Frame not ready', 'InvalidStateError'); } }) };
+  const video = { dataset: {}, readyState: 2, videoWidth: 480, videoHeight: 640, srcObject: null,
+    play: async () => {}, pause() {}, addEventListener() {} } as unknown as HTMLVideoElement;
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: { createElement: () => canvas } });
+  Object.defineProperty(globalThis, 'HTMLMediaElement', { configurable: true, value: { HAVE_CURRENT_DATA: 2 } });
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { mediaDevices: { getUserMedia: async () => {
+    captures++; return { getTracks: () => [{ stop() { stopped++; } }] };
+  } } } });
+  const scanner = new CameraScanner(video, async () => false, message => errors.push(message));
+  try {
+    await scanner.start(); expect(reads).toBe(1);
+    if (action === 'cancel') {
+      scanner.stop(); await new Promise(resolve => setTimeout(resolve, 300));
+      expect(reads).toBe(1); expect(errors).toEqual([]);
+    } else {
+      await expect.poll(() => errors.length, { timeout: 4000 }).toBe(1);
+      expect(reads).toBe(8);
+    }
+    expect(captures).toBe(1); expect(stopped).toBe(1); expect(video.srcObject).toBeNull();
+  } finally {
+    scanner.stop();
+    for (const [key, descriptor] of descriptors) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key);
+    }
+  }
+});
