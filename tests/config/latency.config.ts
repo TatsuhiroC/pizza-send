@@ -1,5 +1,5 @@
 import { defineConfig } from '@playwright/test';
-import benchmark from './playwright.benchmark.config';
+import benchmark from './benchmark.config';
 
 const servers = Array.isArray(benchmark.webServer) ? benchmark.webServer : benchmark.webServer ? [benchmark.webServer] : [];
 export default defineConfig({

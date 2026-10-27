@@ -24,6 +24,7 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+      - run: npm run check:public
       - run: npm ci
       - name: Verify preinstalled browsers
         run: node -e "for (const name of ['chromium', 'webkit']) require('node:fs').accessSync(require('@playwright/test')[name].executablePath())"

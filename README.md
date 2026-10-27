@@ -49,7 +49,7 @@ PizzaSend 是一个开源的浏览器文件快传工具。手机与电脑之间�
 
 ## 再了解一点
 
-[开发与部署](docs/development.md) &nbsp; · &nbsp; [安全设计](docs/security-hardening.md) &nbsp; · &nbsp; [工程文档](docs/README.md) &nbsp; · &nbsp; [MIT License](LICENSE)
+[开发与部署](docs/development.md) &nbsp; · &nbsp; [安全设计](SECURITY.md) &nbsp; · &nbsp; [工程文档](docs/README.md) &nbsp; · &nbsp; [MIT License](LICENSE)
 
 ---
 

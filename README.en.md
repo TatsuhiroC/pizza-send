@@ -49,7 +49,7 @@ Share files. Drop a folder on a computer to package it as a ZIP. Pair by QR. Rec
 
 ## A little more
 
-[Develop & deploy](docs/development.en.md) &nbsp; · &nbsp; [Security design](docs/security-hardening.md) &nbsp; · &nbsp; [Engineering notes](docs/README.md) &nbsp; · &nbsp; [MIT License](LICENSE)
+[Develop & deploy](docs/development.en.md) &nbsp; · &nbsp; [Security design](SECURITY.md) &nbsp; · &nbsp; [Engineering notes](docs/README.md) &nbsp; · &nbsp; [MIT License](LICENSE)
 
 <sub>Most engineering notes are in Chinese.</sub>
 

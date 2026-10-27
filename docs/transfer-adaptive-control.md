@@ -33,7 +33,7 @@
 
 **本轮结论是消除候选的明显回退，并保留自动背压，而非“所有场景全面加速”。** 先前 32 MiB 测试用工具注入的内存文件，本轮统一为实际磁盘文件，不能拿旧表的 3.8 秒与此表混算出两倍提速。所有旧结果仍保留在[首轮记录](transfer-performance.md)及[回退复核](transfer-latency-investigation.md)。150／300 ms 只是测试里推迟自动回执，不是人工确认，也不是完整的真实 WAN 延迟、带宽、丢包模型；不代表实机 iPhone、VPN 或跨地区测量。
 
-最终对照共 36 次成功传输，逐次下载并检查原文件名及独立 SHA-256，同时断言最多 4 MiB 未确认量。各次计时、等待与队列计数见[对照记录](../benchmarks/results/2026-10-16-adaptive-control.json)。完整逐 MiB 轨迹及被弃用的实验留在本机 `outputs/pizza-send-throughput-verification/adaptive-retune/`，没有进入产品构建。
+最终对照共 36 次成功传输，逐次下载并检查原文件名及独立 SHA-256，同时断言最多 4 MiB 未确认量。各次计时、等待与队列计数见[对照记录](archive/benchmarks/2026-10-16-adaptive-control.json)。完整逐 MiB 轨迹及被弃用的实验留在本机 `outputs/pizza-send-throughput-verification/adaptive-retune/`，没有进入产品构建。
 
 ## 验证与复现
 
@@ -42,7 +42,7 @@ BENCHMARK_RESULT=/tmp/pizzasend-latency.json npm run bench:latency
 BENCH_MIB=128 BENCH_DELAYS=150 BENCHMARK_RESULT=/tmp/pizzasend-latency-128.json npm run bench:latency
 ```
 
-`bench:latency` 与旧 `bench:transfer` 使用独立匹配配置，避免同一输出文件被两套基准的结束钩子覆盖。默认 CI 不运行硬件相关的速度基准，也不把速度值当成功能阈值。旧版对照需独立检出相应提交，复制相同的基准脚本、夹具与配置，共用同版本依赖，然后顺序运行；`BENCH_VARIANT` 只是记录标签，不选择生产代码。旧版没有 `bench:latency` 脚本时，直接运行 `npx playwright test --config playwright.latency.config.ts`。
+`bench:latency` 与旧 `bench:transfer` 使用独立匹配配置，避免同一输出文件被两套基准的结束钩子覆盖。默认 CI 不运行硬件相关的速度基准，也不把速度值当成功能阈值。旧版对照需独立检出相应提交，复制相同的基准脚本、夹具与配置，共用同版本依赖，然后顺序运行；`BENCH_VARIANT` 只是记录标签，不选择生产代码。旧版没有 `bench:latency` 脚本时，可使用旧提交自带的配置；当前仓库统一运行 `npm run bench:latency`，专用配置位于 `tests/config/`。
 
 新增确定性覆盖稳定延迟与拥塞的区分、持续反馈恢复后的窗口增长、重置旧时钟、稀疏到达不等批次定时器、短批次不漂移回执及异常短读取不发送数据。真实传输另检查慢写盘、原文件下载、队列／消息上限，并重跑后台返回、多人独立传输、连接重建、磁盘失败、较大文件和 CSP 等原有检查。
 

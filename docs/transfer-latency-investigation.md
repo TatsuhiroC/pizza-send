@@ -40,7 +40,7 @@
 
 本轮共 **42 次成功传输**，每次检查原文件名、下载后独立 SHA-256 和不超过 4 MiB 的未确认数据上限；并非 42 项新的产品功能。128 MiB 夹具首次因 Playwright 的内存输入上限失败，未开始传输，改为真实磁盘文件后 3 次全部通过，不计入成功次数。生产构建通过，输出脚本仍为 `index-E73PEyQu.js`，与候选原构建一致。没有修改生产源码，因此没有重复整套 180 项功能回归。
 
-每次计时、队列峰值及等待计数见[统计记录](../benchmarks/results/2026-10-16-latency-review.json)。完整逐 MiB 轨迹另存于本机 `outputs/pizza-send-throughput-verification/latency-review/`。
+每次计时、队列峰值及等待计数见[统计记录](archive/benchmarks/2026-10-16-latency-review.json)。完整逐 MiB 轨迹另存于本机 `outputs/pizza-send-throughput-verification/latency-review/`。
 
 ## 复现
 

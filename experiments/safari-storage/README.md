@@ -46,7 +46,7 @@ v0.2 已接入接收写盘与确认顺序、同一临时文件的断线续写、
 | 隔离 Playwright WebKit | 512 MiB、2 GiB、5 GiB、10 GiB、20 GiB 通过 |
 | iPhone Safari | 尚未实测 |
 
-20 GiB 的 SHA-256 为 `7ee599ae3d150df2291eea7869f6960b2f5b90b8b144932dda14eae4729e5b70`，实际大小为 21,474,836,480 字节。原始结果见 [Mac Safari](results/safari-mac.json)、[WebKit 小文件](results/webkit-small.json)、[WebKit 大文件](results/webkit-large.json)。GiB 使用二进制计量，20 GiB 约为十进制 21.47 GB。
+20 GiB 的 SHA-256 为 `7ee599ae3d150df2291eea7869f6960b2f5b90b8b144932dda14eae4729e5b70`，实际大小为 21,474,836,480 字节。原始结果见 [Mac Safari](../../docs/archive/safari-storage/safari-mac.json)、[WebKit 小文件](../../docs/archive/safari-storage/webkit-small.json)、[WebKit 大文件](../../docs/archive/safari-storage/webkit-large.json)。GiB 使用二进制计量，20 GiB 约为十进制 21.47 GB。
 
 Mac 20 GiB 写入耗时 835.72 秒，写入加读回耗时 1,321.641 秒；隔离 WebKit 相应为 196.68 秒和 332.863 秒。两轮曾并发运行，页面前后台状态及资源调度也影响耗时，这些数值不是受控性能基准。
 
