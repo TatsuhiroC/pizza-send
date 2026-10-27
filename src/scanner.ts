@@ -37,6 +37,8 @@ export class CameraScanner {
     const generation = this.generation;
     if (!navigator.mediaDevices?.getUserMedia) { this.stop(); this.error('这个浏览器无法使用相机，请从图片识别或粘贴链接。'); return; }
     try {
+      // Fetch the decoder while the camera permission and playback are starting.
+      const decoding = loadDecoder(); void decoding.catch(() => {});
       const devices = navigator.mediaDevices;
       const video = await cameraConstraints(devices, this.rearCamera);
       if (generation !== this.generation) return;
@@ -70,26 +72,27 @@ export class CameraScanner {
       const ready = () => {
         if (generation === this.generation && this.video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) this.video.dataset.ready = 'true';
       };
-      // Both display paths start before downloading/initializing jsQR.
+      // Both display paths start independently of decoder readiness.
       // Frame rendering reads this same stream, without a settling delay.
       this.video.addEventListener('loadeddata', ready, { signal: playback.signal });
       this.video.addEventListener('playing', ready, { signal: playback.signal });
       this.video.srcObject = stream; this.livePreview?.start();
       await this.video.play(); ready();
       if (generation !== this.generation) return;
-      const decode = await loadDecoder();
+      const decode = await decoding;
+      let attempt = 0, readFailures = 0;
       const frame = async () => {
         if (generation !== this.generation) return;
         try {
-          if (this.video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && this.video.videoWidth) {
+          if (this.video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && this.video.videoWidth && this.video.videoHeight) {
             this.video.dataset.ready = 'true';
-            const scale = Math.min(1, 640 / Math.max(this.video.videoWidth, this.video.videoHeight));
-            const width = Math.round(this.video.videoWidth * scale), height = Math.round(this.video.videoHeight * scale);
-            if (this.canvas.width !== width || this.canvas.height !== height) { this.canvas.width = width; this.canvas.height = height; }
-            const ctx = this.canvas.getContext('2d', { willReadFrequently: true })!;
-            ctx.drawImage(this.video, 0, 0, this.canvas.width, this.canvas.height);
-            const image = ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
-            const result = decode(image.data, image.width, image.height, { inversionAttempts: 'attemptBoth' });
+            let result: ReturnType<Decoder> = null;
+            try { result = this.decodeFrame(decode, attempt++); readFailures = 0; }
+            catch (error) {
+              // A readyState transition can race a frame read during startup.
+              // Keep the same camera and retry; permanent errors still surface.
+              if (!(error instanceof DOMException) || !['InvalidStateError', 'IndexSizeError'].includes(error.name) || ++readFailures >= 8) throw error;
+            }
             if (result && await this.found(result.data)) {
               // Recognition may finish after cancellation and a new camera start.
               if (generation === this.generation) this.stop();
@@ -105,6 +108,27 @@ export class CameraScanner {
     } catch (error) {
       if (generation === this.generation) { this.stop(); this.error(cameraError(error)); }
     }
+  }
+  private decodeFrame(decode: Decoder, attempt: number) {
+    const width = this.video.videoWidth, height = this.video.videoHeight;
+    const ctx = this.canvas.getContext('2d', { willReadFrequently: true })!;
+    const read = (x: number, y: number, w: number, h: number, limit: number) => {
+      const scale = Math.min(1, limit / Math.max(w, h));
+      const outWidth = Math.max(1, Math.round(w * scale)), outHeight = Math.max(1, Math.round(h * scale));
+      if (this.canvas.width !== outWidth || this.canvas.height !== outHeight) { this.canvas.width = outWidth; this.canvas.height = outHeight; }
+      ctx.drawImage(this.video, x, y, w, h, 0, 0, outWidth, outHeight);
+      const image = ctx.getImageData(0, 0, outWidth, outHeight);
+      return decode(image.data, image.width, image.height, { inversionAttempts: 'attemptBoth' });
+    };
+    const result = read(0, 0, width, height, 640);
+    if (result) return result;
+    // Only a missed frame gets one extra pass. Alternate native central detail
+    // and a larger whole frame so a stationary/off-center QR can also be found.
+    if (attempt % 2 === 0 || Math.max(width, height) <= 640) {
+      const side = Math.min(640, Math.floor(Math.min(width, height) * .8));
+      return read(Math.floor((width - side) / 2), Math.floor((height - side) / 2), side, side, 640);
+    }
+    return read(0, 0, width, height, 1280);
   }
   async readImage(file: File): Promise<string> {
     if (file.size > 20 * 1048576) throw Error('图片过大，请选择 20 MB 以内的二维码图片。');
