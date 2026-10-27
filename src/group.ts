@@ -3,12 +3,14 @@ import { Transfer, AutoPair, randomToken, signalKey, type Config, type TransferE
 import { deriveRecipientShare, receiverDigest } from './share';
 import type { CompressionStatus } from './compression';
 import type { RouteState, TransferRoute } from './stream-fallback';
+import type { PeerInfo } from './peer-info';
 
 export type Recipient = {
   client: string; number: number; phase: 'pairing' | 'waiting' | 'sending' | 'recovering' | 'done' | 'error' | 'left';
   message: string; file: string; transferred: number; total: number; speed: number; path: string; started: boolean;
   transfer?: Transfer; pair?: AutoPair; background?: boolean; compression?: CompressionStatus;
   route?: RouteState;
+  info?: PeerInfo;
 };
 const valid = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 export function groupURL(api: string, room: string, role: 'sender' | 'receiver', token: string, client: string) {
@@ -156,6 +158,7 @@ export class GroupSender {
     else if (event.type === 'background') { peer.background = event.data; }
     else if (event.type === 'compression') peer.compression = event.data;
     else if (event.type === 'route') peer.route = event.data;
+    else if (event.type === 'peer-info') peer.info = event.data;
     else if (event.type === 'file') peer.file = event.data;
     else if (event.type === 'path') peer.path = event.data;
     else if (event.type === 'progress') { peer.transferred = event.data.transferred; peer.total = event.data.total; peer.speed = event.data.speed; }

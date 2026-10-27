@@ -20,6 +20,7 @@ import { checkSources, droppedSources } from './source-files';
 import { setSignalPreconnect } from './signal-preconnect';
 import { cleanupSourceArchives, packageSources, releaseSourceArchive, stopSourceArchives } from './folder-archive';
 import { remainingTime } from './remaining-time';
+import { deviceLabel, browserLabel } from './peer-info';
 import type { CompressionStatus } from './compression';
 import { connectionDiagnosticsEnabled, mountConnectionDiagnostics } from './connection-diagnostics';
 import './style.css';
@@ -727,13 +728,19 @@ function renderRecipients(peers: Recipient[], expired: boolean) {
     let row = rows.get(peer.client);
     if (!row) {
       row = document.createElement('div'); row.className = 'recipient-row'; row.dataset.client = peer.client;
-      row.innerHTML = '<div class="recipient-heading"><strong></strong><span><span class="recipient-message"></span><span class="completion-mark" aria-hidden="true" hidden>'+completionSymbol+'</span></span></div><button class="filename-button" type="button" aria-haspopup="dialog"></button><progress max="100" value="0"></progress><div class="recipient-detail"><span></span><span></span></div><div class="route-controls" hidden></div><div class="compression-hint" role="status" hidden></div>';
+      row.innerHTML = '<div class="recipient-heading"><div class="recipient-identity"><strong></strong><small class="recipient-device" hidden><span></span> · <span></span></small></div><span><span class="recipient-message"></span><span class="completion-mark" aria-hidden="true" hidden>'+completionSymbol+'</span></span></div><button class="filename-button" type="button" aria-haspopup="dialog"></button><progress max="100" value="0"></progress><div class="recipient-detail"><span></span><span></span></div><div class="route-controls" hidden></div><div class="compression-hint" role="status" hidden></div>';
       $('recipients').append(row);
     }
     row.dataset.phase = peer.phase;
     renderRouteControls(row.querySelector<HTMLElement>('.route-controls')!, peer.route, route => run(async () => { await senderGroup?.chooseRoute(peer.client, route); }), peers.length > 1 && !['done', 'error', 'left'].includes(peer.phase));
     renderCompression(row.querySelector<HTMLElement>('.compression-hint')!, peer.compression || { active: false }, () => senderGroup?.enableCompression(peer.client), () => senderGroup?.dismissCompression(peer.client), peer.phase === 'sending' && !peer.background);
     setText(row.querySelector('strong')!, '接收者 {number}', { number: peer.number }); setText(row.querySelector('.recipient-message')!, peer.message);
+    const identity = row.querySelector<HTMLElement>('.recipient-device')!;
+    identity.hidden = !peer.info;
+    if (peer.info) {
+      const labels = identity.querySelectorAll<HTMLElement>('span');
+      setText(labels[0], deviceLabel[peer.info.device]); setText(labels[1], browserLabel[peer.info.browser]);
+    }
     if (peer.background) setText(row.querySelector('.recipient-message')!, '对方已切到后台，等待返回');
     const complete = row.querySelector<HTMLElement>('.completion-mark')!; complete.hidden = peer.phase !== 'done'; complete.classList.toggle('is-complete', peer.phase === 'done');
     const name = row.querySelector<HTMLButtonElement>('.filename-button')!; name.textContent = peer.file; name.hidden = !peer.file;

@@ -123,6 +123,7 @@ const messages: Record<string, string> = {
   '配对服务尚不支持多人分享，请刷新后重试。': 'The signaling service does not support multiple recipients yet. Refresh and retry.',
   '结束分享': 'End sharing',
   '正在连接接收者': 'Connecting to recipient', '等待接收者确认': 'Waiting for recipient to accept', '接收者已退出': 'Recipient left',
+  '手机': 'Phone', '平板': 'Tablet', '电脑': 'Computer', '设备未知': 'Unknown device', '浏览器未知': 'Unknown browser',
   '接收者 {number}': 'Recipient {number}', '接收者 {number} 的进度': 'Progress for recipient {number}',
   '已完成 {count} 位接收者，分享仍可继续。': '{count} recipients completed. You can keep sharing.',
   '部分接收未完成': 'Some transfers did not finish',
