@@ -20,6 +20,12 @@ async function share(sender: Page) {
 
 test('candidates arriving after the old eight-second cutoff still connect and deliver', async ({ page, context }) => {
   await setup(context);
+  await context.route('**/rooms/**', async route => {
+    const request = route.request();
+    if (request.method() === 'POST' && request.postDataJSON()?.type === 'stream-connect') {
+      await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Relay intentionally unavailable in delayed-ICE test' }) });
+    } else await route.fallback();
+  });
   await context.addInitScript(() => {
     const Peer = RTCPeerConnection;
     const local = Object.getOwnPropertyDescriptor(Peer.prototype, 'localDescription')!.get!;
@@ -48,6 +54,7 @@ test('candidates arriving after the old eight-second cutoff still connect and de
   expect(await page.evaluate(() => (window as any).__candidateCount)).toBeGreaterThan(0);
   await receiver.locator('#accept-files').click();
   await expect(page.locator('#status')).toHaveText('传输完成，原样送达。');
+  await expect(receiver.locator('#connection-path')).toContainText('DTLS');
   const download = receiver.waitForEvent('download');
   await receiver.locator('.download-file').click();
   expect((await readFile((await (await download).path())!)).toString()).toBe('late candidates still deliver the complete file');

@@ -1,5 +1,6 @@
 import { retryPairingRequest, ticketURL } from './security';
 import { safeName } from './file-name';
+import { localPeerInfo, readPeerInfo, type PeerInfo } from './peer-info';
 export { safeName } from './file-name';
 import { readSource, SourceReadError } from './source-files';
 import { sha256 } from '@noble/hashes/sha2.js';
@@ -227,6 +228,7 @@ export class Transfer {
       hidden: this.localHidden || this.peerHidden };
   }
   reportRoute(state: RouteState) { if (!this.stopped && !this.completed) this.emit({ type: 'route', data: state }); }
+  reportPeerInfo(data: PeerInfo) { if (!this.stopped && !this.completed) this.emit({ type: 'peer-info', data }); }
   constructor(public config: Config, public role: 'sender' | 'receiver', private emit: (event: TransferEvent) => void) {
     this.pc = this.createPeer();
     if (this.localHidden) this.localBackgroundUntil = Date.now() + 10 * 60 * 1000;
@@ -1255,7 +1257,7 @@ export class AutoPair {
     }, 100);
   }
   private async sendDescription(type: 'offer' | 'answer', description: RTCSessionDescriptionInit) {
-    await this.signal.send({ type, epoch: this.epoch, description, ...(this.streamFallback ? { streamSupport: 1, warmSupport: 1, quickRelaySupport: 1 } : {}) });
+    await this.signal.send({ type, epoch: this.epoch, description, ...(type === 'answer' ? { peerInfo: localPeerInfo() } : {}), ...(this.streamFallback ? { streamSupport: 1, warmSupport: 1, quickRelaySupport: 1 } : {}) });
     this.descriptionSent = true; this.scheduleCandidates();
   }
   private async applyCandidates() {
@@ -1329,10 +1331,12 @@ export class AutoPair {
       await this.sendDescription('answer', this.lastAnswer);
     } else if (message.type === 'answer' && t.role === 'sender') {
       if (message.epoch === this.epoch && t.pc.signalingState === 'have-local-offer') {
+        const peerInfo = readPeerInfo(message.peerInfo);
         if (this.streamFallback) this.streamFallback.supported = message.streamSupport === 1;
         if (this.streamFallback) this.streamFallback.quickSupported = message.quickRelaySupport === 1;
         this.warmSupported = message.warmSupport === 1; t.enableStandby(this.warmSupported);
         await t.finish(message.description); await this.applyCandidates();
+        if (peerInfo) t.reportPeerInfo(peerInfo);
         this.streamFallback?.negotiated();
         t.pairingStage('配对信息已交换，正在寻找直连路径');
       }
