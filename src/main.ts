@@ -1039,7 +1039,15 @@ $('accept-files').onclick = () => run(async () => {
 });
 $('cancel').onclick = reset;
 $('close-dialog').onclick = () => $<HTMLDialogElement>('pair-dialog').close?.();
-$('copy-link').onclick = () => run(async () => { await navigator.clipboard.writeText(shareLink); toast('分享链接已复制'); });
+async function copyValue(input: HTMLInputElement | HTMLTextAreaElement, message: string) {
+  try { await navigator.clipboard.writeText(input.value); toast(message); return; }
+  catch { /* Some embedded browsers omit or deny the Clipboard API. */ }
+  input.focus({ preventScroll: true }); input.select(); input.setSelectionRange(0, input.value.length);
+  let copied = false;
+  try { copied = document.execCommand('copy'); } catch { /* Leave a selection for manual copying. */ }
+  toast(copied ? message : '无法自动复制，请长按或选中链接后复制。');
+}
+$('copy-link').onclick = () => run(() => copyValue($<HTMLInputElement>('share-link'), '分享链接已复制'));
 async function renderShareQR() {
   const canvas = $<HTMLCanvasElement>('share-qr'), revision = ++shareQRRevision, link = shareLink;
   if (!link) return;
@@ -1049,7 +1057,7 @@ async function renderShareQR() {
   canvas.width = rendered.width; canvas.height = rendered.height;
   canvas.getContext('2d')!.drawImage(rendered, 0, 0); canvas.hidden = false;
 }
-$('copy-code').onclick = () => run(async () => { await navigator.clipboard.writeText($<HTMLTextAreaElement>('outgoing-code').value); toast('配对码已复制'); });
+$('copy-code').onclick = () => run(() => copyValue($<HTMLTextAreaElement>('outgoing-code'), '配对码已复制'));
 $('pair-qr-button').onclick = () => run(async () => {
   if (!$('pair-qr').hidden) $('pair-qr').hidden = true;
   else await renderPairQR();

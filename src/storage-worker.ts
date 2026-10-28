@@ -1,7 +1,7 @@
 import { STORAGE_ROOT, RETENTION_MS, validSession, storageLock, diskName, validateIndex, type StoredIndex, type StoredFile, type StoredEntry } from './storage-format';
 import type { FileInfo } from './protocol';
 
-type Access = { write(data: Uint8Array, options: { at: number }): number; read(data: Uint8Array, options: { at: number }): number; getSize(): number; truncate(size: number): void; flush(): void; close(): void };
+type Access = { write(data: Uint8Array, options: { at: number }): number; read(data: Uint8Array, options: { at: number }): number; getSize(): number | Promise<number>; truncate(size: number): void | Promise<void>; flush(): void | Promise<void>; close(): void | Promise<void> };
 type SyncFile = FileSystemFileHandle & { createSyncAccessHandle(): Promise<Access> };
 type Session = { dir: FileSystemDirectoryHandle; index: StoredIndex; release: () => void; live: boolean; access?: Access; active?: number; written: number };
 const scope = globalThis as unknown as { navigator: Navigator; postMessage(value: unknown): void; onmessage: ((event: MessageEvent) => void) | null };
@@ -24,8 +24,8 @@ async function writeIndex(s: Session) {
   const access = await handle.createSyncAccessHandle();
   try {
     const bytes = new TextEncoder().encode(JSON.stringify(s.index));
-    writeAll(access, bytes); access.truncate(bytes.length); access.flush();
-  } finally { access.close(); }
+    writeAll(access, bytes); await access.truncate(bytes.length); await access.flush();
+  } finally { await access.close(); }
 }
 async function readIndex(dir: FileSystemDirectoryHandle) {
   const copies: StoredIndex[] = [];
@@ -62,7 +62,7 @@ async function removeEntry(dir: FileSystemDirectoryHandle, name: string) {
   try { await dir.removeEntry(name); } catch (error) { if ((error as DOMException).name !== 'NotFoundError') throw error; }
 }
 async function discardIncomplete(s: Session) {
-  s.access?.close(); s.access = undefined; s.active = undefined;
+  await s.access?.close(); s.access = undefined; s.active = undefined;
   const pending = s.index.files.filter(f => !f.complete);
   for (const entry of pending) await removeEntry(s.dir, diskName(entry.info.id));
   if (pending.length) { s.index.files = s.index.files.filter(f => f.complete); await writeIndex(s); }
@@ -99,18 +99,22 @@ async function endSession(s: Session) {
 }
 async function handle(type: string, data: any): Promise<unknown> {
   if (type === 'probe') {
-    if (!scope.navigator.locks) throw Error('Web Locks unavailable');
+    if (typeof scope.navigator.locks?.request !== 'function') throw Error('Web Locks unavailable');
     const dir = await root(), name = 'probe-' + crypto.randomUUID();
     try {
-      const access = await (await syncFile(dir, name, true)).createSyncAccessHandle();
-      try { writeAll(access, new Uint8Array([37])); access.flush(); if (access.getSize() !== 1) throw Error('Storage probe failed'); }
-      finally { access.close(); }
+      const file = await syncFile(dir, name, true), access = await file.createSyncAccessHandle();
+      // Older Safari returns promises for control methods. Close before taking
+      // a snapshot, so detection covers the same readback used for downloads.
+      try { writeAll(access, new Uint8Array([37])); await access.flush(); if (await access.getSize() !== 1) throw Error('Storage probe failed'); }
+      finally { await access.close(); }
+      const snapshot = await file.getFile();
+      if (snapshot.size !== 1 || new Uint8Array(await snapshot.arrayBuffer())[0] !== 37) throw Error('Storage readback failed');
     } finally { await removeEntry(dir, name); }
     return true;
   }
   if (type === 'create') {
-    const estimate = await scope.navigator.storage.estimate();
-    if (estimate.quota && estimate.usage !== undefined && estimate.quota - estimate.usage < data.total) throw new DOMException('Insufficient storage quota', 'QuotaExceededError');
+    const estimate = await scope.navigator.storage.estimate?.().catch(() => ({} as StorageEstimate));
+    if (estimate?.quota && estimate.usage !== undefined && estimate.quota - estimate.usage < data.total) throw new DOMException('Insufficient storage quota', 'QuotaExceededError');
     const id = crypto.randomUUID(), s = await claim(id, true);
     if (!s) throw Error('Temporary files are busy');
     try { await writeIndex(s); } catch (error) { await (await root()).removeEntry(id, { recursive: true }).catch(() => {}); sessions.delete(id); s.release(); throw error; }
@@ -149,7 +153,7 @@ async function handle(type: string, data: any): Promise<unknown> {
     validateIndex({ ...s.index, files: [...s.index.files, { info, complete: false }] });
     s.index.files.push({ info, complete: false }); await writeIndex(s);
     s.access = await (await syncFile(s.dir, diskName(info.id), true)).createSyncAccessHandle();
-    s.access.truncate(0); s.active = info.id; s.written = 0;
+    await s.access.truncate(0); s.active = info.id; s.written = 0;
     return;
   }
   if (type === 'write') {
@@ -158,13 +162,13 @@ async function handle(type: string, data: any): Promise<unknown> {
     if (!s.access || !entry || data.offset !== s.written || !bytes.length || bytes.length > 256 * 1024 || s.written + bytes.length > entry.info.size) throw Error('Invalid write offset');
     const previous = s.written;
     writeAll(s.access, bytes, s.written); s.written += bytes.length;
-    if (Math.floor(s.written / 1048576) > Math.floor(previous / 1048576) || s.written === entry.info.size) s.access.flush();
+    if (Math.floor(s.written / 1048576) > Math.floor(previous / 1048576) || s.written === entry.info.size) await s.access.flush();
     return s.written;
   }
   if (type === 'finish') {
     const entry = s.index.files.find(f => f.info.id === s.active);
     if (!entry || !s.access || s.written !== entry.info.size || !/^[a-f0-9]{64}$/.test(data.hash)) throw Error('Incomplete file');
-    s.access.flush(); s.access.close(); s.access = undefined; s.active = undefined;
+    await s.access.flush(); await s.access.close(); s.access = undefined; s.active = undefined;
     entry.complete = true; entry.hash = data.hash; entry.receivedAt = Date.now(); entry.expiresAt = entry.receivedAt + RETENTION_MS;
     try { await writeIndex(s); } catch (error) { entry.complete = false; delete entry.hash; delete entry.receivedAt; delete entry.expiresAt; throw error; }
     return;

@@ -2,6 +2,8 @@ import { storageKey } from './app-environment';
 export type Language = 'zh' | 'en';
 type Params = Record<string, string | number>;
 const messages: Record<string, string> = {
+  '当前浏览器不支持手动配对码，请使用分享链接或更新浏览器。': 'This browser cannot use manual pairing codes. Use a sharing link or update your browser.',
+  '无法自动复制，请长按或选中链接后复制。': 'Automatic copy is unavailable. Touch and hold, or select the link to copy it.',
   '加密转发未能建立，请检查网络后重试，或更换新版浏览器。': 'Encrypted relay could not connect. Check the network and retry, or use an updated browser.',
   '当前浏览器缺少安全传输能力，请在新版 Safari、Chrome 或 Edge 中通过 HTTPS 打开完整分享链接。': 'This browser lacks secure transfer capabilities. Open the complete sharing link over HTTPS in an updated Safari, Chrome, or Edge.',
   '当前浏览器不支持直连，请使用加密转发或新版浏览器。': 'This browser cannot connect directly. Use encrypted relay or an updated browser.',

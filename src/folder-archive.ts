@@ -14,7 +14,7 @@ const unavailable = '此浏览器不支持文件夹打包暂存，请先在系�
 // but never touch archives still owned by another tab's worker lock.
 export function cleanupSourceArchives() {
   return cleanup ??= (async () => {
-    if (!navigator.storage?.getDirectory || !navigator.locks) return;
+    if (typeof navigator.storage?.getDirectory !== 'function' || typeof navigator.locks?.request !== 'function') return;
     try {
       const root = await (await navigator.storage.getDirectory()).getDirectoryHandle(ARCHIVE_ROOT);
       for await (const [id] of root.entries()) if (validID(id)) {
@@ -33,7 +33,7 @@ export async function packageSources(sources: DroppedSource[], progress: (done: 
   throwIfAborted(signal);
   const folders = sources.filter(source => source.kind === 'folder');
   if (!folders.length) return sources.map(source => (source as Extract<DroppedSource, { kind: 'file' }>).file);
-  if (!navigator.storage?.getDirectory || !navigator.locks) throw Error(unavailable);
+  if (typeof navigator.storage?.getDirectory !== 'function' || typeof navigator.locks?.request !== 'function') throw Error(unavailable);
   await cleanupSourceArchives();
   throwIfAborted(signal);
   const id = crypto.randomUUID();
@@ -44,7 +44,7 @@ export async function packageSources(sources: DroppedSource[], progress: (done: 
       const abort = () => { signal?.removeEventListener('abort', abort); reject(new DOMException('Cancelled', 'AbortError')); };
       const fail = (error: Error) => { signal?.removeEventListener('abort', abort); reject(error); };
       signal?.addEventListener('abort', abort, { once: true });
-      worker.onerror = () => fail(Error('文件夹打包失败，请重试。'));
+      worker.onerror = worker.onmessageerror = () => fail(Error('文件夹打包失败，请重试。'));
       worker.onmessage = ({ data }) => {
         if (data.type === 'progress') progress(data.done, data.total);
         else if (data.type === 'done') { signal?.removeEventListener('abort', abort); resolve(data.files); }

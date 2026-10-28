@@ -47,13 +47,18 @@ function fromBase64(s: string): Uint8Array<ArrayBuffer> {
   const decoded = atob(s.replace(/-/g, '+').replace(/_/g, '/'));
   return Uint8Array.from(decoded, c => c.charCodeAt(0));
 }
+function requireManualCompression() {
+  if (!supportsCompression()) throw Error('当前浏览器不支持手动配对码，请使用分享链接或更新浏览器。');
+}
 export async function packDescription(d: RTCSessionDescriptionInit): Promise<string> {
+  requireManualCompression();
   const input = new Blob([JSON.stringify({ v: 1, type: d.type, sdp: d.sdp })]);
   const compressed = await new Response(input.stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
   return 'PS1.' + toBase64(new Uint8Array(compressed));
 }
 export async function unpackDescription(code: string, expected: 'offer' | 'answer'): Promise<RTCSessionDescriptionInit> {
   if (!code.startsWith('PS1.') || code.length > 120000) throw Error('这不是有效的 PizzaSend 配对码');
+  requireManualCompression();
   const reader = new Blob([fromBase64(code.slice(4))]).stream().pipeThrough(new DecompressionStream('gzip')).getReader();
   const parts: Uint8Array<ArrayBuffer>[] = [];
   let size = 0;

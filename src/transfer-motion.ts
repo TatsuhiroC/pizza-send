@@ -28,7 +28,7 @@ export class DeliveryMotion {
     this.state = state;
     if (opens && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
       const lid = this.hero.querySelector<SVGElement>('.parcel-lid-face');
-      if (lid) {
+      if (lid && typeof lid.animate === 'function') {
         // Project a rigid lid around the rear hinge, instead of morphing two
         // matrices. Both hinge endpoints remain attached at every angle.
         const frames = Array.from({ length: 136 }, (_, degree) => {
@@ -37,7 +37,8 @@ export class DeliveryMotion {
           const d = .25456 * (Math.cos(angle) - Math.sin(angle));
           return { transform: `matrix(.36,.25456,${c},${d},${42 + 5 * (-.36 - c)},${39 + 5 * (.25456 - d)})` };
         });
-        this.lidOpening = lid.animate(frames, { duration: 700, easing: 'cubic-bezier(.3,.65,.3,1)' });
+        try { this.lidOpening = lid.animate(frames, { duration: 700, easing: 'cubic-bezier(.3,.65,.3,1)' }); }
+        catch { /* Optional SVG animation must not interrupt file selection. */ }
       }
     }
   }
