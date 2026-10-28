@@ -1389,6 +1389,10 @@ export class AutoPair {
         await this.sendDescription('answer', t.pc.localDescription?.toJSON() ?? this.lastAnswer);
       } else if (t.recovering) void this.recover();
     } else if (message.type === 'restart-request' && t.role === 'sender') {
+      if (message.epoch === this.epoch + 1 && (!t.transportConnected || t.recovering)) {
+        this.epoch = message.epoch; this.lastOffer = this.lastAnswer = undefined; this.resetCandidates();
+        this.streamFallback?.peerAdvancedEpoch();
+      }
       t.requestRecovery();
       if (!this.negotiating && this.lastOffer) await this.sendDescription('offer', t.pc.localDescription?.toJSON() ?? this.lastOffer);
     } else if (message.type === 'offer' && t.role === 'receiver') {
@@ -1460,7 +1464,7 @@ export class AutoPair {
     if (this.directTrial) { if (this.directTrial.attempted) return; this.directTrial.attempted = true; }
     if (this.streamFallback?.active) {
       this.lastAttempt = Date.now();
-      if (t.role === 'receiver') await this.signal.send({ type: 'restart-request' }).catch(() => {});
+      if (t.role === 'receiver') await this.signal.send({ type: 'restart-request', epoch: this.epoch }).catch(() => {});
       else this.streamFallback.reconnect();
       return;
     }
@@ -1471,7 +1475,7 @@ export class AutoPair {
       await this.signal.ready();
       if (this.closed || t.stopped || revision !== this.revision) return;
       this.lastAttempt = Date.now();
-      if (t.role === 'receiver') await this.signal.send({ type: 'restart-request' });
+      if (t.role === 'receiver') await this.signal.send({ type: 'restart-request', epoch: this.epoch });
       else {
         this.epoch++; this.offered = true; this.lastOffer = undefined; this.resetCandidates();
         await t.replaceTransport();
