@@ -1,3 +1,4 @@
+import { throwIfAborted } from './cancellation';
 import { storageDirectory } from './app-environment';
 import type { DroppedSource } from './source-files';
 
@@ -13,7 +14,7 @@ const unavailable = '此浏览器不支持文件夹打包暂存，请先在系�
 // but never touch archives still owned by another tab's worker lock.
 export function cleanupSourceArchives() {
   return cleanup ??= (async () => {
-    if (!navigator.storage?.getDirectory || !navigator.locks) return;
+    if (typeof navigator.storage?.getDirectory !== 'function' || typeof navigator.locks?.request !== 'function') return;
     try {
       const root = await (await navigator.storage.getDirectory()).getDirectoryHandle(ARCHIVE_ROOT);
       for await (const [id] of root.entries()) if (validID(id)) {
@@ -29,12 +30,12 @@ export function releaseSourceArchive(file: File) { releases.get(file)?.(); relea
 export function stopSourceArchives() { for (const worker of workers) worker.terminate(); workers.clear(); releases.clear(); }
 
 export async function packageSources(sources: DroppedSource[], progress: (done: number, total: number) => void, signal?: AbortSignal): Promise<File[]> {
-  signal?.throwIfAborted();
+  throwIfAborted(signal);
   const folders = sources.filter(source => source.kind === 'folder');
   if (!folders.length) return sources.map(source => (source as Extract<DroppedSource, { kind: 'file' }>).file);
-  if (!navigator.storage?.getDirectory || !navigator.locks) throw Error(unavailable);
+  if (typeof navigator.storage?.getDirectory !== 'function' || typeof navigator.locks?.request !== 'function') throw Error(unavailable);
   await cleanupSourceArchives();
-  signal?.throwIfAborted();
+  throwIfAborted(signal);
   const id = crypto.randomUUID();
   const worker = new Worker(new URL('./folder-archive-worker.ts', import.meta.url), { type: 'module' });
   workers.add(worker);
@@ -43,7 +44,7 @@ export async function packageSources(sources: DroppedSource[], progress: (done: 
       const abort = () => { signal?.removeEventListener('abort', abort); reject(new DOMException('Cancelled', 'AbortError')); };
       const fail = (error: Error) => { signal?.removeEventListener('abort', abort); reject(error); };
       signal?.addEventListener('abort', abort, { once: true });
-      worker.onerror = () => fail(Error('文件夹打包失败，请重试。'));
+      worker.onerror = worker.onmessageerror = () => fail(Error('文件夹打包失败，请重试。'));
       worker.onmessage = ({ data }) => {
         if (data.type === 'progress') progress(data.done, data.total);
         else if (data.type === 'done') { signal?.removeEventListener('abort', abort); resolve(data.files); }

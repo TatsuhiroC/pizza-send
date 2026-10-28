@@ -27,7 +27,7 @@
 - [全代码审查与旧连接回调修复：2026-10-26](review-2026-10-26.md)
 - [24 日功能逐项恢复与新路线兼容：2026-10-26](restoration-2026-10-26.md)
 - [回退后的独立功能恢复范围：2026-10-25](independent-restoration-2026-10-25.md)
-- [体积、复杂度与重复工作审查：2026-10-24（历史）](lightweight-review.md)
+- [体积、复杂度与资源占用复审：2026-10-28（含历史记录）](lightweight-review.md)
 - [创建准备优化与全仓审查：2026-10-24（历史）](startup-preparation-review.md)
 - [启动配置与源文件读取保护：2026-10-24（历史）](startup-source-hardening.md)
 - [分享链接与二维码就绪延迟：2026-10-24（历史）](share-readiness.md)

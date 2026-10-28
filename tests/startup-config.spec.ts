@@ -212,8 +212,8 @@ for (const bad of [{ signalUrl: settings.signalUrl, memoryLimitBytes: -1 }, { si
   await expect(page.locator('#retry-config')).toBeVisible(); await expect(page.locator('#start-send')).toBeDisabled();
   await page.locator('#receive-tab').click(); await expect(page.locator('#open-scanner')).toBeEnabled();
 });
-test('loading configuration cannot enable a browser without WebRTC', async ({ page }) => {
-  await page.addInitScript(() => Object.defineProperty(window, 'RTCPeerConnection', { configurable: true, value: undefined }));
+test('loading configuration cannot enable a browser without secure cryptography', async ({ page }) => {
+  await page.addInitScript(() => Object.defineProperty(window.crypto, 'subtle', { configurable: true, value: undefined }));
   await page.goto('./'); await page.locator('#file-input').setInputFiles(file);
-  await expect(page.locator('#start-send')).toBeDisabled(); await expect(page.locator('#notice')).toContainText('WebRTC');
+  await expect(page.locator('#start-send')).toBeDisabled(); await expect(page.locator('#notice')).toContainText('缺少安全传输能力');
 });

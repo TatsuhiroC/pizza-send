@@ -12,13 +12,14 @@ export function fitCameraFrame(video: HTMLVideoElement) {
     // Measure the actual heading, instructions and buttons, including wrapping
     // in either language. Reserve their space before sizing the preview.
     const children = [...dialog.children].filter(child => child.getBoundingClientRect().height > 0);
-    const last = children.at(-1)!;
+    const last = children[children.length - 1];
+    if (!last) return;
     // Use subpixel bounds rather than rounded scrollHeight, so resizing cannot
     // create a one-pixel feedback loop in the observer.
     const otherHeight = last.getBoundingClientRect().bottom - dialog.getBoundingClientRect().top
       + dialog.scrollTop + parseFloat(style.paddingBottom) + parseFloat(style.borderBottomWidth)
       + parseFloat(getComputedStyle(last).marginBottom) - frame.getBoundingClientRect().height;
-    const viewport = Math.min(innerHeight, visualViewport?.height ?? innerHeight);
+    const viewport = Math.min(innerHeight, window.visualViewport?.height ?? innerHeight);
     const availableHeight = Math.max(64, viewport - 32 - otherHeight);
     const width = Math.min(contentWidth, availableHeight * ratio);
     if (width <= 0) return;
@@ -35,8 +36,10 @@ export function fitCameraFrame(video: HTMLVideoElement) {
   video.addEventListener('loadedmetadata', dimensions);
   video.addEventListener('resize', dimensions);
   window.addEventListener('resize', schedule);
-  visualViewport?.addEventListener('resize', schedule);
-  const observer = new ResizeObserver(schedule);
-  observer.observe(dialog);
-  for (const child of dialog.children) observer.observe(child);
+  window.visualViewport?.addEventListener('resize', schedule);
+  if (typeof ResizeObserver === 'function') {
+    const observer = new ResizeObserver(schedule);
+    observer.observe(dialog);
+    for (const child of dialog.children) observer.observe(child);
+  }
 }

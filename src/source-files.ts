@@ -1,10 +1,11 @@
+import { throwIfAborted } from './cancellation';
 export class SourceReadError extends Error {}
 type ReadOptions = { signal?: AbortSignal; deferTimeout?: () => number };
 
 // Always read bounded ranges, including files beyond the 2/4 GiB boundaries.
 export async function readSource(file: File, start: number, end: number, timeout = 15000, options: ReadOptions = {}): Promise<ArrayBuffer> {
   const { signal, deferTimeout } = options;
-  signal?.throwIfAborted();
+  throwIfAborted(signal);
   let timer: ReturnType<typeof setTimeout> | undefined;
   let abort: (() => void) | undefined;
   try {
@@ -30,13 +31,13 @@ export async function readSource(file: File, start: number, end: number, timeout
     if (data.byteLength !== end - start) throw new Error('Short source read');
     return data;
   } catch {
-    signal?.throwIfAborted();
+    throwIfAborted(signal);
     throw new SourceReadError('无法读取原文件“' + file.name + '”。请确认文件仍在本机、未被移动或修改，再重新选择。');
   } finally { clearTimeout(timer); if (abort) signal?.removeEventListener('abort', abort); }
 }
 
 export async function checkSources(files: File[], active: () => boolean, signal?: AbortSignal) {
-  signal?.throwIfAborted();
+  throwIfAborted(signal);
   const controller = new AbortController();
   let next = 0, stopped = false, failed = false, failure: unknown;
   const stop = () => { stopped = true; controller.abort(); };
@@ -61,7 +62,7 @@ export async function checkSources(files: File[], active: () => boolean, signal?
   try {
     await Promise.all(Array.from({ length: Math.min(4, files.length) }, worker));
     if (failed) throw failure;
-    signal?.throwIfAborted();
+    throwIfAborted(signal);
   } finally { signal?.removeEventListener('abort', stop); }
 }
 
@@ -74,7 +75,7 @@ export function validSourceSegment(name: string) {
 // Capture native entries while the drop event is still readable. Keep explicit
 // directory entries (including empty directories) and the selected root name.
 export async function droppedSources(data: DataTransfer, signal?: AbortSignal): Promise<DroppedSource[]> {
-  signal?.throwIfAborted();
+  throwIfAborted(signal);
   const items = Array.from(data.items || []).filter(item => item.kind === 'file');
   const entries = items.map(item => item.webkitGetAsEntry?.());
   const fallbacks = items.map(item => item.getAsFile?.());
@@ -83,7 +84,7 @@ export async function droppedSources(data: DataTransfer, signal?: AbortSignal): 
   const sources: DroppedSource[] = [];
   let visited = 0, files = 0;
   const read = <T>(operation: (resolve: (value: T) => void, reject: (error: unknown) => void) => void) => new Promise<T>((resolve, reject) => {
-    signal?.throwIfAborted();
+    throwIfAborted(signal);
     const abort = () => { signal?.removeEventListener('abort', abort); reject(signal?.reason); };
     signal?.addEventListener('abort', abort, { once: true });
     const done = (value: T) => { signal?.removeEventListener('abort', abort); resolve(value); };
@@ -91,7 +92,7 @@ export async function droppedSources(data: DataTransfer, signal?: AbortSignal): 
     try { operation(done, fail); } catch (error) { fail(error); }
   });
   const visit = async (entry: FileSystemEntry, output: FolderEntry[], parent = '', depth = 0): Promise<void> => {
-    signal?.throwIfAborted();
+    throwIfAborted(signal);
     if (++visited > 1000 || depth > 32) throw Error('文件夹层级或项目过多，请分批分享。');
     if (!validSourceSegment(entry.name)) throw Error('文件夹中有不支持的名称，请重命名后重试。');
     const path = parent + entry.name;
@@ -110,7 +111,7 @@ export async function droppedSources(data: DataTransfer, signal?: AbortSignal): 
     } else throw Error('无法读取所选内容，请重新选择。');
   };
   for (let i = 0; i < entries.length; i++) {
-    signal?.throwIfAborted();
+    throwIfAborted(signal);
     const entry = entries[i];
     if (entry?.isDirectory) {
       const output: FolderEntry[] = [];

@@ -8,7 +8,7 @@ import { readSource, validSourceSegment, type DroppedSource } from './source-fil
 configure({ useWebWorkers: false, chunkSize: 262144 });
 const ROOT = storageDirectory('pizzasend-source-archives-v1');
 type Folder = Extract<DroppedSource, { kind: 'folder' }>;
-type Access = { write(data: Uint8Array, options: { at: number }): number; flush(): void; close(): void };
+type Access = { write(data: Uint8Array, options: { at: number }): number; flush(): void | Promise<void>; close(): void | Promise<void> };
 type SyncFile = FileSystemFileHandle & { createSyncAccessHandle(): Promise<Access> };
 const scope = globalThis as unknown as { navigator: Navigator; postMessage(value: unknown): void; onmessage(event: MessageEvent): void };
 let dir: FileSystemDirectoryHandle, root: FileSystemDirectoryHandle, batchID: string;
@@ -58,10 +58,10 @@ async function pack(id: string, folders: Folder[]) {
     stage = 'batch-root';
     dir = await root.getDirectoryHandle(id, { create: true });
     stage = 'quota';
-    const estimate = await scope.navigator.storage.estimate();
+    const estimate = await scope.navigator.storage.estimate?.().catch(() => ({} as StorageEstimate));
     // STORE needs source size plus modest headers. This is advisory; writes can
     // still fail when another tab or app consumes the remaining quota.
-    if (estimate.quota !== undefined && total + 1048576 > estimate.quota - (estimate.usage || 0)) throw new DOMException('Quota', 'QuotaExceededError');
+    if (estimate?.quota !== undefined && total + 1048576 > estimate.quota - (estimate.usage || 0)) throw new DOMException('Quota', 'QuotaExceededError');
     const files: File[] = [];
     let done = 0, lastReport = 0;
     for (const [index, folder] of folders.entries()) {
@@ -106,7 +106,7 @@ async function pack(id: string, folders: Folder[]) {
         done += entry.file?.size || 0;
       }
       stage = 'close';
-      await writer.close(); access.flush(); access.close(); access = undefined;
+      await writer.close(); await access.flush(); await access.close(); access = undefined;
       stage = 'snapshot';
       const snapshot = await handle.getFile();
       files.push(new File([snapshot], safeName(folder.name + '.zip'), { type: 'application/zip' })); live.add(index);
@@ -114,7 +114,7 @@ async function pack(id: string, folders: Folder[]) {
     scope.postMessage({ type: 'progress', done: total, total });
     stage = 'deliver'; scope.postMessage({ type: 'done', files });
   } catch (error) {
-    try { access?.close(); } catch { /* Closed or failed device. */ }
+    try { await access?.close(); } catch { /* Closed or failed device. */ }
     try { if (root && batchID) await root.removeEntry(batchID, { recursive: true }); } catch { /* Retry next visit. */ }
     releaseLock?.();
     scope.postMessage({ type: 'error', storageUnavailable: stage === 'storage-root', quota: error instanceof DOMException && error.name === 'QuotaExceededError', reason: stage + ': ' + (error instanceof Error ? error.name + ': ' + error.message : String(error)) });

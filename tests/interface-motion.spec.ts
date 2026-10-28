@@ -32,7 +32,7 @@ test('canceling scan success prevents a delayed connection and permits scanning 
   let connections = 0;
   page.on('request', request => { if (new URL(request.url()).port === '8787' && new URL(request.url()).pathname.startsWith('/rooms/')) connections++; });
   await page.goto('./'); await page.locator('#receive-tab').click(); await page.locator('#open-scanner').click();
-  const link = 'http://127.0.0.1:5173/#' + shareFragment('11'.repeat(32));
+  const link = new URL('/#' + shareFragment('11'.repeat(32)), page.url()).toString();
   const image = { name: 'share.png', mimeType: 'image/png', buffer: await QRCode.toBuffer(link, { width: 480, margin: 4 }) };
   const uploadImage = () => page.evaluate(({ name, mimeType, base64 }) => {
     const input = document.getElementById('qr-image-input') as HTMLInputElement;

@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { shareFragment } from '../src/share';
 
 // WebKit's private contexts reject OPFS. Use a disposable, test-owned disk
 // profile just as the existing real storage coverage does.
@@ -15,6 +16,31 @@ const test = base.extend({ context: async ({ context, browserName, playwright },
 
 test.beforeEach(async ({ context }) => {
   await context.route('**/app.config.json', route => route.fulfill({ json: { signalUrl: '', iceServers: [], memoryLimitBytes: 1048576 } }));
+});
+
+test('compiled test page boots and preserves invitations without newer runtime APIs', async ({ page }) => {
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  await page.addInitScript(() => {
+    Object.defineProperty(Object, 'hasOwn', { configurable: true, value: undefined });
+    Object.defineProperty(Array.prototype, 'at', { configurable: true, value: undefined });
+    Object.defineProperty(AbortSignal, 'timeout', { configurable: true, value: undefined });
+    Object.defineProperty(AbortSignal.prototype, 'throwIfAborted', { configurable: true, value: undefined });
+    Object.defineProperty(window, 'RTCPeerConnection', { configurable: true, value: undefined });
+  });
+  await page.route('**/test/app.config.json', route => route.fulfill({ json: { signalUrl: 'https://compiled-fixture.invalid', iceServers: [], memoryLimitBytes: 1048576 } }));
+  await page.route('https://compiled-fixture.invalid/rooms/**', route => route.fulfill({ status: 410 }));
+  await page.goto('/test/?receive=1#' + shareFragment('11'.repeat(32)));
+  await expect(page.locator('#notice')).toContainText('分享链接已过期');
+  await expect(page.locator('#receive-code')).toHaveValue(/#2\.[A-Za-z0-9_-]{43}$/);
+  const semantics = await page.evaluate(() => {
+    let nullRejected = false;
+    try { Object.hasOwn(null, 'value'); } catch { nullRejected = true; }
+    const object = Object.create({ inherited: true }); object.own = true;
+    return { own: Object.hasOwn(object, 'own'), inherited: Object.hasOwn(object, 'inherited'), primitive: Object.hasOwn('x', 0),
+      nullRejected, enumerable: Object.getOwnPropertyDescriptor(Object, 'hasOwn')!.enumerable };
+  });
+  expect(semantics).toEqual({ own: true, inherited: false, primitive: true, nullRejected: true, enumerable: false });
+  expect(errors).toEqual([]);
 });
 
 test('stable root and test path load distinct bundles with a translated compact test banner', async ({ page }) => {

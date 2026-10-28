@@ -7,7 +7,7 @@ export class RouteFallbackPolicy {
   reset() { this.samples = []; this.slowSince = undefined; }
   update(now: number, bytes: number, total: number, active: boolean) {
     if (!active || total <= bytes || !Number.isFinite(bytes) || !Number.isFinite(total)) { this.reset(); return false; }
-    const previous = this.samples.at(-1);
+    const previous = this.samples[this.samples.length - 1];
     // Tab suspension and checkpoint rollback require a fresh window.
     if (previous && (now <= previous.at || now - previous.at > 4000 || bytes < previous.bytes)) this.reset();
     this.samples.push({ at: now, bytes });

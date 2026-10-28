@@ -6,7 +6,7 @@ const integer = (value: unknown) => { const n = numeric(value); return n === und
 const choice = (value: unknown, allowed: readonly string[]) => typeof value === 'string' && allowed.includes(value) ? value : 'unknown';
 type Native = Record<string, string | number | undefined>;
 export type DiagnosticInput = {
-  pc: RTCPeerConnection; role: 'sender' | 'receiver'; generation: number; started: number;
+  pc?: RTCPeerConnection; role: 'sender' | 'receiver'; generation: number; started: number;
   sent: number; acknowledged: number; received: number; buffered: number; queued: number; window: number;
   sourceBytes: number; sourceMs: number; sinkBytes: number; sinkMs: number;
   completed: boolean; stopped: boolean; recovering: boolean; hidden: boolean; peerHidden: boolean;
@@ -14,7 +14,7 @@ export type DiagnosticInput = {
 };
 type Row = Native & { atMs: number };
 type Trace = { id: number; role: string; ended: boolean; samples: Row[]; peer?: Record<string, number>; peerAtMs?: number };
-type Reader = { read: () => DiagnosticInput; trace: Trace; origin: number; native: Native; nativeAt: number; nativePeer: RTCPeerConnection; pending?: object; pendingPeer?: RTCPeerConnection; lastPeerAt: number };
+type Reader = { read: () => DiagnosticInput; trace: Trace; origin: number; native: Native; nativeAt: number; nativePeer?: RTCPeerConnection; pending?: object; pendingPeer?: RTCPeerConnection; lastPeerAt: number };
 export type DiagnosticHandle = { close(): void; packet(): Record<string, number> | undefined; receive(value: unknown): void };
 const readers = new Map<number, Reader>(), traces: Trace[] = [];
 let sequence = 0, timer: ReturnType<typeof setInterval> | undefined;
@@ -80,7 +80,7 @@ export function sanitizedPeerDiagnostics(value: unknown): Record<string, number>
 
 function notify() { window.dispatchEvent(new Event('pizzasend-diagnostics-change')); }
 function append(reader: Reader, input: DiagnosticInput, now: number) {
-  const previous = reader.trace.samples.at(-1), confirmed = input.role === 'sender' ? input.acknowledged : input.received;
+  const previous = reader.trace.samples[reader.trace.samples.length - 1], confirmed = input.role === 'sender' ? input.acknowledged : input.received;
   const atMs = Math.round(now - reader.origin), elapsed = input.started ? Math.max(1, now - input.started) : 0;
   const recentBps = previous && atMs - previous.atMs >= 500 ? Math.round(Math.max(0, confirmed - Number(previous.confirmed || 0)) * 1000 / (atMs - previous.atMs)) : previous?.recentBps;
   const row: Row = {
@@ -90,8 +90,8 @@ function append(reader: Reader, input: DiagnosticInput, now: number) {
     sourceBytes: integer(input.sourceBytes), sourceReadAndHashMs: integer(input.sourceMs), sinkBytes: integer(input.sinkBytes), sinkHashAndWriteMs: integer(input.sinkMs),
     hidden: Number(input.hidden), peerHidden: Number(input.peerHidden), recovering: Number(input.recovering), completed: Number(input.completed),
     transport: input.transport || 'webrtc',
-    connection: input.transport === 'websocket' ? input.connectionOpen ? 'connected' : 'closed' : choice(input.pc.connectionState, ['new', 'connecting', 'connected', 'disconnected', 'failed', 'closed']),
-    ice: input.transport === 'websocket' ? 'not-applicable' : choice(input.pc.iceConnectionState, ['new', 'checking', 'connected', 'completed', 'disconnected', 'failed', 'closed']),
+    connection: input.transport === 'websocket' ? input.connectionOpen ? 'connected' : 'closed' : choice(input.pc?.connectionState, ['new', 'connecting', 'connected', 'disconnected', 'failed', 'closed']),
+    ice: input.transport === 'websocket' ? 'not-applicable' : choice(input.pc?.iceConnectionState, ['new', 'checking', 'connected', 'completed', 'disconnected', 'failed', 'closed']),
     nativeAgeMs: reader.nativeAt ? Math.round(now - reader.nativeAt) : undefined
   };
   reader.trace.samples.push(row);
@@ -104,7 +104,7 @@ function sample() {
     if (input.transport === 'websocket') { reader.native = {}; reader.nativeAt = 0; }
     append(reader, input, now);
     if (input.completed || input.stopped) { reader.trace.ended = true; readers.delete(reader.trace.id); continue; }
-    if (input.transport === 'websocket' || (reader.pending && reader.pendingPeer === pc) || pc.connectionState === 'closed') continue;
+    if (!pc || input.transport === 'websocket' || (reader.pending && reader.pendingPeer === pc) || pc.connectionState === 'closed') continue;
     const pending = {}; reader.pending = pending; reader.pendingPeer = pc;
     void Promise.resolve().then(() => pc.getStats()).then(report => {
       if (readers.get(reader.trace.id) !== reader || reader.read().pc !== pc || reader.read().transport === 'websocket') return;

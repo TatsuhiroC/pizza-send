@@ -31,10 +31,16 @@ function request<T>(type: string, data?: unknown, transfer: Transferable[] = [])
 }
 export function supportsTemporaryStorage(): Promise<boolean> {
   return available ??= (async () => {
-    if (!isSecureContext || !navigator.storage?.getDirectory || !navigator.locks) return false;
+    if (!isSecureContext || typeof navigator.storage?.getDirectory !== 'function' || typeof navigator.locks?.request !== 'function') return false;
+    let activeWorker: Worker | undefined, timer: ReturnType<typeof setTimeout> | undefined;
+    const stop = () => {
+      if (!activeWorker || worker !== activeWorker) return;
+      activeWorker.terminate(); worker = undefined;
+      for (const task of tasks.values()) task.reject(Error('浏览器写盘进程已停止，请刷新页面后重试。'));
+      tasks.clear();
+    };
     try {
-      worker = new Worker(new URL('./storage-worker.ts', import.meta.url), { type: 'module' });
-      const activeWorker = worker;
+      activeWorker = worker = new Worker(new URL('./storage-worker.ts', import.meta.url), { type: 'module' });
       worker.onmessage = ({ data }) => {
         if (worker !== activeWorker) return;
         const task = tasks.get(data.id); if (!task) return;
@@ -42,13 +48,15 @@ export function supportsTemporaryStorage(): Promise<boolean> {
         if (data.ok) task.resolve(data.data);
         else { const error = Error(data.error.message); error.name = data.error.name; task.reject(storageError(error)); }
       };
-      worker.onerror = () => {
-        if (worker !== activeWorker) return;
-        for (const task of tasks.values()) task.reject(Error('浏览器写盘进程已停止，请刷新页面后重试。'));
-        tasks.clear(); worker?.terminate(); worker = undefined;
-      };
-      return await request<boolean>('probe');
-    } catch { worker?.terminate(); worker = undefined; return false; }
+      worker.onerror = stop;
+      worker.onmessageerror = stop;
+      // Bound capability detection only. Real writes retain their existing
+      // semantics; a slow disk must not trigger a mid-transfer memory fallback.
+      timer = setTimeout(stop, 8000);
+      const supported = await request<boolean>('probe');
+      return supported && worker === activeWorker;
+    } catch { stop(); return false; }
+    finally { clearTimeout(timer); }
   })();
 }
 export async function createTemporarySession(total: number) {
