@@ -1,43 +1,23 @@
 # PizzaSend · 工程文档
 
-[项目首页](../README.md) · [English introduction](../README.en.md)
+[项目首页](../README.md) · [English](../README.en.md)
 
-首页只保留使用介绍。这里记录实现、验证范围与维护过程；历史实测不代表所有设备和网络的表现。
+这里只维护当前行为、部署方法和技术边界。旧审查、迁移过程和一次性测量可从 Git 历史查阅，不重复保存每一轮工作记录。
 
-## 使用与部署 · Use & deploy
+## 开发与维护
 
-- [开发与自行部署](development.md) · [Development & deployment](development.en.md)
-- [大文件、Safari 与本机暂存](safari-storage.md)
-- [多人分享](multi-share.md) · [iPhone 保存与分享](mobile-batch-save.md)
-- [常亮、后台返回与恢复](background-sharing.md)
+- [开发与部署](development.md) · [Development & deployment](development.en.md)
+- [正式版与测试版](test-site.md) · [目录、检查与维护约定](maintenance.md)
+- [浏览器支持与扫码](browser-support.md)
 
-## 实现与验证 · Design & validation
+## 连接与安全
 
-- [安全边界与漏洞报告](../SECURITY.md) · [安全加固](security-hardening.md) · [网页安全头](web-security-headers.md)
-- [加密流式兜底与手动路线选择](stream-relay.md)
-- [传输优化与慢网压缩审查](transfer-upgrade-review.md)
-- [压缩触发条件与估算公式](transfer-compression.md)
-- [接收端校验优化](transfer-receive-hash.md)
-- [直接选择文件、文件夹 ZIP 打包与清空选择](folder-archives.md)
-- [文件选择与相机调整（历史记录）](selection-camera-review.md)
+- [安全边界与漏洞报告](../SECURITY.md) · [服务端防护](security-hardening.md) · [网页安全头](web-security-headers.md)
+- [加密转发与路线切换](stream-relay.md) · [连接诊断](connection-diagnostics.md)
+- [多人分享](multi-share.md) · [常亮与后台返回](background-sharing.md)
 
-## 维护记录 · Maintenance
+## 文件与性能
 
-- [仓库整理与公开信息审查：2026-10-27](repository-review-2026-10-27.md)
-- [全代码审查与旧连接回调修复：2026-10-26](review-2026-10-26.md)
-- [24 日功能逐项恢复与新路线兼容：2026-10-26](restoration-2026-10-26.md)
-- [回退后的独立功能恢复范围：2026-10-25](independent-restoration-2026-10-25.md)
-- [体积、复杂度与资源占用复审：2026-10-28（含历史记录）](lightweight-review.md)
-- [创建准备优化与全仓审查：2026-10-24（历史）](startup-preparation-review.md)
-- [启动配置与源文件读取保护：2026-10-24（历史）](startup-source-hardening.md)
-- [分享链接与二维码就绪延迟：2026-10-24（历史）](share-readiness.md)
-- [旧配对入口隐私清理：2026-10-21](legacy-endpoint-privacy.md)
-- [全代码审查：2026-10-20](review-2026-10-20.md)
-- [全代码审查：2026-10-19](review-2026-10-19.md)
-
-- [Cloudflare 迁移](cloudflare-migration.md)
-- [生产问题与验证](production-bugs-2026-10-16.md)
-- [代码审查：2026-10-14](review-2026-10-14.md) · [2026-10-13](review-2026-10-13.md) · [早期审查](review.md)
-- [首版验证](validation.md)
-- 性能实验：[初期测量](transfer-performance.md) · [自动窗口](transfer-adaptive-control.md) · [延迟调查](transfer-latency-investigation.md)
-- [历史测量归档](archive/README.md) · [测试配置说明](../tests/config/README.md)
+- [Safari、大文件与暂存](safari-storage.md) · [手机单个／批量保存](mobile-batch-save.md)
+- [文件夹打包](folder-archives.md)
+- [传输性能与测量](performance.md) · [慢网压缩的触发条件与公式](transfer-compression.md)
