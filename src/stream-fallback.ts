@@ -105,6 +105,12 @@ export class StreamFallback {
     if (!this.busy && this.role === 'sender') void this.prepare(0, true);
     return true;
   }
+  peerAdvancedEpoch() {
+    // A receiver may have committed before its activation receipt reached us.
+    // Retire the old candidate before retrying at the authenticated peer epoch.
+    if (this.candidate) this.abort(this.candidate, false);
+    this.connectAttempts = 0; this.retryAt = 0;
+  }
   private begin(session: string, epoch: number, probeBytes = PROBE_BYTES, automaticConnect = false) {
     if (this.used.has(session) || this.used.size >= 128) throw Error('Stream session reused');
     this.used.add(session);

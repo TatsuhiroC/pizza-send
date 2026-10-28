@@ -190,7 +190,32 @@ test('relay-only connection failure has a deadline even when no native ICE timeo
   await page.evaluate(() => { (window as any).__deadlinePair.close(); (window as any).__deadlineTransfer.close(false); });
 });
 
-for (const unavailable of ['sender', 'receiver', 'both', 'constructor-denied', 'data-channel-denied'] as const) test(`encrypted file relay works when native WebRTC is unavailable on ${unavailable}`, async ({ page, context }) => {
+test('recovery epoch synchronization requires authentication, a lost route and exactly one committed generation', async ({ page }) => {
+  await page.addInitScript(() => Object.defineProperty(window, 'RTCPeerConnection', { configurable: true, value: undefined }));
+  await page.goto('./');
+  expect(await page.evaluate(async () => {
+    const { Transfer, AutoPair, signalKey } = await import('/src/protocol.ts');
+    const transfer: any = new Transfer({ signalUrl: '', iceServers: [], memoryLimitBytes: 1048576 }, 'sender', () => {});
+    const pair: any = new AutoPair(transfer, await signalKey('77'.repeat(32)), () => {}, '77'.repeat(32));
+    let synchronized = 0; pair.streamFallback.peerAdvancedEpoch = () => { synchronized++; };
+    pair.recover = async () => {};
+    try {
+      await pair.handle({ type: 'restart-request', epoch: 1 });
+      const unauthenticated = pair.epoch;
+      transfer.streamTransport = true; transfer.channel = { readyState: 'open', close() {} };
+      await pair.handle({ type: 'restart-request', epoch: 1 }, true);
+      const healthy = pair.epoch;
+      transfer.channel.readyState = 'closed';
+      for (const epoch of [-1, 0, 2, 1.5, '1']) await pair.handle({ type: 'restart-request', epoch }, true);
+      const invalid = pair.epoch;
+      await pair.handle({ type: 'restart-request', epoch: 1 }, true);
+      await pair.handle({ type: 'restart-request', epoch: 1 }, true);
+      return { unauthenticated, healthy, invalid, recovered: pair.epoch, synchronized };
+    } finally { pair.close(); transfer.close(false); }
+  })).toEqual({ unauthenticated: 0, healthy: 0, invalid: 0, recovered: 1, synchronized: 1 });
+});
+
+for (const unavailable of ['sender', 'receiver', 'both', 'constructor-denied', 'data-channel-denied', 'late-activation-ack'] as const) test(`encrypted file relay works when native WebRTC is unavailable on ${unavailable}`, async ({ page, context }) => {
   const receiver = await context.newPage(), errors: string[] = [];
   for (const current of [page, receiver]) {
     current.on('pageerror', error => errors.push(error.message));
@@ -203,7 +228,7 @@ for (const unavailable of ['sender', 'receiver', 'both', 'constructor-denied', '
   if (unavailable === 'data-channel-denied') for (const current of [page, receiver]) await current.addInitScript(() => {
     if (typeof HTMLDialogElement !== 'undefined') Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: undefined });
   });
-  for (const current of unavailable === 'both' ? [page, receiver] : unavailable === 'receiver' ? [receiver] : [page]) {
+  for (const current of unavailable === 'both' || unavailable === 'late-activation-ack' ? [page, receiver] : unavailable === 'receiver' ? [receiver] : [page]) {
     await current.addInitScript(mode => {
       const Native = RTCPeerConnection;
       const value = mode === 'constructor-denied' ? function() { throw new DOMException('Disabled by browser', 'NotSupportedError'); } :
@@ -222,8 +247,31 @@ for (const unavailable of ['sender', 'receiver', 'both', 'constructor-denied', '
   const url = await page.locator('#share-link').inputValue();
   expect(new URL(url).searchParams.get('receive')).toBe('1');
   expect(new URL(url).searchParams.has('key')).toBe(false);
-  await config(receiver); await receiver.goto(url);
-  await expect(receiver.locator('#accept-files')).toBeVisible({ timeout: 20000 });
+  await config(receiver);
+  if (unavailable === 'late-activation-ack') {
+    await receiver.goto('./');
+    await receiver.evaluate(async () => {
+      const { Signaling } = await import('/src/protocol.ts');
+      const send = Signaling.prototype.send, state = window as any;
+      Signaling.prototype.send = function(message: any, connectedOnly = false) {
+        if (message.type === 'stream-activated' && !state.__delayedActivation) {
+          state.__delayedActivation = true;
+          setTimeout(() => {
+            void send.call(this, message, connectedOnly).then(() => { state.__lateActivationSent = true; });
+          }, 20000);
+          return Promise.resolve();
+        }
+        return send.call(this, message, connectedOnly);
+      };
+    });
+    await receiver.locator('#receive-tab').click();
+    await receiver.locator('#receive-code').fill(url); await receiver.locator('#connect-receive').click();
+  } else await receiver.goto(url);
+  await expect(receiver.locator('#accept-files')).toBeVisible({ timeout: 40000 });
+  if (unavailable === 'late-activation-ack') {
+    expect(forwarded.opened()).toBeGreaterThanOrEqual(4);
+    await expect.poll(() => receiver.evaluate(() => (window as any).__lateActivationSent), { timeout: 25000 }).toBe(true);
+  }
   // The URL is scrubbed only after the file manifest actually arrives.
   expect(new URL(receiver.url()).hash).toBe('');
   expect(new URL(receiver.url()).searchParams.has('receive')).toBe(false);
