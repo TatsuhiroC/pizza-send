@@ -1,4 +1,4 @@
-import { authenticatedRequest, retryPairingRequest, ticketURL } from './security';
+import { authenticatedRequest, PairingConnectionError, PairingResponseError, retryInitialPairing, retryPairingRequest, temporaryPairingError, ticketURL } from './security';
 import { Transfer, AutoPair, randomToken, signalKey, type Config, type TransferEvent } from './protocol';
 import { deriveRecipientShare, receiverDigest } from './share';
 import type { CompressionStatus } from './compression';
@@ -16,16 +16,16 @@ const valid = (value: unknown): value is string => typeof value === 'string' && 
 export function groupURL(api: string, room: string, role: 'sender' | 'receiver', token: string, client: string) {
   const url = new URL('/rooms/' + room, api); url.search = new URLSearchParams({ role, token, client }).toString(); return url.toString();
 }
-export async function groupRequest(url: string, body?: unknown, keepalive = false) {
+export async function groupRequest(url: string, body?: unknown, keepalive = false, signal?: AbortSignal) {
   const retryable = !body || (typeof body === 'object' && 'type' in body && body.type === 'join');
-  const options = { ...(body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}), keepalive };
+  const options = { ...(body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}), keepalive, signal };
   const consume = async (response: Response) => {
     if (!response.ok) {
       if (response.status === 429) {
         const reason = await response.text();
-        throw Error(reason.includes('Recipient limit reached') || reason === 'Invitation unavailable' ? '同时接收的人数已达 10 位，请稍后再试。' : '请求过于频繁，请稍后重试或使用手动配对。');
+        throw new PairingResponseError(reason.includes('Recipient limit reached') || reason === 'Invitation unavailable' ? '同时接收的人数已达 10 位，请稍后再试。' : '请求过于频繁，请稍后重试或使用手动配对。', response.status);
       }
-      throw Error(response.status === 410 ? '分享链接已过期或发送方已结束，请创建新链接。' : response.status === 409 ? '分享链接已被另一接收页面占用，请关闭原页面或创建新链接。' : '无法连接配对服务');
+      throw new PairingResponseError(response.status === 410 ? '分享链接已过期或发送方已结束，请创建新链接。' : response.status === 409 ? '分享链接已被另一接收页面占用，请关闭原页面或创建新链接。' : '无法连接配对服务', response.status);
     }
     return response.json();
   };
@@ -44,8 +44,10 @@ export class GroupSender {
   private firstClient?: string;
   private counter = 0;
   private closed = false;
+  private lifetime = new AbortController();
   private expired = false;
   private timer?: ReturnType<typeof setTimeout>;
+  private polling?: Promise<void>;
   private url: string;
   private inviteExpiresAt = Infinity;
   constructor(private initial: Transfer, private config: Config, private files: File[], private secret: string,
@@ -54,32 +56,56 @@ export class GroupSender {
   }
   get active() { return [...this.peers.values()].some(peer => !['done', 'error', 'left'].includes(peer.phase)); }
   get needsAwake() { return !this.closed && (this.active || (!this.expired && Date.now() < this.inviteExpiresAt && !this.peers.size)); }
-  async connect() { await this.poll(); this.schedule(); }
+  async connect() { await retryInitialPairing(signal => this.poll(signal), this.lifetime.signal); this.schedule(); }
+  resumePage() {
+    if (this.closed) return;
+    if (![...this.peers.values()].some(peer => peer.transfer === this.initial && peer.pair)) this.initial.resumePage();
+    for (const peer of this.peers.values()) peer.pair?.resumePage();
+    clearTimeout(this.timer);
+    if (!this.polling) {
+      const socket = this.socket; this.socket = undefined; clearInterval(this.heartbeat);
+      if (socket) { socket.onopen = socket.onclose = socket.onerror = socket.onmessage = null; socket.close(); }
+    }
+    void this.poll().catch(error => { if (!this.closed) this.onError(error.message); }).finally(() => this.schedule());
+  }
   firstEvent(event: TransferEvent) { if (this.firstClient) this.event(this.firstClient, event); }
   enableCompression(client: string) { this.peers.get(client)?.transfer?.enableCompression(); }
   dismissCompression(client: string) { this.peers.get(client)?.transfer?.dismissCompression(); }
   async chooseRoute(client: string, route: TransferRoute) { await this.peers.get(client)?.pair?.chooseRoute(route); }
   private notify() { if (!this.closed) this.changed([...this.peers.values()], this.expired || Date.now() >= this.inviteExpiresAt); }
   private schedule() {
+    clearTimeout(this.timer);
     if (this.closed || this.expired) return;
     this.timer = setTimeout(() => { void this.poll().catch(error => {
       if (!this.closed) this.onError(error.message);
     }).finally(() => this.schedule()); }, 1500);
   }
-  private async poll() {
+  private poll(signal = this.lifetime.signal): Promise<void> {
+    if (!this.polling) this.polling = this.readMembers(signal).finally(() => { this.polling = undefined; });
+    return this.polling;
+  }
+  private async readMembers(signal: AbortSignal) {
     await Promise.allSettled([...this.pendingRetire].map(async client => {
       await groupRequest(this.url, { type: 'finished', client }); this.pendingRetire.delete(client);
     }));
     if (this.closed) return;
     if (this.socket?.readyState === WebSocket.OPEN) { this.notify(); return; }
     let state;
-    try { state = await groupRequest(this.url); }
+    try { state = await groupRequest(this.url, undefined, false, signal); }
     catch (error) {
       if ((error as Error).message.startsWith('分享链接已过期')) { this.expired = true; this.notify(); }
       throw error;
     }
     await this.consume(state);
-    if (!this.closed) await this.openSocket();
+    if (!this.closed) {
+      try { await this.openSocket(signal); }
+      catch (error) {
+        if (signal.aborted || !temporaryPairingError(error)) throw error;
+        // Membership notifications are an optimization. HTTP polling already
+        // keeps this invitation usable; a failed notification socket must not
+        // escape into the UI's cleanup and explicitly end the entire share.
+      }
+    }
   }
   private async consume(state: any) {
     if (this.closed) return;
@@ -92,9 +118,9 @@ export class GroupSender {
     await Promise.allSettled(state.members.filter((member: any) => !this.peers.has(member.client) && !this.retired.has(member.client)).map((member: any) => this.add(member)));
     this.notify();
   }
-  private async openSocket() {
+  private async openSocket(signal: AbortSignal) {
     const url = new URL(this.url); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    const connectionURL = await ticketURL(url.toString());
+    const connectionURL = await ticketURL(url.toString(), undefined, signal);
     if (this.closed) return;
     const socket = this.socket = new WebSocket(connectionURL); this.lastSeen = Date.now();
     socket.onmessage = event => {
@@ -119,17 +145,26 @@ export class GroupSender {
       });
     };
     await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => { socket.close(); reject(Error('配对服务连接超时')); }, 10000);
+      const fail = (error: Error) => {
+        clearTimeout(timeout); signal.removeEventListener('abort', cancel);
+        if (socket === this.socket) { this.socket = undefined; clearInterval(this.heartbeat); }
+        socket.onopen = socket.onerror = socket.onclose = socket.onmessage = null;
+        socket.close(); reject(error);
+      };
+      const cancel = () => fail(signal.reason ?? new DOMException('Cancelled', 'AbortError'));
+      const timeout = setTimeout(() => fail(new PairingConnectionError('配对服务连接超时')), 10000);
+      if (signal.aborted) { cancel(); return; }
+      signal.addEventListener('abort', cancel, { once: true });
       socket.onopen = () => {
-        clearTimeout(timeout);
+        clearTimeout(timeout); signal.removeEventListener('abort', cancel);
         if (this.closed) { socket.close(); reject(Error('配对服务已断开')); return; }
         clearInterval(this.heartbeat); this.heartbeat = setInterval(() => {
           if (Date.now() - this.lastSeen > 30000) socket.close();
           else if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'keepalive' }));
         }, 10000); resolve();
       };
-      socket.onerror = () => { clearTimeout(timeout); reject(Error('无法连接配对服务')); };
-      socket.onclose = () => { clearTimeout(timeout); reject(Error('配对服务已断开')); if (socket === this.socket) clearInterval(this.heartbeat); };
+      socket.onerror = () => fail(new PairingConnectionError('无法连接配对服务'));
+      socket.onclose = () => fail(new PairingConnectionError('配对服务已断开'));
     });
   }
   private async add(member: any) {
@@ -176,7 +211,7 @@ export class GroupSender {
     this.notify();
   }
   close(notify = true) {
-    if (this.closed) return; this.closed = true; clearTimeout(this.timer); clearInterval(this.heartbeat);
+    if (this.closed) return; this.closed = true; this.lifetime.abort(); clearTimeout(this.timer); clearInterval(this.heartbeat);
     if (notify && this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify({ type: 'end' }));
     this.socket?.close();
     for (const peer of this.peers.values()) { peer.transfer?.close(notify); peer.pair?.close(); }

@@ -30,6 +30,52 @@ async function share(page: Page) {
   await expect(page.locator('#share-box')).toBeVisible();
 }
 
+test('a cached pagehide/pageshow cycle keeps the original invitation and files; explicit end still revokes it', async ({ page, context }) => {
+  await setup(context); let ends = 0, navigations = 0;
+  page.on('request', request => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname.startsWith('/rooms/')) {
+      try { if (request.postDataJSON()?.type === 'end') ends++; } catch {}
+    }
+  });
+  page.on('websocket', socket => socket.on('framesent', frame => {
+    if (typeof frame.payload === 'string') { try { if (JSON.parse(frame.payload).type === 'end') ends++; } catch {} }
+  }));
+  await page.goto('./'); await share(page);
+  const invitation = await page.locator('#share-link').inputValue();
+  page.on('framenavigated', frame => { if (frame === page.mainFrame()) navigations++; });
+  const status = () => page.evaluate(async invitation => {
+    const { parseShare } = await import('/src/share.ts'), { randomToken } = await import('/src/protocol.ts');
+    const { groupURL } = await import('/src/group.ts'), { authenticatedRequest } = await import('/src/security.ts');
+    const share = await parseShare(new URL(invitation).hash);
+    return (await authenticatedRequest(groupURL('http://127.0.0.1:8787', share.room, 'receiver', share.receiver, randomToken()))).status;
+  }, invitation);
+  await page.evaluate(() => {
+    (window as any).__visibility(true);
+    window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+  });
+  expect(await status()).toBe(200); expect(ends).toBe(0);
+  await page.evaluate(() => {
+    (window as any).__visibility(false);
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+  });
+  await expect(page.locator('#share-link')).toHaveValue(invitation);
+  await expect(page.locator('#status')).toHaveText('等待接收方');
+  await expect(page.locator('#awake-panel')).toHaveAttribute('data-state', 'held');
+  expect(await status()).toBe(200); expect(navigations).toBe(0); expect(ends).toBe(0);
+  await page.locator('#cancel').click();
+  await expect.poll(status).toBe(410);
+});
+
+test('a non-cached pagehide still ends the invitation', async ({ page, context }) => {
+  await setup(context); await page.goto('./'); await share(page);
+  const invitation = await page.locator('#share-link').inputValue();
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false })));
+  const receiver = await context.newPage(); await receiver.goto(invitation);
+  await expect(receiver.locator('#notice')).toContainText('已过期或发送方已结束');
+  await expect(receiver.locator('#accept-files')).toBeHidden();
+});
+
 test('screen wake lock follows visibility, user choice, OS release and cancellation', async ({ page, context }, info) => {
   await setup(context); await page.goto('./');
   await expect(page.locator('#awake-panel')).toBeHidden(); await share(page);
@@ -177,7 +223,7 @@ async function transferFixture(context: BrowserContext) {
   });
 }
 
-for (const background of ['sender', 'receiver'] as const) test(`${background} returns from background after the ordinary recovery deadline and resumes original bytes`, async ({ page, context, browserName }) => {
+for (const background of ['sender', 'receiver'] as const) test(`${background} returns from cached background after the ordinary recovery deadline and resumes original bytes`, async ({ page, context, browserName }) => {
   test.skip(browserName !== 'chromium', 'Real DataChannel transfers run in Chromium; UI and lock lifecycle also run in WebKit.');
   await transferFixture(context); const receiver = await context.newPage();
   const diagnostics: unknown[] = [];
@@ -197,7 +243,10 @@ for (const background of ['sender', 'receiver'] as const) test(`${background} re
     prototype.recover = function() { (window as any).__pair = this; return recover.call(this); };
   });
   const hidden = background === 'sender' ? page : receiver, other = background === 'sender' ? receiver : page;
-  await hidden.evaluate(() => (window as any).__visibility(true));
+  await hidden.evaluate(() => {
+    (window as any).__visibility(true);
+    window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+  });
   await expect(other.locator('#background-note')).toBeVisible();
   for (const p of [page, receiver]) await p.evaluate(() => {
     const state = window as any; state.__cutPC = state.__pcs.at(-1); state.__cutSockets = [...state.__sockets];
@@ -210,7 +259,10 @@ for (const background of ['sender', 'receiver'] as const) test(`${background} re
   for (const p of [page, receiver]) await p.evaluate(() => { const state = window as any; state.__offset = 3 * 60000; state.__expireRecovery(); });
   await expect(receiver.locator('#notice')).not.toContainText('已等待两分钟');
   await expect(page.locator('.recipient-row[data-phase="error"]')).toHaveCount(0);
-  await hidden.evaluate(() => (window as any).__visibility(false));
+  await hidden.evaluate(() => {
+    (window as any).__visibility(false);
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+  });
   await context.setOffline(false); await page.evaluate(() => { (window as any).__hold = false; });
   try { await expect(receiver.locator('#status')).toHaveText('文件已收到，请保存到设备', { timeout: 30000 }); }
   catch (error) {

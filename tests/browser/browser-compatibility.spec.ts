@@ -215,7 +215,7 @@ test('recovery epoch synchronization requires authentication, a lost route and e
   })).toEqual({ unauthenticated: 0, healthy: 0, invalid: 0, recovered: 1, synchronized: 1 });
 });
 
-for (const unavailable of ['sender', 'receiver', 'both', 'constructor-denied', 'data-channel-denied', 'late-activation-ack'] as const) test(`encrypted file relay works when native WebRTC is unavailable on ${unavailable}`, async ({ page, context }) => {
+for (const unavailable of ['sender', 'receiver', 'both', 'constructor-denied', 'data-channel-denied', 'late-activation-ack', 'initial-pairing-retry'] as const) test(`encrypted file relay works when native WebRTC is unavailable on ${unavailable}`, async ({ page, context }) => {
   const receiver = await context.newPage(), errors: string[] = [];
   for (const current of [page, receiver]) {
     current.on('pageerror', error => errors.push(error.message));
@@ -228,7 +228,7 @@ for (const unavailable of ['sender', 'receiver', 'both', 'constructor-denied', '
   if (unavailable === 'data-channel-denied') for (const current of [page, receiver]) await current.addInitScript(() => {
     if (typeof HTMLDialogElement !== 'undefined') Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: undefined });
   });
-  for (const current of unavailable === 'both' || unavailable === 'late-activation-ack' ? [page, receiver] : unavailable === 'receiver' ? [receiver] : [page]) {
+  for (const current of ['both', 'late-activation-ack', 'initial-pairing-retry'].includes(unavailable) ? [page, receiver] : unavailable === 'receiver' ? [receiver] : [page]) {
     await current.addInitScript(mode => {
       const Native = RTCPeerConnection;
       const value = mode === 'constructor-denied' ? function() { throw new DOMException('Disabled by browser', 'NotSupportedError'); } :
@@ -241,6 +241,11 @@ for (const unavailable of ['sender', 'receiver', 'both', 'constructor-denied', '
     Blob.prototype.arrayBuffer = async function() { if (this.size <= 32768) await new Promise(resolve => setTimeout(resolve, 8)); return read.call(this); };
   });
   const forwarded = await relay(context);
+  let initialAttempts = 0;
+  if (unavailable === 'initial-pairing-retry') await receiver.routeWebSocket(url => url.hostname === '127.0.0.1' && url.port === '8787' && url.searchParams.get('role') === 'receiver' && !url.searchParams.has('transport'), route => {
+    if (++initialAttempts === 1) route.close({ code: 1013, reason: 'Generated temporary failure' });
+    else route.connectToServer();
+  });
   const payload = unavailable === 'both' ? { ...generated, buffer: Buffer.from(generated.buffer.toString().repeat(24)) } : generated;
   await config(page); await page.goto('./'); await page.locator('#file-input').setInputFiles(payload);
   await page.locator('#start-send').click(); await expect(page.locator('#share-qr')).toBeVisible();
@@ -268,6 +273,7 @@ for (const unavailable of ['sender', 'receiver', 'both', 'constructor-denied', '
     await receiver.locator('#receive-code').fill(url); await receiver.locator('#connect-receive').click();
   } else await receiver.goto(url);
   await expect(receiver.locator('#accept-files')).toBeVisible({ timeout: 40000 });
+  if (unavailable === 'initial-pairing-retry') expect(initialAttempts).toBe(2);
   if (unavailable === 'late-activation-ack') {
     expect(forwarded.opened()).toBeGreaterThanOrEqual(4);
     await expect.poll(() => receiver.evaluate(() => (window as any).__lateActivationSent), { timeout: 25000 }).toBe(true);
