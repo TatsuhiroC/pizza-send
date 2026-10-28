@@ -2,7 +2,7 @@
 
 [← Project home](../README.en.md) · [简体中文](development.md)
 
-The Vite + TypeScript frontend runs on Cloudflare Pages. A Worker with Durable Objects handles pairing messages and the encrypted streaming relay; STUN helps discover connection addresses. Files travel directly between browsers over WebRTC first. The [streaming fallback](stream-relay.md) measures the benefit before automatic switching and also supports manual route selection. TURN integration has been removed. The project's Worker deployment configuration enables the fallback; self-hosters can set `STREAM_RELAY_ENABLED` to `"0"` to disable it.
+The Vite + TypeScript frontend runs on Cloudflare Pages. A Worker with Durable Objects handles pairing messages and the encrypted streaming relay; STUN helps discover connection addresses. Files travel directly between browsers over WebRTC first. The [streaming fallback](stream-relay.md) measures the benefit before automatic switching and also supports manual route selection. The project's Worker deployment configuration enables the fallback; self-hosters can set `STREAM_RELAY_ENABLED` to `"0"` to disable it.
 
 ## Local development
 
@@ -19,14 +19,12 @@ Enter `http://127.0.0.1:8787` in the webpage's connection settings. Leave it emp
 
 ## Deploy your own instance
 
-1. Fork the repository and import it into Cloudflare Pages. Use production branch `main`, build command `npm run build`, output directory `dist`, and Node.js 22.12 or a newer 22.x release. Connect your custom domain and verify HTTPS. Replace the production hostname in `public/_headers` with your own hostname. Cloudflare builds and publishes updates to `main`; GitHub Actions runs the checks separately and no longer publishes GitHub Pages. Complete local verification before pushing to the production branch.
+1. Fork the repository and import it into Cloudflare Pages. Use production branch `main`, build command `npm run build`, output directory `dist`, and Node.js 22.12 or a newer 22.x release. Connect your custom domain and verify HTTPS. Replace the production hostname in `public/_headers` with your own hostname. Cloudflare builds and publishes updates to `main`; GitHub Actions runs the checks separately and no longer publishes GitHub Pages. For a separate pinned production site and `/test/`, use `npm run build:site` instead; see [release channels](test-site.md).
 2. Edit the Worker name and `ALLOWED_ORIGINS` in `signal/wrangler.jsonc`, using your frontend's origin. The default deployment allows only the production custom origin and two local development origins; Cloudflare preview hostnames cannot use the production signaling service by default. Replace the custom domain in `routes` with your own active Cloudflare domain. Only the custom domain is exposed by default. To use only `workers.dev`, remove `routes` and set `workers_dev` to `true`.
 3. Run `npx wrangler login`. Create a free Turnstile widget restricted to your frontend hostname, replace `TURNSTILE_SITE_KEY`, and store its server secret using `npx wrangler secret put TURNSTILE_SECRET_KEY --config signal/wrangler.jsonc`. Never commit the secret. Then run `npm run signal:deploy`. Durable Objects use SQLite storage, which your account must support. Usage limits and charges depend on your Cloudflare account.
 4. Set `signalUrl` in `public/app.config.json` to the Worker's returned HTTPS URL, then commit and publish. Worker updates must be deployed separately. Access tokens are not stored in the repository.
 
 ## Run checks
-
-On first visit, the browser's language priority list selects Chinese or English, with English as the fallback. An explicit choice made with the language switch is saved and takes priority. Automatic detection does not save an override, so later visits can follow changed browser preferences. Additional languages need matching interface text, errors, saving instructions and small-screen layout checks. Ordinary regressions explicitly use a Chinese locale; language tests cover other preferences independently of the test machine's defaults.
 
 The full test suite also requires Python 3 to verify folder ZIP contents and checksums with an independent standard-library reader. The application and build do not require Python.
 
@@ -40,18 +38,15 @@ npm run test:webkit
 npm test
 ```
 
-Verify locally before pushing a production branch. The frontend and signaling service are deployed separately; a frontend update does not deploy the Worker. GitHub Actions checks and Cloudflare Pages builds run independently.
+Test-site releases require the build, public-file scan and checks relevant to the change. Full regression can continue in the background. A production promotion waits for complete verification of the target revision before updating `deployment/production.json`; see [release policy](maintenance.md).
 
-GitHub Actions uses the official preinstalled browser image matching the locked Playwright version, while keeping all checks. Update the workflow's image version and digest when upgrading Playwright. This image is used only for CI and is not shipped with the website.
-
-
-Specialized Playwright configurations live in `tests/config/`; the root keeps only the default entry. Existing npm test commands are unchanged. Historical raw measurements live in `docs/archive/` and are not part of the website build.
+Frontend and Worker deployments are independent. GitHub Actions runs checks separately from Cloudflare Pages. CI uses a pinned official browser image; keep its version and digest aligned with Playwright. Test files are grouped by feature; [test commands](../tests/README.md) stay unchanged. Historical work logs and one-off experiments are available through Git history rather than the current tree.
 
 ## Connection troubleshooting
 
 Refresh both pages, create a new link, keep the sending page open and leave the phone unlocked. First try the same Wi-Fi with both VPNs off, then compare. Sharing Wi-Fi does not guarantee a direct connection: a VPN must still allow local networking and WebRTC / UDP.
 
-Automatic recovery needs the original pages and session, a reachable signaling service, an unexpired room and a direct path through the new networks. Recovery time and speed are not guaranteed. Manual pairing does not reconnect automatically.
+Automatic recovery needs the original pages and session, a reachable signaling service, an unexpired room and a usable direct or encrypted relay path. Recovery time and speed are not guaranteed. Manual pairing does not reconnect automatically.
 
 ## Further reading
 

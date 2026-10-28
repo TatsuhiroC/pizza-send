@@ -40,9 +40,8 @@ export function sanitizedConnectionStats(report: RTCStatsReport): Native {
   if (pair) {
     const local = report.get(pair.localCandidateId), remote = report.get(pair.remoteCandidateId);
     result.protocol = choice(local?.protocol, ['udp', 'tcp']);
-    if (local?.candidateType === 'relay') result.relayProtocol = choice(local?.relayProtocol, ['udp', 'tcp', 'tls', 'dtls']);
-    result.localCandidate = choice(local?.candidateType, ['host', 'srflx', 'prflx', 'relay']);
-    result.remoteCandidate = choice(remote?.candidateType, ['host', 'srflx', 'prflx', 'relay']);
+    result.localCandidate = choice(local?.candidateType, ['host', 'srflx', 'prflx']);
+    result.remoteCandidate = choice(remote?.candidateType, ['host', 'srflx', 'prflx']);
     result.localAddressKind = addressKind(local?.address);
     result.remoteAddressKind = addressKind(remote?.address);
     result.networkType = choice(local?.networkType, ['wifi', 'ethernet', 'vpn', 'cellular']);

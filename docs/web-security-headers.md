@@ -1,4 +1,4 @@
-# 网页安全头 · 2026-10-15
+# 网页安全头
 
 Cloudflare Pages 通过 `public/_headers` 给正式静态网页及资源附加安全响应头。它不改变配对 Worker 的来源限制、认证、限流或文件传输加密。
 
@@ -19,18 +19,3 @@ Cloudflare Pages 通过 `public/_headers` 给正式静态网页及资源附加�
 不设置 `includeSubDomains`，因此不会扩展到 `signal` 或 `location` 等其他子域；不设置或提交 preload，不影响本地 HTTP 开发和预览。它不改变文件加密、传输速度，也不对首次尚未学到规则的 HTTP 访问提供完整保护。
 
 撤销时，应继续通过有效 HTTPS 返回 `max-age=0`，让再次访问的浏览器清除记忆；只删响应头不会立即清除已经记住的规则。既有 HTTP → HTTPS 跳转继续保留。没有改动 DNSSEC、域名委派、账号验证或任何付费设置。
-
-## 验证方法
-
-`tests/headers.spec.ts` 加载真实 `dist` 构建及 Pages 全局响应头，检查内联与非白名单外部脚本确实被浏览器阻止、iframe 嵌套被拒绝、磁盘 Worker 与原文件下载、二维码 Blob 解码和按需验证组件。验证组件使用本地模拟，不自动操作真实 CAPTCHA。
-
-`npm run test:headers` 在真实本地 HTTP 预览上应用 Pages 全局响应头，使用独立的本地配对服务与测试来源配置，不改变正式配对服务。线上验证通过环境变量直接访问 Cloudflare，不替换静态页面响应。
-
-WebKit 覆盖加载、脚本与嵌套拦截、二维码及模拟验证组件；真实 WebRTC 收发专项在 Chromium 中执行，不将 WebKit 的跳过项记为通过。
-
-## 官方依据
-
-- [Cloudflare Pages headers](https://developers.cloudflare.com/pages/configuration/headers/)
-- [Turnstile CSP compatibility](https://developers.cloudflare.com/turnstile/reference/content-security-policy/)
-
-- [Cloudflare HSTS](https://developers.cloudflare.com/ssl/edge-certificates/additional-options/http-strict-transport-security/)
