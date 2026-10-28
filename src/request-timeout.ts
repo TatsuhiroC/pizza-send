@@ -1,5 +1,14 @@
 // AbortSignal.timeout is missing in some otherwise capable mobile browsers.
 // Keep the deadline and caller cancellation without requiring that newer API.
+export function abortableDelay(milliseconds: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    const cancel = () => { clearTimeout(timer); reject(signal?.reason ?? new DOMException('Cancelled', 'AbortError')); };
+    const timer = setTimeout(() => { signal?.removeEventListener('abort', cancel); resolve(); }, milliseconds);
+    if (signal?.aborted) cancel();
+    else signal?.addEventListener('abort', cancel, { once: true });
+  });
+}
+
 export async function fetchWithTimeout<T = Response>(input: RequestInfo | URL, options: RequestInit = {}, milliseconds = 10000, consume?: (response: Response) => Promise<T>): Promise<T> {
   const controller = new AbortController(), source = options.signal;
   let abortReason: unknown;

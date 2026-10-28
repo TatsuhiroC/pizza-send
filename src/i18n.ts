@@ -324,6 +324,7 @@ const messages: Record<string, string> = {
   '这个浏览器暂不支持大文件流式保存。请使用桌面 Chrome 或 Edge；当前接收上限为 {size}': 'This browser cannot stream large files to disk. Use desktop Chrome or Edge. The current receive limit is {size}.',
   '对方浏览器的数据通道限制过小': 'The other browser’s data channel limit is too small',
   '配对服务连接超时': 'Pairing service connection timed out', '无法连接配对服务': 'Unable to connect to the pairing service',
+  '配对连接暂时中断，正在重试': 'Pairing connection interrupted. Retrying…',
   '重复或无效的配对消息': 'Duplicate or invalid pairing message', '配对服务已断开；已建立的文件直连可以继续': 'Pairing service disconnected. An established direct transfer can continue.', '配对服务已断开': 'Pairing service disconnected'
 };
 function initialLanguage(): Language {

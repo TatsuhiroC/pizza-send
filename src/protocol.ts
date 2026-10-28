@@ -1,5 +1,5 @@
 import './browser-compat';
-import { retryPairingRequest, ticketURL } from './security';
+import { PairingConnectionError, PairingResponseError, retryInitialPairing, retryPairingRequest, ticketURL } from './security';
 import { safeName } from './file-name';
 import { localPeerInfo, readPeerInfo, type PeerInfo } from './peer-info';
 export { safeName } from './file-name';
@@ -166,6 +166,7 @@ export class Transfer {
     }
     this.wake();
   };
+  resumePage() { if (!document.hidden) this.visibilityChanged(); }
   private get backgroundDeadline() { return Math.max(this.localBackgroundUntil, this.peerBackgroundUntil); }
   private get waitingInBackground() { return Date.now() < this.backgroundDeadline; }
   private reportVisibility() {
@@ -929,6 +930,8 @@ export class Signaling {
   private endpoint?: string;
   private role = '';
   private closed = false;
+  private lifetime = new AbortController();
+  private starting = false;
   private connecting?: Promise<void>;
   private retry?: ReturnType<typeof setTimeout>;
   private heartbeat?: ReturnType<typeof setInterval>;
@@ -936,29 +939,34 @@ export class Signaling {
   private lastSeen = Date.now();
   private client = randomToken();
   constructor(private key: CryptoKey, private onMessage: (message: any, authenticated?: boolean) => Promise<void>, private onError: (message: string) => void) {}
-  async connect(endpoint: string, room: string, role: string, token: string) {
+  async connect(endpoint: string, room: string, role: string, token: string, onRetry?: () => void) {
     const url = new URL(endpoint);
     url.protocol = url.protocol === 'http:' ? 'ws:' : 'wss:';
     url.pathname = '/rooms/' + room;
     url.search = new URLSearchParams({ role, token, client: this.client }).toString();
     this.endpoint = url.toString(); this.role = role;
-    await this.open();
+    this.starting = true; let connected = false;
+    try { await retryInitialPairing(signal => this.open(signal), this.lifetime.signal, onRetry); connected = true; }
+    finally {
+      this.starting = false;
+      if (connected && !this.closed && this.socket?.readyState !== WebSocket.OPEN) this.scheduleRetry();
+    }
   }
-  private open(): Promise<void> {
+  private open(signal = this.lifetime.signal): Promise<void> {
     if (this.closed) return Promise.reject(Error('配对服务已断开'));
     if (this.socket?.readyState === WebSocket.OPEN) return Promise.resolve();
     if (this.connecting) return this.connecting;
     const attempt = (async () => {
       const url = new URL(this.endpoint!);
       url.protocol = url.protocol === 'ws:' ? 'http:' : 'https:';
-      const { response, state } = await retryPairingRequest(url, {}, async response => ({ response, state: response.ok ? await response.json() : undefined }));
+      const { response, state } = await retryPairingRequest(url, { signal }, async response => ({ response, state: response.ok ? await response.json() : undefined }));
       if (!response.ok) {
         if ([401, 409, 410].includes(response.status)) { this.closed = true; clearTimeout(this.retry); }
-        throw Error(response.status === 409 ? '分享链接已被另一接收页面占用，请关闭原页面或创建新链接。' :
-          response.status === 410 ? '分享链接已过期或发送方已结束，请创建新链接。' : '无法连接配对服务');
+        throw new PairingResponseError(response.status === 409 ? '分享链接已被另一接收页面占用，请关闭原页面或创建新链接。' :
+          response.status === 410 ? '分享链接已过期或发送方已结束，请创建新链接。' : '无法连接配对服务', response.status);
       }
       if (this.closed) throw Error('配对服务已断开');
-      const connectionURL = await ticketURL(this.endpoint!);
+      const connectionURL = await ticketURL(this.endpoint!, undefined, signal);
       if (this.closed) throw Error('配对服务已断开');
       const socket = this.socket = new WebSocket(connectionURL);
       this.lastSeen = Date.now();
@@ -997,9 +1005,19 @@ export class Signaling {
         });
       };
       await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => { socket.close(); reject(Error('配对服务连接超时')); }, 10000);
+        let opened = false;
+        const fail = (error: Error) => {
+          clearTimeout(timeout); signal.removeEventListener('abort', cancel);
+          if (socket === this.socket) this.socket = undefined;
+          socket.onopen = socket.onerror = socket.onclose = socket.onmessage = null;
+          socket.close(); reject(error);
+        };
+        const cancel = () => fail(signal.reason ?? new DOMException('Cancelled', 'AbortError'));
+        const timeout = setTimeout(() => fail(new PairingConnectionError('配对服务连接超时')), 10000);
+        if (signal.aborted) { cancel(); return; }
+        signal.addEventListener('abort', cancel, { once: true });
         socket.onopen = () => {
-          clearTimeout(timeout);
+          opened = true; clearTimeout(timeout); signal.removeEventListener('abort', cancel);
           if (this.closed || socket !== this.socket) { socket.close(); reject(Error('配对服务已断开')); return; }
           this.failures = 0;
           clearInterval(this.heartbeat);
@@ -1012,13 +1030,14 @@ export class Signaling {
           }).catch(e => { if (socket === this.socket && !this.closed) this.onError(e.message); });
           resolve();
         };
-        socket.onerror = () => { clearTimeout(timeout); reject(Error('无法连接配对服务')); };
+        socket.onerror = () => { if (!opened) fail(new PairingConnectionError('无法连接配对服务')); else socket.close(); };
         socket.onclose = () => {
+          if (!opened) { fail(new PairingConnectionError('配对服务已断开')); return; }
           clearTimeout(timeout);
           reject(Error('配对服务已断开'));
           if (socket !== this.socket || this.closed) return;
           clearInterval(this.heartbeat);
-          this.onError('配对服务已断开；已建立的文件直连可以继续');
+          if (!this.starting) this.onError('配对服务已断开；已建立的文件直连可以继续');
           this.scheduleRetry();
         };
       });
@@ -1028,10 +1047,19 @@ export class Signaling {
   }
   private scheduleRetry() {
     clearTimeout(this.retry);
-    if (this.closed) return;
+    if (this.closed || this.starting) return;
     this.retry = setTimeout(() => {
       if (!this.closed) void this.open().catch(() => this.scheduleRetry());
     }, Math.min(1000 * 2 ** this.failures++, 8000));
+  }
+  resumePage() {
+    if (this.closed || this.starting || this.connecting || !this.endpoint) return;
+    const socket = this.socket; this.socket = undefined; clearInterval(this.heartbeat);
+    if (socket) {
+      socket.onopen = socket.onclose = socket.onerror = socket.onmessage = null;
+      socket.close();
+    }
+    this.scheduleRetry();
   }
   async ready() {
     const deadline = Date.now() + 60000;
@@ -1061,7 +1089,7 @@ export class Signaling {
     return task;
   }
   close() {
-    this.closed = true; clearTimeout(this.retry); clearInterval(this.heartbeat);
+    this.closed = true; this.lifetime.abort(); clearTimeout(this.retry); clearInterval(this.heartbeat);
     if (this.socket) {
       if (this.socket.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify({ type: this.role === 'sender' ? 'end' : 'leave' }));
       this.socket.onopen = null; this.socket.onclose = null; this.socket.onerror = null; this.socket.onmessage = null; this.socket.close();
@@ -1295,7 +1323,11 @@ export class AutoPair {
     if (role === 'receiver') this.waitingTimer = setTimeout(() => {
       if (!this.offered) this.transfer.fail('发送方尚未响应。请让发送方回到网页并保持手机解锁，或创建新链接。');
     }, 90000);
-    await this.signal.connect(endpoint, room, role, token);
+    await this.signal.connect(endpoint, room, role, token, () => this.transfer.pairingStage('配对连接暂时中断，正在重试'));
+  }
+  resumePage() {
+    if (this.closed || this.transfer.stopped || this.transfer.completed) return;
+    this.signal.resumePage(); this.transfer.resumePage();
   }
   private resetCandidates() {
     clearTimeout(this.candidateTimer); this.candidateTimer = undefined;

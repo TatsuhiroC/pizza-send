@@ -1102,8 +1102,20 @@ $('save-settings').onclick = () => run(async () => {
 window.addEventListener('beforeunload', event => {
   if (packagingFiles || senderGroup?.active || (transfer && !transfer.completed && !transfer.stopped)) { event.preventDefault(); event.returnValue = ''; }
 });
-window.addEventListener('pagehide', () => { sessionRevision++; storedRevision++; storedRefreshRequested = false; checkingAbort?.abort(); configurationVersion++; configurationController?.abort(); screenAwake.setActive(false); cancelAllDownloads(); clearTimeout(storedRetry); closeScanner(); senderGroup?.close(); leaveReceiverGroup(); signaling?.close(); transfer?.close(false); suspendTemporaryStorage(); stopSourceArchives(); });
-window.addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
+window.addEventListener('pagehide', event => {
+  screenAwake.setActive(false); closeScanner();
+  // A cached page still owns its files and session. Sending "end" here would
+  // invalidate the link while the user briefly visits another app/page.
+  if (event.persisted) return;
+  sessionRevision++; storedRevision++; storedRefreshRequested = false; checkingAbort?.abort(); configurationVersion++; configurationController?.abort(); cancelAllDownloads(); clearTimeout(storedRetry); senderGroup?.close(); leaveReceiverGroup(); signaling?.close(); transfer?.close(false); suspendTemporaryStorage(); stopSourceArchives();
+});
+window.addEventListener('pageshow', event => {
+  if (!event.persisted) return;
+  if (senderGroup) senderGroup.resumePage();
+  else if (signaling) signaling.resumePage();
+  else transfer?.resumePage();
+  syncAwake(); void refreshStored(); revealSaveActions();
+});
 function readPreference(key: string) {
   try { return localStorage.getItem(storageKey(key)); } catch { return null; }
 }
