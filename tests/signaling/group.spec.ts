@@ -36,6 +36,32 @@ async function downloaded(receiver: Page, buffer: Buffer) {
   expect(download.suggestedFilename()).toBe('多人-原样.mp4');
   expect(hash(await readFile((await download.path())!))).toBe(hash(buffer));
 }
+
+test('a later recipient receives original bytes while the first recipient is still connecting', async ({ page, context }) => {
+  await setup(context);
+  const first = await context.newPage(), second = await context.newPage(), buffer = Buffer.alloc(131089, 81);
+  let unblock!: () => void, enter!: () => void, stalledPath = '';
+  const gate = new Promise<void>(resolve => { unblock = resolve; }), blocked = new Promise<void>(resolve => { enter = resolve; });
+  const invitation = await share(page, buffer);
+  const rootPath = '/rooms/' + await page.evaluate(async link => (await (await import('/src/share.ts')).parseShare(new URL(link).hash)).room, invitation);
+  await page.route('http://127.0.0.1:8787/rooms/**', async route => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get('role') !== 'sender' || route.request().method() !== 'GET' || url.pathname === rootPath) return route.fallback();
+    if (!stalledPath) stalledPath = url.pathname;
+    if (url.pathname !== stalledPath) return route.fallback();
+    enter(); await gate;
+    try { await route.fallback(); } catch { /* A timed-out attempt may already be cancelled. */ }
+  });
+  try {
+    await first.goto(invitation); await blocked;
+    await second.goto(invitation);
+    await expect(second.locator('#accept-files')).toBeVisible({ timeout: 5000 });
+    await expect(first.locator('#accept-files')).toBeHidden();
+    await second.locator('#accept-files').click(); await downloaded(second, buffer);
+    unblock(); await expect(first.locator('#accept-files')).toBeVisible();
+    await first.locator('#accept-files').click(); await downloaded(first, buffer);
+  } finally { unblock(); await page.locator('#cancel').click(); }
+});
 test('three concurrent receivers: independent progress and recovery, verified original files, same invitation for a later receiver', async ({ page, context }) => {
   await setup(context);
   const receivers = await Promise.all([context.newPage(), context.newPage(), context.newPage()]);

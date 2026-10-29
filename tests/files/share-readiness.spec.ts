@@ -71,20 +71,26 @@ for (const phase of ['member-state', 'socket-ticket'] as const) {
   });
 }
 
-test('a delayed notification connection failure removes the published invitation and allows retry', async ({ page, context }) => {
+test('a delayed notification failure preserves the invitation and polling recovery', async ({ page, context, browserName }) => {
   await setup(context);
   const held = await holdSenderRequest(page, 'socket-ticket', true);
   try {
     await create(page); await held.blocked;
-    await visibleInvitation(page);
+    const invitation = await visibleInvitation(page);
+    const retry = page.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname === held.path && new URL(response.url()).searchParams.get('role') === 'sender');
     held.unblock();
-    await expect(page.locator('#status')).toHaveText('连接未完成');
-    await expect(page.locator('#share-box')).toBeHidden();
-    await expect(page.locator('#share-qr')).toBeHidden();
-    await expect(page.locator('#share-link')).toHaveValue('');
-    await expect(page.locator('#start-send')).toBeEnabled();
-    await page.locator('#start-send').click();
-    await visibleInvitation(page);
+    expect((await retry).status()).toBe(200);
+    expect(await visibleInvitation(page)).toBe(invitation);
+    await expect(page.locator('#notice')).toBeHidden();
+    if (browserName === 'chromium') {
+      const receiver = await context.newPage(); await receiver.goto(invitation);
+      await expect(receiver.locator('#accept-files')).toBeVisible(); await receiver.locator('#accept-files').click();
+      await expect(receiver.locator('#status')).toHaveText('文件已收到，请保存到设备');
+      const pending = receiver.waitForEvent('download'); await receiver.locator('.download-file').click();
+      const download = await pending;
+      expect(download.suggestedFilename()).toBe(file.name);
+      expect(await readFile((await download.path())!)).toEqual(file.buffer);
+    }
   } finally {
     held.unblock(); await page.locator('#cancel').click();
   }
