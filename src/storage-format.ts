@@ -1,5 +1,5 @@
 import { storageDirectory } from './app-environment';
-import type { FileInfo } from './protocol';
+import type { FileInfo } from './transfer';
 
 export const STORAGE_ROOT = storageDirectory('pizzasend-received-v1');
 export const RETENTION_MS = 10 * 60 * 1000;

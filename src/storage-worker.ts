@@ -1,5 +1,5 @@
 import { STORAGE_ROOT, RETENTION_MS, validSession, storageLock, diskName, validateIndex, type StoredIndex, type StoredFile, type StoredEntry } from './storage-format';
-import type { FileInfo } from './protocol';
+import type { FileInfo } from './transfer';
 
 type Access = { write(data: Uint8Array, options: { at: number }): number; read(data: Uint8Array, options: { at: number }): number; getSize(): number | Promise<number>; truncate(size: number): void | Promise<void>; flush(): void | Promise<void>; close(): void | Promise<void> };
 type SyncFile = FileSystemFileHandle & { createSyncAccessHandle(): Promise<Access> };

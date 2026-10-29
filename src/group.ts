@@ -1,5 +1,8 @@
 import { authenticatedRequest, PairingConnectionError, PairingResponseError, retryInitialPairing, retryPairingRequest, temporaryPairingError, ticketURL } from './security';
-import { Transfer, AutoPair, randomToken, signalKey, type Config, type TransferEvent } from './protocol';
+import { Transfer, type Config, type TransferEvent } from './transfer';
+import { AutoPair } from './auto-pair';
+import { randomToken, signalKey } from './protocol-codec';
+import { releaseSignalingSocket } from './signaling';
 import { deriveRecipientShare, receiverDigest } from './share';
 import type { CompressionStatus } from './compression';
 import type { RouteState, TransferRoute } from './stream-fallback';
@@ -67,7 +70,7 @@ export class GroupSender {
     clearTimeout(this.timer);
     if (!this.polling) {
       const socket = this.socket; this.socket = undefined; clearInterval(this.heartbeat);
-      if (socket) { socket.onopen = socket.onclose = socket.onerror = socket.onmessage = null; socket.close(); }
+      if (socket) releaseSignalingSocket(socket);
     }
     void this.poll().catch(error => { if (!this.closed) this.onError(error.message); }).finally(() => this.schedule());
   }
@@ -165,8 +168,7 @@ export class GroupSender {
       const fail = (error: Error) => {
         clearTimeout(timeout); signal.removeEventListener('abort', cancel);
         if (socket === this.socket) { this.socket = undefined; clearInterval(this.heartbeat); }
-        socket.onopen = socket.onerror = socket.onclose = socket.onmessage = null;
-        socket.close(); reject(error);
+        releaseSignalingSocket(socket); reject(error);
       };
       const cancel = () => fail(signal.reason ?? new DOMException('Cancelled', 'AbortError'));
       const timeout = setTimeout(() => fail(new PairingConnectionError('配对服务连接超时')), 10000);

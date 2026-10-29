@@ -1,5 +1,5 @@
 import { STORAGE_ROOT, diskName, validSession, type StoredFile } from './storage-format';
-import type { FileInfo } from './protocol';
+import type { FileInfo } from './transfer';
 import { downloadType } from './download';
 export type { StoredFile } from './storage-format';
 
