@@ -13,6 +13,7 @@ export type Recipient = {
   info?: PeerInfo;
 };
 const valid = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+type Member = { client: string; room: string; receiverHash: string; sender: string };
 export function groupURL(api: string, room: string, role: 'sender' | 'receiver', token: string, client: string) {
   const url = new URL('/rooms/' + room, api); url.search = new URLSearchParams({ role, token, client }).toString(); return url.toString();
 }
@@ -39,6 +40,8 @@ export class GroupSender {
   private queuedMessages = 0;
   private lastSeen = 0;
   private peers = new Map<string, Recipient>();
+  private connecting = new Set<string>();
+  private pendingMembers: Member[] = [];
   private retired = new Set<string>();
   private pendingRetire = new Set<string>();
   private firstClient?: string;
@@ -109,14 +112,28 @@ export class GroupSender {
   }
   private async consume(state: any) {
     if (this.closed) return;
-    if (state.multi !== true || !Array.isArray(state.members) || state.members.length > 10 || !Number.isSafeInteger(state.inviteExpiresAt)) throw Error('配对服务尚不支持多人分享，请刷新后重试。');
+    if (state.multi !== true || !Array.isArray(state.members) || state.members.length > 10 || !Number.isSafeInteger(state.inviteExpiresAt) ||
+      !state.members.every((member: any) => member && [member.client, member.room, member.receiverHash, member.sender].every(valid)) ||
+      new Set(state.members.map((member: Member) => member.client)).size !== state.members.length) throw Error('配对服务尚不支持多人分享，请刷新后重试。');
     this.inviteExpiresAt = state.inviteExpiresAt;
     const listed = new Set<string>(state.members.map((member: any) => member.client));
     for (const peer of this.peers.values()) if (!listed.has(peer.client) && !this.retired.has(peer.client) && !peer.transfer?.reportingSourceFailure) {
       peer.phase = 'left'; peer.message = '接收者已退出'; peer.background = false; peer.pair?.close(); peer.transfer?.close(false); this.retired.add(peer.client);
     }
-    await Promise.allSettled(state.members.filter((member: any) => !this.peers.has(member.client) && !this.retired.has(member.client)).map((member: any) => this.add(member)));
+    // Keep only the latest bounded snapshot. Slow per-recipient negotiation must
+    // never hold the membership queue or delay another person's leave/join.
+    this.pendingMembers = state.members.filter((member: Member) => !this.peers.has(member.client) && !this.retired.has(member.client));
+    this.startMembers();
     this.notify();
+  }
+  private startMembers() {
+    while (!this.closed && this.connecting.size < 10 && this.pendingMembers.length) {
+      const member = this.pendingMembers.shift()!;
+      if (this.peers.has(member.client) || this.retired.has(member.client) || this.connecting.has(member.client)) continue;
+      this.connecting.add(member.client);
+      const settled = () => { this.connecting.delete(member.client); this.startMembers(); };
+      void this.add(member).then(settled, settled);
+    }
   }
   private async openSocket(signal: AbortSignal) {
     const url = new URL(this.url); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -167,7 +184,7 @@ export class GroupSender {
       socket.onclose = () => fail(new PairingConnectionError('配对服务已断开'));
     });
   }
-  private async add(member: any) {
+  private async add(member: Member) {
     if (this.closed || ![member.client, member.room, member.receiverHash, member.sender].every(valid)) return;
     if (this.peers.size >= 30) for (const [id, old] of this.peers) {
       if (this.peers.size < 30) break;
@@ -175,17 +192,18 @@ export class GroupSender {
     }
     const peer: Recipient = { client: member.client, number: ++this.counter, phase: 'pairing', message: '正在连接接收者', file: '', transferred: 0, total: this.files.reduce((sum, file) => sum + file.size, 0), speed: 0, path: '', started: false };
     this.peers.set(peer.client, peer); this.notify();
+    const current = () => !this.closed && !this.retired.has(peer.client) && this.peers.get(peer.client) === peer;
     try {
       const share = await deriveRecipientShare(this.secret, peer.client);
       if (share.room !== member.room || await receiverDigest(share.receiver) !== member.receiverHash) throw Error('配对信息无效');
       const key = await signalKey(share.secret);
-      if (this.closed || this.retired.has(peer.client)) return;
+      if (!current()) return;
       if (!this.firstClient) { this.firstClient = peer.client; peer.transfer = this.initial; }
       else { peer.transfer = new Transfer(this.config, 'sender', event => this.event(peer.client, event)); peer.transfer.prepare(this.files); }
       peer.pair = new AutoPair(peer.transfer, key, message => { if (!this.closed) { peer.message = message; this.notify(); } }, share.secret);
       await peer.pair.connect(this.api, share.room, 'sender', member.sender);
-      if (this.closed) { peer.pair.close(); peer.transfer.close(false); }
-    } catch (error) { if (!this.closed) this.event(peer.client, { type: 'error', data: (error as Error).message }); }
+      if (!current()) { peer.pair.close(); peer.transfer.close(false); }
+    } catch (error) { if (current()) this.event(peer.client, { type: 'error', data: (error as Error).message }); }
   }
   private event(client: string, event: TransferEvent) {
     const peer = this.peers.get(client); if (!peer || this.closed || this.retired.has(client)) return;
@@ -211,7 +229,7 @@ export class GroupSender {
     this.notify();
   }
   close(notify = true) {
-    if (this.closed) return; this.closed = true; this.lifetime.abort(); clearTimeout(this.timer); clearInterval(this.heartbeat);
+    if (this.closed) return; this.closed = true; this.pendingMembers = []; this.lifetime.abort(); clearTimeout(this.timer); clearInterval(this.heartbeat);
     if (notify && this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify({ type: 'end' }));
     this.socket?.close();
     for (const peer of this.peers.values()) { peer.transfer?.close(notify); peer.pair?.close(); }
