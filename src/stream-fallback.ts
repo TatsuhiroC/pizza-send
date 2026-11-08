@@ -11,12 +11,12 @@ type Hooks = {
   activate(channel: StreamChannel, epoch: number): Promise<void>;
   restore(): void;
   changed?(): void;
+  unavailable?(): void;
 };
 type Candidate = { session: string; epoch: number; channel?: StreamChannel; bytes: number;
   probeBytes: number; automaticConnect: boolean;
   timer: ReturnType<typeof setTimeout>; acknowledged?: () => void; activated?: () => void; committing?: boolean; cancelled?: boolean; early: string[]; earlyBytes: number };
 const PROBE_BYTES = 256 * 1024;
-export const INITIAL_RELAY_WAIT_MS = 4000;
 export const MAX_CONNECT_ATTEMPTS = 3;
 const valid = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 
@@ -28,11 +28,12 @@ export function streamWorthTrying(oldBps: number, probeMs: number, remaining: nu
   return rate >= Math.max(32768, oldBps * 1.5) && (!oldBps || remaining / rate + 5 < remaining / oldBps - 10);
 }
 
-// Probe authenticated ciphertext on a separate TCP path
-// while the old route continues; switch only after a measured benefit.
+// Race initial authenticated routes; probe benefit only when replacing a live
+// direct connection. Once relay is selected, recovery stays on that route.
 export class StreamFallback {
   supported = false;
   quickSupported = false;
+  // Selected relay route stays selected while its socket is being rebuilt.
   active = false;
   busy = false;
   private closed = false;
@@ -40,26 +41,25 @@ export class StreamFallback {
   private candidate?: Candidate;
   private policy = new RouteFallbackPolicy();
   private samples: { at: number; bytes: number }[] = [];
-  private disconnectedAt?: number;
   private connectAttempts = 0;
   private retryAt = 0;
   private observedAt = Date.now();
-  private trial?: { at: number; bytes: number; oldBps: number };
   private used = new Set<string>();
   private preference?: TransferRoute;
   private manualAttempted = false;
   private target: TransferRoute = 'stream';
   private failed = false;
   private directFailed = false;
-  private relayOnly = false;
+  private exhausted = false;
   constructor(private role: 'sender' | 'receiver', private hooks: Hooks) {}
   get state(): RouteState { return { available: this.supported && this.used.size > 0, current: this.active ? 'stream' : 'direct', target: this.target,
     busy: this.busy, manual: !!this.preference, failed: this.failed, directFailed: this.directFailed, connected: this.hooks.progress().connected }; }
-  negotiated(now = Date.now()) { this.disconnectedAt ??= now; }
-  requireRelay() { this.relayOnly = true; this.disconnectedAt = Date.now() - INITIAL_RELAY_WAIT_MS; }
   choose(route: TransferRoute, directFailed = false) {
+    const retry = route === 'stream' && this.active && this.failed;
     this.directFailed = directFailed;
-    this.preference = route; this.manualAttempted = false; this.trial = undefined; this.failed = false; this.target = route;
+    this.preference = route; this.manualAttempted = false; this.failed = false; this.target = route;
+    this.connectAttempts = 0; this.retryAt = 0; this.exhausted = false;
+    if (retry) this.failed = true;
     if (this.role === 'sender' && route === 'direct' && this.candidate && !this.candidate.committing) this.abort(this.candidate, false);
     this.hooks.changed?.();
   }
@@ -67,30 +67,32 @@ export class StreamFallback {
     this.observedAt = now;
     const state = this.hooks.progress();
     if (this.closed || this.hooks.stopped()) { this.close(); return; }
-    if (!this.supported || state.hidden) { this.policy.reset(); this.samples = []; this.trial = undefined; this.disconnectedAt = undefined; return; }
-    if (this.role !== 'sender' || this.busy) return;
+    if (!this.supported || state.hidden) { this.policy.reset(); this.samples = []; return; }
+    if (this.role !== 'sender') return;
+    if (this.busy) {
+      if (this.candidate?.automaticConnect && !this.candidate.committing && state.connected) {
+        this.tried = false; this.abort(this.candidate, false);
+      }
+      return;
+    }
+    if (this.preference === 'direct' && this.active) this.restoreDirect();
+    if (this.active) {
+      if (state.connected) this.connectAttempts = 0;
+      else if (allowed && this.failed) this.retryRelay(now);
+      return;
+    }
     if (this.preference) {
-      if (this.preference === 'direct' && this.active) this.restore();
-      else if (this.preference === 'stream' && !this.active && !this.manualAttempted && allowed) {
+      if (this.preference === 'stream' && !this.manualAttempted && allowed) {
         this.manualAttempted = true; void this.prepare(0, false, true);
       }
       return;
     }
-    if (this.active) {
-      const trial = this.trial;
-      if (trial && now - trial.at >= 20000) {
-        this.trial = undefined;
-        const rate = Math.max(0, state.bytes - trial.bytes) * 1000 / (now - trial.at);
-        if (trial.oldBps > 0 && rate < trial.oldBps * 1.2 && rate < 256 * 1024 && (rate === 0 || (state.total - state.bytes) / rate > 90)) this.restore();
-      }
-      return;
-    }
     if (!state.connected) {
-      this.disconnectedAt ??= now; this.policy.reset(); this.samples = [];
-      if (allowed && now - this.disconnectedAt >= INITIAL_RELAY_WAIT_MS && this.connectAttempts < MAX_CONNECT_ATTEMPTS && now >= this.retryAt) void this.prepare(0, false);
+      this.policy.reset(); this.samples = [];
+      if (allowed && this.connectAttempts < MAX_CONNECT_ATTEMPTS && now >= this.retryAt) void this.prepare(0, false);
       return;
     }
-    this.disconnectedAt = undefined; this.connectAttempts = 0;
+    this.connectAttempts = 0;
     if (this.tried) { this.policy.reset(); this.samples = []; return; }
     this.samples.push({ at: now, bytes: state.bytes });
     while (this.samples.length > 1 && this.samples[1].at <= now - 10000) this.samples.shift();
@@ -102,14 +104,22 @@ export class StreamFallback {
   }
   reconnect() {
     if (!this.active || this.closed) return false;
-    if (!this.busy && this.role === 'sender') void this.prepare(0, true);
+    if (!this.busy && this.role === 'sender' && !this.hooks.progress().hidden) this.retryRelay(Date.now());
     return true;
+  }
+  private retryRelay(now: number) {
+    if (now < this.retryAt) return;
+    if (this.connectAttempts >= MAX_CONNECT_ATTEMPTS || this.used.size >= 128) {
+      if (!this.exhausted) { this.exhausted = true; this.failed = true; this.hooks.changed?.(); this.hooks.unavailable?.(); }
+      return;
+    }
+    this.observedAt = now;
+    void this.prepare(0, true);
   }
   peerAdvancedEpoch() {
     // A receiver may have committed before its activation receipt reached us.
     // Retire the old candidate before retrying at the authenticated peer epoch.
     if (this.candidate) this.abort(this.candidate, false);
-    this.connectAttempts = 0; this.retryAt = 0;
   }
   private begin(session: string, epoch: number, probeBytes = PROBE_BYTES, automaticConnect = false) {
     if (this.used.has(session) || this.used.size >= 128) throw Error('Stream session reused');
@@ -157,14 +167,14 @@ export class StreamFallback {
   private async prepare(oldBps: number, reconnect: boolean, manual = false) {
     const before = this.hooks.progress();
     if (this.closed || this.busy || this.hooks.stopped() || this.tried && !reconnect && !manual && before.connected) return;
-    if (this.used.size >= 128) { if (reconnect) this.restore(); return; }
+    if (this.used.size >= 128) { this.failed = true; this.hooks.changed?.(); return; }
     const session = [...crypto.getRandomValues(new Uint8Array(32))].map(n => n.toString(16).padStart(2, '0')).join('');
     const benchmark = !reconnect && !manual && before.connected;
     const automaticConnect = !reconnect && !manual && !before.connected;
     // Failed initial setup must not consume the later slow-transfer benchmark
     // if native ICE eventually succeeds on a different path.
     this.tried = !automaticConnect;
-    if (automaticConnect) this.connectAttempts++;
+    if (automaticConnect || reconnect) this.connectAttempts++;
     const probeBytes = this.quickSupported && !benchmark ? 0 : PROBE_BYTES;
     const candidate = this.begin(session, this.hooks.epoch(), probeBytes, automaticConnect);
     try {
@@ -181,22 +191,28 @@ export class StreamFallback {
         this.abort(candidate, false); return;
       }
       const activated = new Promise<void>(resolve => { candidate.activated = resolve; });
-      candidate.committing = true;
+      // The sender arbitrates once, after the peer's encrypted handshake. A
+      // missing activation receipt must retry relay, not restart native ICE.
+      candidate.committing = true; this.active = true;
       await this.hooks.send({ type: 'stream-activate', session, epoch: candidate.epoch }); await activated;
       if (!this.current(candidate)) return;
       this.finish(candidate, true);
       await this.hooks.activate(channel, candidate.epoch + 1);
       if (this.closed || this.hooks.stopped()) { channel.close(); return; }
       for (const data of candidate.early) channel.onmessage?.(new MessageEvent('message', { data }));
-      this.active = true; this.busy = false; this.trial = this.preference ? undefined : { at: Date.now(), bytes: this.hooks.progress().bytes, oldBps: benchmark ? oldBps : 0 };
+      this.active = true; this.busy = false;
       this.connectAttempts = 0; this.retryAt = 0;
-      this.hooks.changed?.(); this.monitor(true);
+      this.hooks.changed?.();
     } catch {
       if (candidate.cancelled) return;
-      this.abort(candidate); this.busy = false;
-      if (!this.active) candidate.channel?.close();
-      if (reconnect && this.active) this.restore();
-      this.hooks.changed?.();
+      if (this.candidate === candidate) this.abort(candidate);
+      else {
+        // Activation can fail after ownership left the candidate timer. Close
+        // that socket too, and retain the same relay recovery target.
+        this.busy = false; this.failed = true;
+        this.retryAt = this.observedAt + (this.connectAttempts <= 1 ? 3000 : 6000);
+        candidate.channel?.close(); this.hooks.restore(); this.hooks.changed?.();
+      }
     }
   }
   async handle(message: any) {
@@ -215,13 +231,13 @@ export class StreamFallback {
     if (message.type === 'stream-unavailable') { this.abort(candidate); return; }
     if (message.type === 'stream-activated' && this.role === 'sender') { candidate.activated?.(); return; }
     if (message.type === 'stream-activate' && this.role === 'receiver' && candidate.bytes === candidate.probeBytes && candidate.channel?.readyState === 'open') {
-      const channel = candidate.channel; this.finish(candidate, true);
+      const channel = candidate.channel; this.active = true; this.finish(candidate, true);
       try {
         await this.hooks.activate(channel, candidate.epoch + 1);
         if (this.closed || this.hooks.stopped()) { channel.close(); return; }
         this.active = true; this.busy = false; this.hooks.changed?.();
         await this.hooks.send({ type: 'stream-activated', session: candidate.session, epoch: candidate.epoch });
-      } catch { this.busy = false; channel.close(); this.restore(); }
+      } catch { this.busy = false; this.failed = true; channel.close(); this.hooks.restore(); this.hooks.changed?.(); }
     }
   }
   private finish(candidate: Candidate, committing = false) {
@@ -232,14 +248,22 @@ export class StreamFallback {
     if (this.candidate !== candidate) return;
     candidate.cancelled = true;
     this.finish(candidate); this.failed = failed; candidate.channel?.close();
-    if (failed && candidate.automaticConnect) this.retryAt = this.observedAt + (this.connectAttempts === 1 ? 3000 : 6000);
+    if (failed && (candidate.automaticConnect || this.active)) this.retryAt = this.observedAt + (this.connectAttempts <= 1 ? 3000 : 6000);
+    this.target = this.active || this.preference !== 'direct' && !this.hooks.progress().connected ? 'stream' : 'direct';
     candidate.acknowledged?.(); candidate.activated?.();
     if (!this.closed) void this.hooks.send({ type: 'stream-unavailable', session: candidate.session, epoch: candidate.epoch }).catch(() => {});
-    if (this.active && !this.closed) this.restore();
+    if (this.active && !this.closed) this.hooks.restore();
     this.hooks.changed?.();
   }
-  private restore() { this.active = false; this.target = this.relayOnly ? 'stream' : 'direct'; this.trial = undefined; if (this.relayOnly) this.disconnectedAt = Date.now() - INITIAL_RELAY_WAIT_MS; this.hooks.restore(); this.hooks.changed?.(); }
-  useNative() { this.active = false; this.target = 'direct'; this.trial = undefined; if (this.candidate) this.abort(this.candidate); this.hooks.changed?.(); }
-  useRoute(route: TransferRoute) { this.active = route === 'stream'; this.target = route; this.trial = undefined; this.hooks.changed?.(); }
+  private restoreDirect() { this.active = false; this.target = 'direct'; this.hooks.restore(); this.hooks.changed?.(); }
+  useNative() {
+    // Late native offers cannot override a relay winner. Only an authenticated
+    // explicit direct choice unlocks native negotiation again.
+    if (this.active && this.preference !== 'direct') return false;
+    this.active = false; this.target = 'direct';
+    if (this.candidate) this.abort(this.candidate, false);
+    this.hooks.changed?.(); return true;
+  }
+  useRoute(route: TransferRoute) { this.active = route === 'stream'; this.target = route; this.hooks.changed?.(); }
   close() { this.closed = true; if (this.candidate) this.abort(this.candidate); }
 }

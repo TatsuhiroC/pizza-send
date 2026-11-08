@@ -126,7 +126,7 @@ export class Transfer {
     }, delay);
   }
   private armRecoveryTimeout() {
-    this.scheduleFailure('recoveryTimer', 120000, '暂时无法恢复直连，已等待两分钟。请检查双方网络，或重新创建传输。');
+    this.scheduleFailure('recoveryTimer', 120000, '暂时无法恢复连接，已等待两分钟。请检查双方网络，或重新创建传输。');
   }
   private heartbeat?: ReturnType<typeof setInterval>;
   private recoveryTimer?: ReturnType<typeof setTimeout>;
@@ -320,6 +320,7 @@ export class Transfer {
         ...(this.generation ? { resumeRequested: true } : {}), compression: supportsCompression() ? COMPRESSION : undefined });
       this.reportVisibility();
       clearInterval(this.heartbeat);
+      if (this.completed) return; // A recovered receiver only owes the final receipt.
       this.heartbeat = setInterval(() => {
         if (this.stopped || this.completed || this.recovering) return;
         if (Date.now() - this.lastSeen > 8000 && !this.waitingInBackground) { this.requestRecovery(); return; }

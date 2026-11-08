@@ -186,3 +186,84 @@ test('a recipient joining before the sender notification socket opens still rece
     held.unblock(); await page.locator('#cancel').click();
   }
 });
+
+test('a committed creation whose reply is lost retries the same room and produces a usable invitation', async ({ page, context, browserName }, info) => {
+  await setup(context); let count = 0, release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const bodies: any[] = [], statuses: number[] = [];
+  await page.route(api + '/rooms', async route => {
+    count++; bodies.push(route.request().postDataJSON());
+    const response = await route.fetch({ headers: { ...route.request().headers(), 'cf-connecting-ip': 'lost-creation-' + info.testId } });
+    statuses.push(response.status());
+    if (count === 1) await gate;
+    await route.fulfill({ response }).catch(() => {});
+  });
+  try {
+    await page.goto('./'); await page.clock.install();
+    await page.locator('#file-input').setInputFiles(file); await page.locator('#start-send').click();
+    await expect.poll(() => statuses.length).toBe(1); expect(statuses[0]).toBe(201);
+    await page.clock.fastForward(16000);
+    await expect(page.locator('#status')).toHaveText('配对服务响应较慢，正在重试…');
+    await page.clock.fastForward(1100);
+    await visibleInvitation(page);
+    expect(count).toBe(2); expect(statuses).toEqual([201, 200]); expect(bodies[1]).toEqual(bodies[0]);
+    const link = await page.locator('#share-link').inputValue();
+    expect(await page.evaluate(async ({ link, creationToken }) => {
+      const { parseShare } = await import('/src/share.ts');
+      return (await parseShare(new URL(link).hash)).secret !== creationToken;
+    }, { link, creationToken: bodies[0].creationToken })).toBe(true);
+    release();
+    if (browserName === 'chromium') {
+      const receiver = await context.newPage(); await receiver.goto(link);
+      await expect(receiver.locator('#accept-files')).toBeVisible(); await receiver.locator('#accept-files').click();
+      await expect(receiver.locator('#status')).toHaveText('文件已收到，请保存到设备');
+      const downloading = receiver.waitForEvent('download'); await receiver.locator('.download-file').click();
+      const download = await downloading;
+      expect(download.suggestedFilename()).toBe(file.name);
+      expect(createHash('sha256').update(await readFile((await download.path())!)).digest('hex')).toBe(createHash('sha256').update(file.buffer).digest('hex'));
+    }
+  } finally { release(); if (await page.locator('#cancel').isVisible()) await page.locator('#cancel').click(); }
+});
+
+test('persistent creation timeouts stop after one retry and preserve the file selection', async ({ page, context }) => {
+  await setup(context); let calls = 0, release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  await page.route(api + '/rooms', async route => { calls++; await gate; await route.abort().catch(() => {}); });
+  try {
+    await page.goto('./'); await page.clock.install();
+    await page.locator('#file-input').setInputFiles(file); await page.locator('#start-send').click();
+    await expect.poll(() => calls).toBe(1);
+    await page.clock.fastForward(16000);
+    await expect(page.locator('#status')).toHaveText('配对服务响应较慢，正在重试…');
+    await page.clock.fastForward(1100); await expect.poll(() => calls).toBe(2);
+    await page.clock.fastForward(14000);
+    await expect(page.locator('#notice')).toHaveText('未能及时连接配对服务，文件尚未开始传输。请稍后重试。');
+    await expect(page.locator('#status')).toHaveText('连接未完成');
+    await expect(page.locator('#start-send')).toBeEnabled(); await expect(page.locator('#files')).toContainText(file.name);
+    await page.clock.fastForward(60000); expect(calls).toBe(2);
+    await expect(page.locator('#share-box')).toBeHidden();
+  } finally { release(); }
+});
+
+test('cancel aborts a pending creation and its late response cannot replace a new invitation', async ({ page, context }, info) => {
+  await setup(context); let release!: () => void, first: any, second: any;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  await page.route(api + '/rooms', async route => {
+    const body = route.request().postDataJSON();
+    const response = await route.fetch({ headers: { ...route.request().headers(), 'cf-connecting-ip': 'cancel-creation-' + info.testId } });
+    if (!first) { first = body; await gate; } else second = body;
+    await route.fulfill({ response }).catch(() => {});
+  });
+  try {
+    await create(page); await expect.poll(() => !!first).toBe(true);
+    // Observe cleanup rather than probing the sender API: a GET with a new
+    // client would bind that client and race the very cleanup being tested.
+    const ended = page.waitForResponse(response => new URL(response.url()).pathname === '/rooms/' + first.room && response.request().method() === 'POST' && response.request().postDataJSON()?.type === 'end');
+    await page.locator('#cancel').click(); await expect(page.locator('#session-panel')).toBeHidden();
+    expect((await ended).status()).toBe(200);
+    await page.locator('#start-send').click(); const invitation = await visibleInvitation(page);
+    expect(second.room).not.toBe(first.room); expect(second.creationToken).not.toBe(first.creationToken);
+    release(); await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 50)));
+    await expect(page.locator('#share-link')).toHaveValue(invitation); await expect(page.locator('#notice')).toBeHidden();
+  } finally { release(); if (await page.locator('#cancel').isVisible()) await page.locator('#cancel').click(); }
+});

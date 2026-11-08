@@ -68,3 +68,43 @@ test('persistent aborts stop after two attempts and HTTP authentication errors a
     expect(calls).toBe(1);
   } finally { globalThis.fetch = original; }
 });
+
+// Creation has a separate, bounded policy: never reuse the ordinary room retry
+// helper without an independent creation capability and server ownership check.
+test('creation retries one transient request with the same capability and preserves legacy success', async () => {
+  const { createShare } = await import('../../src/share-creation');
+  const original = globalThis.fetch, requests: string[] = []; let retries = 0;
+  const creation = { v: 2 as const, room: '11'.repeat(32), receiverHash: '22'.repeat(32), multi: true as const, creationToken: '33'.repeat(32) };
+  try {
+    globalThis.fetch = async (_url, options) => {
+      requests.push(String(options?.body));
+      if (requests.length === 1) throw new TypeError('Transient network failure');
+      return Response.json({ v: 2, room: creation.room, sender: creation.creationToken, creationRetry: 1 }, { status: 200 });
+    };
+    const session = await createShare('https://creation.invalid', creation, { signal: new AbortController().signal, retry: () => retries++, challenge: async () => { throw Error('Unexpected challenge'); } });
+    expect(session.sender).toBe(creation.creationToken); expect(retries).toBe(1);
+    expect(requests).toHaveLength(2); expect(requests[0]).toBe(requests[1]);
+    globalThis.fetch = async () => Response.json({ v: 2, room: creation.room, sender: '44'.repeat(32) }, { status: 201 });
+    expect((await createShare('https://creation.invalid', creation, { signal: new AbortController().signal, retry() {}, challenge: async () => '' })).sender).toBe('44'.repeat(32));
+  } finally { globalThis.fetch = original; }
+});
+
+test('creation never retries denial, quota, invalid success, or cancellation during the retry delay', async () => {
+  const { createShare } = await import('../../src/share-creation');
+  const original = globalThis.fetch;
+  const creation = { v: 2 as const, room: '11'.repeat(32), receiverHash: '22'.repeat(32), multi: true as const, creationToken: '33'.repeat(32) };
+  try {
+    for (const status of [400, 401, 403, 409, 410, 429, 501, 503]) {
+      let calls = 0;
+      globalThis.fetch = async () => { calls++; return Response.json({ error: 'New shares temporarily paused' }, { status }); };
+      await expect(createShare('https://creation.invalid', creation, { signal: new AbortController().signal, retry() { throw Error('Should not retry'); }, challenge: async () => '' })).rejects.toThrow();
+      expect(calls).toBe(1);
+    }
+    globalThis.fetch = async () => Response.json({ v: 2, room: creation.room, sender: '44'.repeat(32), creationRetry: 1 });
+    await expect(createShare('https://creation.invalid', creation, { signal: new AbortController().signal, retry() {}, challenge: async () => '' })).rejects.toThrow('返回信息无效');
+    let calls = 0; const cancel = new AbortController();
+    globalThis.fetch = async () => { calls++; throw new TypeError('Transient'); };
+    await expect(createShare('https://creation.invalid', creation, { signal: cancel.signal, retry: () => cancel.abort(), challenge: async () => '' })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(calls).toBe(1);
+  } finally { globalThis.fetch = original; }
+});

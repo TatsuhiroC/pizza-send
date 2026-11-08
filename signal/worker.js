@@ -48,6 +48,7 @@ async function roomOptions(request) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error('Invalid room configuration');
   if (value.challenge !== undefined && (typeof value.challenge !== 'string' || value.challenge.length > 2048)) throw Error('Invalid challenge');
   if (value.multi !== undefined && typeof value.multi !== 'boolean') throw Error('Invalid room configuration');
+  if (value.creationToken !== undefined && !validToken(value.creationToken)) throw Error('Invalid creation credential');
   if (value?.v !== 2 || !/^[a-f0-9]{64}$/.test(value.room) || !/^[a-f0-9]{64}$/.test(value.receiverHash)) throw Error('Invalid room configuration');
   return value;
 }
@@ -84,7 +85,14 @@ export default {
         catch { return deny('body', 400, 'Invalid room configuration'); }
         const decision = await env.LIMITS.get(env.LIMITS.idFromName(ip)).creation();
         if (!decision.allowed) return deny('create-limit', 429, 'Too many requests');
-        if (decision.challenge) {
+        const room = options?.room || token(), sender = options?.creationToken || token(), receiver = options ? null : token();
+        const senderHash = await digest(sender), receiverHash = options?.receiverHash || await digest(receiver);
+        // This capability is independent of the invitation/file secret. Bind
+        // retries to all immutable creation parameters, not the public room ID.
+        const creationHash = options?.creationToken ? await digest(JSON.stringify([senderHash, receiverHash, !!options.multi])) : undefined;
+        const guard = admission(env);
+        let reservation = creationHash ? await guard.recoverCreation(room, creationHash) : undefined;
+        if (!reservation && decision.challenge) {
           if (!env.TURNSTILE_SITE_KEY || !env.TURNSTILE_SECRET_KEY) return deny('challenge-unavailable', 429, 'Too many requests');
           let passed = false;
           try { passed = await verifyChallenge(env, request, options, origin); } catch {}
@@ -93,12 +101,21 @@ export default {
             return response({ error: 'Verification required', siteKey: env.TURNSTILE_SITE_KEY }, 428, origin);
           }
         }
-        const room = options?.room || token(), sender = token(), receiver = options ? null : token();
-        const guard = admission(env), reservation = await guard.reserve(room);
+        reservation ??= await guard.reserve(room, creationHash);
         if (!reservation.allowed) return deny('admission-' + reservation.reason, reservation.reason === 'duplicate' ? 409 : 503, reservation.reason === 'duplicate' ? 'Room already exists' : 'New shares temporarily paused');
+        if (creationHash) {
+          // On an ambiguous RPC failure retain the reservation. The first call
+          // may already have committed; a retry must keep its ownership/budget.
+          const result = await env.ROOMS.get(env.ROOMS.idFromName(room)).initializeRecoverable(senderHash, receiverHash, !!options.multi, { room, lease: reservation.lease }, creationHash);
+          if (![200, 201].includes(result.status)) {
+            if (!reservation.reused) await guard.release(room, reservation.lease);
+            return deny('creation-conflict', result.status, result.status === 410 ? 'Session expired' : 'Room already exists');
+          }
+          return response({ v: 2, ...(options.multi ? { multi: true } : {}), room, sender, expiresAt: result.expiresAt, creationRetry: 1 }, result.status, origin);
+        }
         let created = false;
         try {
-          created = await env.ROOMS.get(env.ROOMS.idFromName(room)).initialize(await digest(sender), options?.receiverHash || await digest(receiver), !!options?.multi, { room, lease: reservation.lease });
+          created = await env.ROOMS.get(env.ROOMS.idFromName(room)).initialize(senderHash, receiverHash, !!options?.multi, { room, lease: reservation.lease });
           if (!created) return deny('collision', 409, 'Room already exists');
         } finally { if (!created) await guard.release(room, reservation.lease); }
         return response({ v: options ? 2 : 1, ...(options?.multi ? { multi: true } : {}), room, sender, ...(receiver ? { receiver } : {}), expiresAt: Date.now() + TTL }, 201, origin);
@@ -153,7 +170,12 @@ export class RateLimit extends DurableObject {
 }
 export class Admission extends DurableObject {
   constructor(ctx, env) { super(ctx, env); this.runtime = env; }
-  async reserve(room) {
+  async recoverCreation(room, creationHash) {
+    const value = (await this.ctx.storage.get('admission'))?.active?.[room];
+    return validToken(creationHash) && value?.creationHash === creationHash && value.expires > Date.now()
+      ? { allowed: true, lease: value.lease, reused: true } : undefined;
+  }
+  async reserve(room, creationHash) {
     const limit = (key, fallback, maximum) => { const n = Number(this.runtime[key]); return Number.isInteger(n) && n > 0 ? Math.min(n, maximum) : fallback; };
     return this.ctx.storage.transaction(async storage => {
       const now = Date.now(), day = Math.floor(now / 86400000), minute = Math.floor(now / 60000);
@@ -161,11 +183,12 @@ export class Admission extends DurableObject {
       for (const [id, value] of Object.entries(state.active)) if (value.expires <= now) delete state.active[id];
       if (state.day !== day) { state.day = day; state.daily = 0; }
       if (state.minute !== minute) { state.minute = minute; state.burst = 0; }
-      if (state.active[room]) return { allowed: false, reason: 'duplicate' };
+      if (state.active[room]) return creationHash && state.active[room].creationHash === creationHash
+        ? { allowed: true, lease: state.active[room].lease, reused: true } : { allowed: false, reason: 'duplicate' };
       if (state.daily >= limit('MAX_SHARES_PER_DAY', 1000, 10000)) return { allowed: false, reason: 'daily' };
       if (state.burst >= limit('MAX_SHARES_PER_MINUTE', 60, 200)) return { allowed: false, reason: 'burst' };
       if (Object.keys(state.active).length >= limit('MAX_ACTIVE_SHARES', 128, 512)) return { allowed: false, reason: 'active' };
-      const lease = token(); state.active[room] = { lease, expires: now + MAX_ACTIVE_TTL }; state.daily++; state.burst++;
+      const lease = token(); state.active[room] = { lease, expires: now + MAX_ACTIVE_TTL, ...(creationHash ? { creationHash } : {}) }; state.daily++; state.burst++;
       await storage.put('admission', state); return { allowed: true, lease };
     });
   }
@@ -203,6 +226,23 @@ export class Room extends DurableObject {
     });
     if (created) await this.ctx.storage.setAlarm(Date.now() + TTL);
     return created;
+  }
+  async initializeRecoverable(sender, receiver, multi, reservation, creationHash) {
+    const result = await this.ctx.storage.transaction(async storage => {
+      const current = await storage.get('room'), now = Date.now();
+      if (current) {
+        if (current.creationHash !== creationHash || current.sender !== sender || current.receiver !== receiver || !!current.multi !== multi) return { status: 409 };
+        if (current.ended || current.expiresAt <= now || current.inviteExpiresAt <= now) return { status: 410 };
+        if (current.reservation?.lease !== reservation.lease) return { status: 409 };
+        return { status: 200, expiresAt: current.inviteExpiresAt, alarmAt: current.expiresAt };
+      }
+      const state = { sender, receiver, creationHash, reservation, inviteExpiresAt: now + TTL, expiresAt: now + TTL,
+        maxExpiresAt: now + MAX_ACTIVE_TTL, ended: false, ...(multi ? { multi: true, members: {}, closedClients: [] } : {}) };
+      await storage.put('room', state);
+      return { status: 201, expiresAt: state.inviteExpiresAt, alarmAt: state.expiresAt };
+    });
+    if (result.alarmAt) await this.ctx.storage.setAlarm(result.alarmAt);
+    return result;
   }
   async fetch(request) {
     const state = await this.ctx.storage.get('room');

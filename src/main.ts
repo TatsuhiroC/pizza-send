@@ -22,7 +22,7 @@ import { checkSources, droppedSources } from './source-files';
 import { setSignalPreconnect } from './signal-preconnect';
 import { cleanupSourceArchives, packageSources, releaseSourceArchive, stopSourceArchives } from './folder-archive';
 import { remainingTime } from './remaining-time';
-import { fetchWithTimeout } from './request-timeout';
+import { createShare } from './share-creation';
 import { deviceLabel, browserLabel } from './peer-info';
 import type { CompressionStatus } from './compression';
 import { connectionDiagnosticsEnabled, mountConnectionDiagnostics } from './connection-diagnostics';
@@ -58,6 +58,7 @@ let configurationController: AbortController | undefined;
 let configurationVersion = 0;
 let checkingFiles = false;
 let checkingAbort: AbortController | undefined;
+let creationAbort: AbortController | undefined;
 let packagingFiles = false;
 let packagingAbort: AbortController | undefined;
 let selectionRevision = 0;
@@ -457,6 +458,7 @@ function renderCurrentCompression() {
 }
 function reset() {
   checkingAbort?.abort();
+  creationAbort?.abort();
   deliveryMotion.setState('idle');
   $('route-controls').hidden = true;
   compressionState = { active: false }; $('compression-hint').hidden = true;
@@ -488,7 +490,7 @@ function events(event: TransferEvent) {
   } else if (event.type === 'compression') {
     compressionState = event.data; renderCurrentCompression();
   } else if (event.type === 'pairing') {
-    status(event.data, event.data === '配对信息已交换，正在寻找直连路径' ? '请保持手机在发送页面；VPN 需要允许本地网络和 WebRTC。' : event.data === '直连暂未建立，正在连接加密转发' ? '正在通过加密转发建立连接，请保持双方页面打开。' : '请让发送方保持页面打开，手机不要锁屏。');
+    status(event.data, event.data === '配对信息已交换，正在寻找直连路径' ? '请保持手机在发送页面；VPN 需要允许本地网络和 WebRTC。' : event.data === '正在同时尝试直连和加密转发' ? '哪条路线先连通就先使用，请保持双方页面打开。' : event.data === '正在连接加密转发' ? '正在通过加密转发建立连接，请保持双方页面打开。' : '请让发送方保持页面打开，手机不要锁屏。');
   } else if (event.type === 'background') {
     backgroundNote(event.data);
   } else if (event.type === 'connected') {
@@ -749,23 +751,19 @@ async function automaticSender(t: Transfer) {
   const api = endpoint();
   const secret = randomToken(), credentials = await deriveShare(secret);
   if (transfer !== t || t.stopped) return;
-  const options = { v: 2, room: credentials.room, receiverHash: await receiverDigest(credentials.receiver), multi: true, challenge: '' };
-  const create = () => fetchWithTimeout(api + '/rooms', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(options), referrerPolicy: 'no-referrer' }, 15000,
-    async response => ({ response, payload: await response.json().catch(error => { if (response.ok || response.status === 428) throw error; return {}; }) }));
-  let { response, payload } = await create();
-  if (response.status === 428) {
-    const required = payload;
-    if (transfer !== t || t.stopped) return;
-    options.challenge = await challenge(required.siteKey, credentials.room, () => transfer === t && !t.stopped);
-    if (transfer !== t || t.stopped) return;
-    ({ response, payload } = await create());
-  }
-  if (!response.ok) {
-    const failure = payload;
-    throw Error(response.status === 429 ? '请求过于频繁，请稍后重试或使用手动配对。' : response.status === 503 && failure.error === 'New shares temporarily paused' ? '新分享暂时达到服务限额，请稍后重试或使用手动配对。' : '配对服务暂不可用（' + response.status + '），请使用手动配对');
-  }
-  const session = payload;
-  if (session.v !== 2 || session.room !== credentials.room || !/^[a-f0-9]{64}$/.test(session.sender)) throw Error('配对服务返回信息无效');
+  const controller = creationAbort = new AbortController();
+  const creationToken = randomToken();
+  let session;
+  try {
+    session = await createShare(api, { v: 2, room: credentials.room, receiverHash: await receiverDigest(credentials.receiver), multi: true, creationToken }, {
+      signal: controller.signal,
+      retry: () => { if (transfer === t && !t.stopped) status('配对服务响应较慢，正在重试…', '文件尚未开始传输，可以随时取消。'); },
+      challenge: (siteKey, room) => challenge(siteKey, room, () => transfer === t && !t.stopped && !controller.signal.aborted)
+    });
+  } catch (error) {
+    if (controller.signal.aborted) void groupRequest(groupURL(api, credentials.room, 'sender', creationToken, randomToken()), { type: 'end' }, true).catch(() => {});
+    throw error;
+  } finally { if (creationAbort === controller) creationAbort = undefined; }
   if (transfer !== t || t.stopped) {
     void groupRequest(groupURL(api, session.room, 'sender', session.sender, randomToken()), { type: 'end' }, true).catch(() => {});
     return;
@@ -823,7 +821,7 @@ async function manualSender(t: Transfer) {
   const code = await packDescription(await t.offer());
   if (transfer !== t || t.stopped) return;
   pairingKind = 'offer'; $<HTMLTextAreaElement>('outgoing-code').value = code;
-  setText($('pair-instructions'), '把配对码发给对方。对方在「接收文件」中粘贴后，会得到应答码，再把应答码返回这里。');
+  setText($('pair-instructions'), '把配对码发给对方。对方在「接收模式」中粘贴后，会得到应答码，再把应答码返回这里。');
   setText($('outgoing-label'), '发给接收方的配对码'); $('answer-section').hidden = false;
   $('pair-qr').hidden = true; $<HTMLTextAreaElement>('answer-code').value = '';
   $<HTMLDialogElement>('pair-dialog').showModal();
@@ -1070,7 +1068,7 @@ window.addEventListener('pagehide', event => {
   // A cached page still owns its files and session. Sending "end" here would
   // invalidate the link while the user briefly visits another app/page.
   if (event.persisted) return;
-  sessionRevision++; storedRevision++; storedRefreshRequested = false; checkingAbort?.abort(); configurationVersion++; configurationController?.abort(); cancelAllDownloads(); clearTimeout(storedRetry); senderGroup?.close(); leaveReceiverGroup(); signaling?.close(); transfer?.close(false); suspendTemporaryStorage(); stopSourceArchives();
+  sessionRevision++; storedRevision++; storedRefreshRequested = false; checkingAbort?.abort(); creationAbort?.abort(); configurationVersion++; configurationController?.abort(); cancelAllDownloads(); clearTimeout(storedRetry); senderGroup?.close(); leaveReceiverGroup(); signaling?.close(); transfer?.close(false); suspendTemporaryStorage(); stopSourceArchives();
 });
 window.addEventListener('pageshow', event => {
   if (!event.persisted) return;

@@ -79,9 +79,9 @@ test('manual route control requires encrypted peer authentication and cancellati
     const transfer = new Transfer({ signalUrl: '', iceServers: [], memoryLimitBytes: 1048576 }, 'receiver', () => {});
     const pair: any = new AutoPair(transfer, await signalKey('a'.repeat(64)), () => {}, 'a'.repeat(64));
     pair.streamFallback.supported = true; pair.streamFallback.used.add('b'.repeat(64));
-    await pair.handle({ type: 'stream-choice', route: 'direct' });
+    await pair.handle({ type: 'stream-choice', route: 'direct', epoch: 0 });
     const untrustedIgnored = !pair.streamFallback.state.manual;
-    await pair.handle({ type: 'stream-choice', route: 'direct' }, true);
+    await pair.handle({ type: 'stream-choice', route: 'direct', epoch: 0 }, true);
     const authenticatedApplied = pair.streamFallback.state.manual;
     let finish!: () => void; pair.signal.send = () => new Promise<void>(resolve => { finish = resolve; });
     const pending = pair.chooseRoute('stream'); pair.close(); transfer.close(false); finish(); await pending;
