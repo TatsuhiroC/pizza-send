@@ -68,11 +68,11 @@ test('test preferences cannot change stable language or connection settings', as
   await page.goto('/');
   await page.evaluate(() => { localStorage.setItem('pizza-send-language', 'en'); localStorage.setItem('pizza-send-signal', 'https://stable-preference.invalid'); });
   await page.goto('/test/');
-  await expect(page.locator('#send-tab')).toContainText('发送文件');
+  await expect(page.locator('#send-tab')).toContainText('发送模式');
   expect(await page.locator('#signal-url').inputValue()).toBe('');
   await page.locator('#language-toggle').click();
   expect(await page.evaluate(() => ({ stable: localStorage.getItem('pizza-send-language'), test: localStorage.getItem('pizzasend-test:pizza-send-language') }))).toEqual({ stable: 'en', test: 'en' });
-  await page.goto('/'); await expect(page.locator('#send-tab')).toContainText('Send files');
+  await page.goto('/'); await expect(page.locator('#send-tab')).toContainText(/Send (files|mode)/);
   expect(await page.locator('#signal-url').inputValue()).toBe('https://stable-preference.invalid');
 });
 

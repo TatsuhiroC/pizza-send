@@ -46,14 +46,14 @@ test('peer cannot reuse a previous stream salt in a fresh encrypted control mess
   const message = { type: 'stream-prepare', epoch: 0, session: 'a'.repeat(64) };
   await peer.handle(message); await peer.handle(message); peer.close(); expect(opens).toBe(1);
 });
-test('an activated candidate that does not improve actual file progress returns to the previous route', () => {
-  for (const scenario of [{ speed: 1000, remaining: 1e9, expected: 1 }, { speed: 6000, remaining: 1e9, expected: 0 }, { speed: 1000, remaining: 10000, expected: 0 }]) {
-    let restores = 0;
-    const peer: any = new StreamFallback('sender', { epoch: () => 1, progress: () => ({ bytes: scenario.speed * 20, total: scenario.speed * 20 + scenario.remaining, active: true, hidden: false, connected: true }), stopped: () => false,
-      open: async () => { throw Error('Unexpected probe'); }, send: async () => {}, activate: async () => {}, restore: () => { restores++; } });
-    peer.supported = peer.active = peer.tried = true; peer.trial = { at: 10000, bytes: 0, oldBps: 3000 };
-    peer.monitor(true, 30000); peer.monitor(true, 32000); peer.close(); expect(restores).toBe(scenario.expected);
-  }
+test('an automatic relay winner stays selected even when later file progress is slow', () => {
+  let restores = 0;
+  const peer: any = new StreamFallback('sender', { epoch: () => 1, progress: () => ({ bytes: 20000, total: 1e9, active: true, hidden: false, connected: true }), stopped: () => false,
+    open: async () => { throw Error('Unexpected probe'); }, send: async () => {}, activate: async () => {}, restore: () => { restores++; } });
+  peer.supported = true; peer.useRoute('stream');
+  for (const now of [30000, 60000, 120000]) peer.monitor(true, now);
+  expect(peer.state).toMatchObject({ current: 'stream', target: 'stream', manual: false });
+  expect(restores).toBe(0); peer.close();
 });
 
 test('direct connection retries do not reset the disconnected fallback observation forever', async () => {
@@ -84,7 +84,6 @@ test('an explicitly selected relay is not automatically replaced because it is s
   const peer: any = new StreamFallback('sender', { epoch: () => 1, progress: () => ({ bytes: 1000, total: 1e9, active: true, hidden: false, connected: true }), stopped: () => false,
     open: async () => { throw Error('Unexpected probe'); }, send: async () => {}, activate: async () => {}, restore: () => { restores++; } });
   peer.supported = peer.active = true; peer.choose('stream');
-  peer.trial = { at: 10000, bytes: 0, oldBps: 100000 };
   peer.monitor(true, 40000); expect(restores).toBe(0);
   peer.choose('direct'); peer.monitor(true, 42000); expect(restores).toBe(1); peer.close();
 });

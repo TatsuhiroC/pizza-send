@@ -58,9 +58,20 @@ test('a cancelled relay ticket request cannot create a late socket', async ({ pa
   } finally { release(); await page.evaluate(() => (window as any).__routeSignal?.close()); }
 });
 
-for (const scenario of ['slow', 'initial', 'initial-retry', 'manual', 'failed-direct', 'cancel-direct']) test(scenario === 'initial-retry' ? 'initial relay failure automatically retries without blocking signaling or requiring a button' : scenario === 'initial' ? 'initial direct ICE failure opens encrypted WSS without a TURN stage' : scenario === 'manual' ? 'either peer reuses both warm routes without new relay tickets or resetting progress' : scenario === 'failed-direct' ? 'unreachable direct selection restores the warm encrypted relay after eight seconds' : scenario === 'cancel-direct' ? 'either peer can cancel a stalled direct attempt and immediately reuse encrypted relay' : 'a slow long transfer probes encrypted WSS without a TURN stage and resumes the original file', async ({ page, context, browserName }) => {
+const scenarios = {
+  slow: 'a slow long transfer probes encrypted WSS without a TURN stage and resumes the original file',
+  initial: 'initial direct ICE failure opens encrypted WSS without a TURN stage',
+  'initial-retry': 'initial relay failure automatically retries without blocking signaling or requiring a button',
+  manual: 'either peer reuses both warm routes without new relay tickets or resetting progress',
+  'failed-direct': 'unreachable direct selection restores the warm encrypted relay after eight seconds',
+  'cancel-direct': 'either peer can cancel a stalled direct attempt and immediately reuse encrypted relay',
+  'direct-first': 'direct winning the initial race ignores late relay tickets and preserves the original file',
+  'relay-reconnect': 'a relay winner reconnects on relay with native available and resumes the original file'
+};
+for (const [scenario, title] of Object.entries(scenarios)) test(title, async ({ page, context, browserName }) => {
+  const directFirst = scenario === 'direct-first', relayReconnect = scenario === 'relay-reconnect';
   const failedDirect = scenario === 'failed-direct' || scenario === 'cancel-direct';
-  const blocked = scenario === 'initial' || scenario === 'initial-retry' || failedDirect, manual = scenario === 'manual';
+  const blocked = scenario === 'initial' || scenario === 'initial-retry' || failedDirect || relayReconnect, manual = scenario === 'manual';
   test.skip(browserName === 'webkit', 'The initial native DataChannel comparison uses Chromium.');
   let streamTickets = 0, relayTickets = 0, ciphertextFrames = 0;
   const streams = new Map<string, WebSocketRoute>(), errors: string[] = [];
@@ -69,6 +80,7 @@ for (const scenario of ['slow', 'initial', 'initial-retry', 'manual', 'failed-di
     if (body?.type === 'turn') { relayTickets++; await route.fulfill({ status: 503, json: { error: 'Unavailable in fixture' } }); }
     else if (body?.type === 'stream-connect') {
       streamTickets++;
+      if (directFirst) await new Promise(resolve => setTimeout(resolve, 2000));
       if (scenario === 'initial-retry' && streamTickets === 1) { await route.fulfill({ status: 503, json: { error: 'Transient fixture failure' } }); return; }
       expect(request.headers().authorization).toMatch(/^Bearer [a-f0-9]{64}$/);
       await route.fulfill({ json: { ticket: 'e'.repeat(64) } });
@@ -84,7 +96,7 @@ for (const scenario of ['slow', 'initial', 'initial-retry', 'manual', 'failed-di
     });
     if (streams.has(opposite)) for (const peer of [socket, streams.get(opposite)!]) peer.send(JSON.stringify({ type: 'stream-ready' }));
   });
-  await context.addInitScript(({ blocked, paced, manual }) => {
+  await context.addInitScript(({ blocked, paced, manual, directFirst }) => {
     const state = window as any; state.__slowRouteRead = paced;
     const read = Blob.prototype.arrayBuffer;
     Blob.prototype.arrayBuffer = async function() { if (state.__slowRouteRead && this.size <= 32768) await new Promise(resolve => setTimeout(resolve, 40)); return read.call(this); };
@@ -101,33 +113,36 @@ for (const scenario of ['slow', 'initial', 'initial-retry', 'manual', 'failed-di
     RTCDataChannel.prototype.send = function(data: any) {
       const channel = this as any, now = performance.now();
       channel.__fixtureAt = Math.max(channel.__fixtureAt || 0, now);
-      if (!blocked && !manual && data instanceof ArrayBuffer) channel.__fixtureAt += data.byteLength * 1000 / 32768;
+      if (!blocked && !manual && !directFirst && data instanceof ArrayBuffer) channel.__fixtureAt += data.byteLength * 1000 / 32768;
       const delay = channel.__fixtureAt - now;
       if (delay > 0) { setTimeout(() => { if (this.readyState === 'open') send.call(this, data); }, delay); return; }
       return send.call(this, data);
     } as any;
     void navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => stream.getTracks().forEach(track => track.stop()));
-  }, { blocked, paced: manual || failedDirect, manual });
+  }, { blocked, paced: manual || failedDirect || relayReconnect, manual, directFirst });
   const receiver = await context.newPage(); for (const current of [page, receiver]) current.on('pageerror', error => errors.push(error.message));
   const buffer = Buffer.alloc(8 * 1048576 + 17); for (let i = 0; i < buffer.length; i++) buffer[i] = i % 251;
-  const instrument = async (current: typeof page) => current.evaluate(async ({ manual }) => {
+  const instrument = async (current: typeof page) => current.evaluate(async ({ manual, blocked, directFirst }) => {
     const { StreamFallback } = await import('/src/stream-fallback.ts');
     const { Transfer } = await import('/src/protocol.ts');
     const state = window as any; state.__streamTrace = [];
     const log = (entry: any) => { state.__streamTrace.push(entry); if (state.__streamTrace.length > 100) state.__streamTrace.shift(); };
-    if (manual) {
+    if (!blocked && !directFirst) {
       const monitor = StreamFallback.prototype.monitor;
       StreamFallback.prototype.monitor = function(allowed: boolean, now?: number) {
-        monitor.call(this, allowed, now);
         const fallback = this as any;
+        // These cases exercise upgrades from an already working native route.
+        // Initial route racing is covered independently by the initial cases.
+        if (fallback.role === 'sender' && !fallback.hooks.progress().connected && !fallback.active) return;
+        monitor.call(this, allowed, now);
         // Exercise route reuse independently of the slow-link eligibility test
         // above; keep native frames genuinely ordered, without fixture timers.
-        if (fallback.role === 'sender' && !state.__manualRelayStarted && fallback.hooks.progress().active && allowed) {
+        if (manual && fallback.role === 'sender' && !state.__manualRelayStarted && fallback.hooks.progress().active && allowed) {
           state.__manualRelayStarted = true; void fallback.prepare(0, false, true);
         }
       };
     }
-    for (const name of ['handle', 'abort', 'restore'] as const) {
+    for (const name of ['handle', 'abort', 'restoreDirect'] as const) {
       const original = (StreamFallback.prototype as any)[name];
       (StreamFallback.prototype as any)[name] = function(...args: any[]) {
         log({ action: name, type: args[0]?.type, epoch: args[0]?.epoch, current: this.hooks.epoch(), active: this.active, busy: this.busy });
@@ -145,14 +160,22 @@ for (const scenario of ['slow', 'initial', 'initial-retry', 'manual', 'failed-di
         return original.apply(this, args);
       };
     }
-  }, { manual });
+  }, { manual, blocked, directFirst });
   await page.goto('./'); await instrument(page); await page.locator('#file-input').setInputFiles({ name: 'generated-original-video.mp4', mimeType: 'video/mp4', buffer });
   await page.locator('#start-send').click(); await expect(page.locator('#share-box')).toBeVisible();
   await receiver.goto(await page.locator('#share-link').inputValue());
   if (blocked) await expect.poll(() => streamTickets, { timeout: 9000 }).toBeGreaterThan(0);
   await expect(receiver.locator('#accept-files')).toBeVisible({ timeout: 25000 });
-  await instrument(receiver); if (!blocked) expect(streamTickets).toBe(0); await receiver.locator('#accept-files').click();
+  await instrument(receiver); if (!blocked && !directFirst) expect(streamTickets).toBe(0); await receiver.locator('#accept-files').click();
   try {
+    if (relayReconnect) {
+      await expect.poll(() => receiver.locator('#progress').evaluate((element: HTMLProgressElement) => element.value)).toBeGreaterThan(1);
+      const sending = [...streams.entries()].filter(([key]) => key.endsWith('sender'));
+      await sending[sending.length - 1][1].close({ code: 1012, reason: 'Generated relay reconnection fixture' });
+      await expect.poll(() => streamTickets).toBeGreaterThanOrEqual(4);
+      await expect.poll(() => receiver.evaluate(() => (window as any).__streamTrace.some((entry: any) => entry.type === 'file-start' && entry.offset > 0))).toBe(true);
+      await page.evaluate(() => { (window as any).__slowRouteRead = false; });
+    }
     if (manual) {
       const receiveControls = receiver.locator('#route-controls'), sendControls = page.locator('#route-controls');
       await expect(receiveControls).toHaveAttribute('data-route', 'stream', { timeout: 70000 });
@@ -183,14 +206,23 @@ for (const scenario of ['slow', 'initial', 'initial-retry', 'manual', 'failed-di
     }
     await expect(receiver.locator('#status')).toHaveText('文件已收到，请保存到设备', { timeout: 100000 });
     await expect(page.locator('#status')).toHaveText('传输完成，原样送达。');
-    await expect(receiver.locator('#connection-path')).toContainText('加密服务器转发');
-    await expect(receiver.locator('#connection-path')).toContainText('AES-GCM');
+    if (directFirst) await expect(receiver.locator('#connection-path')).toContainText('网络直连');
+    else {
+      await expect(receiver.locator('#connection-path')).toContainText('加密服务器转发');
+      await expect(receiver.locator('#connection-path')).toContainText('AES-GCM');
+    }
     const pending = receiver.waitForEvent('download'); await receiver.locator('.download-file').click(); const download = await pending;
     expect(download.suggestedFilename()).toBe('generated-original-video.mp4');
     expect(createHash('sha256').update(await readFile((await download.path())!)).digest('hex')).toBe(createHash('sha256').update(buffer).digest('hex'));
     if (manual || failedDirect) expect(await receiver.evaluate(() => (window as any).__streamTrace.filter((entry: any) => entry.type === 'file-start' && entry.offset > 0).length)).toBeGreaterThanOrEqual(manual ? 2 : 1);
     if (manual) for (const route of ['direct', 'stream']) expect(await receiver.evaluate(route => (window as any).__streamTrace.some((entry: any) => entry.action === 'replaceTransportNow' && entry.reuse === route), route)).toBe(true);
-    expect(streamTickets).toBe(scenario === 'initial-retry' ? 4 : 2); expect(relayTickets).toBe(0); expect(ciphertextFrames).toBeGreaterThan(8); expect(errors).toEqual([]);
+    if (directFirst) {
+      await new Promise(resolve => setTimeout(resolve, 2200));
+      expect(ciphertextFrames).toBe(0);
+      for (const current of [page, receiver]) expect(await current.evaluate(() => (window as any).__streamTrace.some((entry: any) => entry.action === 'replaceTransportNow' && entry.mode !== 'webrtc'))).toBe(false);
+    } else expect(streamTickets).toBe(scenario === 'initial-retry' || relayReconnect ? 4 : 2);
+    if (relayReconnect) for (const current of [page, receiver]) expect(await current.evaluate(() => (window as any).__streamTrace.some((entry: any) => entry.action === 'replaceTransportNow' && entry.mode === 'webrtc'))).toBe(false);
+    expect(relayTickets).toBe(0); if (!directFirst) expect(ciphertextFrames).toBeGreaterThan(8); expect(errors).toEqual([]);
   } catch (error) {
     console.log('SAFE_STREAM_FIXTURE', JSON.stringify({ streamTickets, relayTickets, ciphertextFrames, errors,
       sender: await page.evaluate(() => (window as any).__streamTrace), receiver: await receiver.evaluate(() => (window as any).__streamTrace) }));

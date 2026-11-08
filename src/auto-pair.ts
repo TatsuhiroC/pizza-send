@@ -60,18 +60,19 @@ export class AutoPair {
     if (!this.transfer.transportConnected) this.waitingTimer = setTimeout(() => {
       if (!this.closed && !this.transfer.transportConnected) this.transfer.fail('加密转发未能建立，请检查网络后重试，或更换新版浏览器。');
     }, 60000);
-    this.streamFallback.requireRelay();
     this.transfer.pairingStage('一端浏览器不支持直连，正在建立加密转发');
     this.monitorRoute();
   }
   constructor(private transfer: Transfer, key: CryptoKey, private onError: (message: string) => void, secret?: string) {
     this.signal = new Signaling(key, (message, authenticated) => this.handle(message, authenticated), onError);
     if (secret) this.streamFallback = new StreamFallback(transfer.role, {
-      epoch: () => this.epoch, stopped: () => this.closed || transfer.stopped || transfer.completed,
+      // A completed receiver still answers lost completion receipts during the
+      // existing three-minute signaling grace; it cannot accept a new manifest.
+      epoch: () => this.epoch, stopped: () => this.closed || transfer.stopped || transfer.completed && transfer.role === 'sender',
       progress: () => ({ ...transfer.routeProgress(), connected: transfer.transportConnected && !transfer.recovering }),
       open: (session, current) => this.signal.stream(secret, session, current), send: message => this.signal.send(message),
       activate: async (channel, epoch) => {
-        if (this.closed || transfer.stopped || transfer.completed || epoch !== this.epoch + 1) throw Error('Stale stream activation');
+        if (this.closed || transfer.stopped || transfer.completed && transfer.role === 'sender' || epoch !== this.epoch + 1) throw Error('Stale stream activation');
         this.negotiating = true;
         try {
           transfer.pauseRecovery(); this.epoch = epoch; this.lastOffer = this.lastAnswer = undefined; this.resetCandidates();
@@ -79,7 +80,8 @@ export class AutoPair {
         } finally { this.negotiating = false; }
       },
       restore: () => { this.lastAttempt = 0; transfer.requestRecovery(); },
-      changed: () => this.reportRoute()
+      changed: () => this.reportRoute(),
+      unavailable: () => transfer.fail('加密转发重连失败，请检查双方网络后重试。')
     });
     transfer.enableSourceFailure(async () => {
       const receipt = new Promise<void>(resolve => { this.sourceFailureAck = resolve; });
@@ -118,7 +120,7 @@ export class AutoPair {
     if (snapshot !== this.routeSnapshot) {
       this.routeSnapshot = snapshot; t.reportRoute(state);
       if (!state.connected && state.target === 'stream') {
-        if (state.busy) t.pairingStage('直连暂未建立，正在连接加密转发');
+        if (state.busy) t.pairingStage(fallback.active || !this.directAvailable ? '正在连接加密转发' : '正在同时尝试直连和加密转发');
         else if (state.failed) t.pairingStage('暂未连通，正在继续寻找连接路径');
       }
     }
@@ -297,6 +299,7 @@ export class AutoPair {
         if (!this.closed && !t.stopped && !t.completed) this.onError('暂时无法切换路线，请稍后重试。');
       });
       else if (message.type === 'stream-choice' && t.role === 'receiver') {
+        if (!Number.isInteger(message.epoch) || message.epoch < this.epoch) return;
         if (Number.isInteger(message.epoch) && message.epoch > this.epoch) {
           this.epoch = message.epoch; this.lastOffer = this.lastAnswer = undefined; this.resetCandidates();
         }
@@ -318,7 +321,7 @@ export class AutoPair {
         t.pairingStage('找到接收方，正在交换连接信息');
         try { this.lastOffer = await t.offer(true); await this.sendDescription('offer', this.lastOffer); }
         finally { this.negotiating = false; }
-      } else if (t.role === 'sender' && this.lastOffer && !this.negotiating && !t.completed && t.channel?.readyState !== 'open') {
+      } else if (t.role === 'sender' && this.lastOffer && !this.streamFallback?.active && !this.negotiating && !t.completed && t.channel?.readyState !== 'open') {
         // A signaling reconnect must resend the existing offer, not replace a
         // healthy connection that is still negotiating. Include late candidates.
         this.localCandidates = [...this.candidateHistory];
@@ -333,7 +336,7 @@ export class AutoPair {
         this.streamFallback?.peerAdvancedEpoch();
       }
       t.requestRecovery();
-      if (!this.negotiating && this.lastOffer) await this.sendDescription('offer', t.pc.localDescription?.toJSON() ?? this.lastOffer);
+      if (!this.streamFallback?.active && !this.negotiating && this.lastOffer) await this.sendDescription('offer', t.pc.localDescription?.toJSON() ?? this.lastOffer);
     } else if (message.type === 'offer' && t.role === 'receiver') {
       if (!Number.isInteger(message.epoch) || message.epoch < 0 || message.epoch < this.epoch) return;
       if (!this.directAvailable) {
@@ -344,7 +347,8 @@ export class AutoPair {
         if (this.lastAnswer) await this.sendDescription('answer', t.pc.localDescription?.toJSON() ?? this.lastAnswer);
         return;
       }
-      if (this.streamFallback) { this.streamFallback.supported = message.streamSupport === 1; this.streamFallback.useNative(); }
+      if (this.streamFallback && !this.streamFallback.useNative()) return;
+      if (this.streamFallback) this.streamFallback.supported = message.streamSupport === 1;
       if (this.streamFallback) this.streamFallback.quickSupported = message.quickRelaySupport === 1;
       this.warmSupported = message.warmSupport === 1; t.enableStandby(this.warmSupported);
       if (this.offered) { t.pauseRecovery(); this.resetCandidates(); await t.replaceTransport(); }
@@ -363,8 +367,8 @@ export class AutoPair {
         this.warmSupported = message.warmSupport === 1; t.enableStandby(this.warmSupported);
         await t.finish(message.description); await this.applyCandidates();
         if (peerInfo) t.reportPeerInfo(peerInfo);
-        this.streamFallback?.negotiated();
         t.pairingStage('配对信息已交换，正在寻找直连路径');
+        this.monitorRoute();
       }
     } else if (message.type === 'candidates') {
       if (message.epoch !== this.epoch || !Array.isArray(message.candidates) || message.candidates.length > 16) return;

@@ -18,10 +18,16 @@ async function setup(context: BrowserContext) {
         if (message.type === 'file-start') state.__starts.push(message);
       }
     };
-    const send = RTCDataChannel.prototype.send;
-    RTCDataChannel.prototype.send = function(data: any) {
+    state.__transformFileSend ??= (data: any) => data;
+    const intercept = (send: Function) => function(this: any, data: any) {
+      data = state.__transformFileSend(data, this);
+      if (data === undefined) return;
       state.__recordFileSend(data); return send.call(this, data);
-    } as any;
+    };
+    RTCDataChannel.prototype.send = intercept(RTCDataChannel.prototype.send) as any;
+    state.__streamInterceptReady = import('/src/stream-channel.ts').then(({ StreamChannel }) => {
+      StreamChannel.prototype.send = intercept(StreamChannel.prototype.send) as any;
+    });
     // Slow only fixture reads, leaving enough time to interrupt a real transfer.
     const arrayBuffer = Blob.prototype.arrayBuffer;
     Blob.prototype.arrayBuffer = async function() {
@@ -34,13 +40,8 @@ async function setup(context: BrowserContext) {
 }
 async function begin(sender: Page, receiver: Page, buffer: Buffer, multiple = false) {
   await sender.goto('./');
-  // A faster recovery may legitimately use WSS. Count the same file protocol
-  // on either route so the test still requires two actual nonzero resumes.
-  await sender.evaluate(async () => {
-    const { StreamChannel } = await import('/src/stream-channel.ts');
-    const send = StreamChannel.prototype.send;
-    StreamChannel.prototype.send = function(data) { (window as any).__recordFileSend(data); return send.call(this, data); };
-  });
+  // Record and inject protocol faults on either winning route.
+  await sender.evaluate(() => (window as any).__streamInterceptReady);
   const files = [{ name: 'resume.bin', mimeType: 'application/octet-stream', buffer }];
   if (multiple) {
     files.unshift({ name: 'empty.txt', mimeType: 'text/plain', buffer: Buffer.alloc(0) });
@@ -122,16 +123,16 @@ test('invalid resume offset is rejected instead of skipping file bytes', async (
   await setup(context);
   const receiver = await context.newPage();
   await receiver.addInitScript(() => {
-    const send = RTCDataChannel.prototype.send;
-    RTCDataChannel.prototype.send = function(data: any) {
-      if (typeof data === 'string' && data.includes('"type":"resume"')) {
+    (window as any).__transformFileSend = (data: any) => {
+      if ((window as any).__invalidResume && typeof data === 'string' && data.includes('"type":"resume"')) {
         const message = JSON.parse(data); message.offset = Number.MAX_SAFE_INTEGER;
-        data = JSON.stringify(message);
+        return JSON.stringify(message);
       }
-      return send.call(this, data);
-    } as any;
+      return data;
+    };
   });
   await begin(page, receiver, Buffer.alloc(8 * 1048576, 4));
+  await receiver.evaluate(() => { (window as any).__invalidResume = true; });
   await interrupt(page);
   await expect(page.locator('.recipient-row[data-phase="error"]')).toContainText('续传位置无效', { timeout: 40000 });
   await expect(receiver.locator('.download-file')).toHaveCount(0);
@@ -149,23 +150,35 @@ test('cancelling during recovery ends the room and does not restore the transfer
 });
 test('a lost final completion receipt recovers without sending the file again', async ({ page, context }) => {
   await setup(context);
+  // Force the new sticky-relay path: completion recovery must not depend on a
+  // later native reconnection hiding a broken relay receipt handshake.
+  await context.addInitScript(() => {
+    const Peer = RTCPeerConnection;
+    window.RTCPeerConnection = class extends Peer {
+      setRemoteDescription(description: RTCSessionDescriptionInit) {
+        return super.setRemoteDescription({ ...description, sdp: description.sdp?.replace(/^a=candidate:.*\r?\n/gm, '') });
+      }
+      addIceCandidate() { return Promise.resolve(); }
+    } as typeof RTCPeerConnection;
+  });
   const receiver = await context.newPage();
   await receiver.addInitScript(() => {
-    const send = RTCDataChannel.prototype.send;
-    RTCDataChannel.prototype.send = function(data: any) {
+    (window as any).__transformFileSend = (data: any, channel: { close(): void }) => {
       const state = window as any;
       if (!state.__dropped && typeof data === 'string' && data.includes('"type":"complete"')) {
         state.__dropped = true;
-        setTimeout(() => state.__pcs.at(-1).close(), 0);
+        setTimeout(() => channel.close(), 0);
         return;
       }
-      return send.call(this, data);
-    } as any;
+      return data;
+    };
   });
   const buffer = Buffer.alloc(4 * 1048576, 21);
   await begin(page, receiver, buffer);
   await expect(page.locator('#status')).toHaveText('传输完成，原样送达。', { timeout: 40000 });
   expect(await receiver.evaluate(() => (window as any).__dropped)).toBe(true);
+  await expect(receiver.locator('#connection-path')).toContainText('加密服务器转发');
+  expect(await receiver.evaluate(() => (window as any).__sockets.filter((socket: WebSocket) => new URL(socket.url).searchParams.get('transport') === 'stream').length)).toBeGreaterThanOrEqual(2);
   expect(await page.evaluate(() => (window as any).__sentBytes)).toBe(buffer.length);
   expect(await page.evaluate(() => (window as any).__starts.length)).toBe(1);
   const download = receiver.waitForEvent('download');
@@ -175,15 +188,14 @@ test('a lost final completion receipt recovers without sending the file again', 
 test('corruption after reconnection is caught by the whole-file checksum', async ({ page, context }) => {
   await setup(context);
   await page.addInitScript(() => {
-    const send = RTCDataChannel.prototype.send;
     let corruptNext = false;
-    RTCDataChannel.prototype.send = function(data: any) {
+    (window as any).__transformFileSend = (data: any) => {
       if (typeof data === 'string' && data.includes('"type":"file-start"') && JSON.parse(data).offset > 0) corruptNext = true;
       if (corruptNext && data instanceof ArrayBuffer) {
-        const copy = data.slice(0); new Uint8Array(copy)[0] ^= 1; data = copy; corruptNext = false;
+        const copy = data.slice(0); new Uint8Array(copy)[0] ^= 1; corruptNext = false; return copy;
       }
-      return send.call(this, data);
-    } as any;
+      return data;
+    };
   });
   const receiver = await context.newPage();
   await begin(page, receiver, Buffer.alloc(8 * 1048576, 33));

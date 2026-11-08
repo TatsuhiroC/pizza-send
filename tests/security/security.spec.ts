@@ -443,3 +443,59 @@ test('a late rate-limit alarm preserves a renewed creation window and still clea
   clock.now += 120000; await limit.alarm(); expect(data.has('bucket')).toBe(false);
   expect(await limit.creation()).toEqual({ allowed: true, challenge: false });
 });
+
+test('recoverable creation reuses one reservation and original expiry without storing raw sender credentials', async () => {
+  const f = await fixture({ MAX_SHARES_PER_DAY: '1', MAX_SHARES_PER_MINUTE: '1' });
+  const body = { v: 2, room: hex(501), receiverHash: hash(hex(900)), multi: true, creationToken: 'ab'.repeat(32) };
+  const create = (value = body, ip = 'creation-owner') => f.request('/rooms', { method: 'POST', body: JSON.stringify(value) }, ip);
+  const first = await create(); expect(first.status).toBe(201);
+  const initial = await first.json(); f.clock.now += 5000;
+  const retry = await create(); expect(retry.status).toBe(200); expect(await retry.json()).toEqual(initial);
+  const ledger = f.gateContext.data.get('admission');
+  expect({ daily: ledger.daily, burst: ledger.burst, active: Object.keys(ledger.active).length }).toEqual({ daily: 1, burst: 1, active: 1 });
+  expect(initial.sender).toBe(body.creationToken); expect(initial.creationRetry).toBe(1);
+  const room = f.rooms.get(body.room), state = await room.ctx.storage.get('room');
+  expect(state.sender).toBe(hash(body.creationToken));
+  expect(JSON.stringify(state) + JSON.stringify(ledger)).not.toContain(body.creationToken);
+  for (const changed of [{ creationToken: hex(601) }, { receiverHash: hash(hex(901)) }, { multi: false }]) {
+    expect((await create({ ...body, ...changed }, 'wrong-' + Object.keys(changed)[0])).status).toBe(409);
+  }
+  await room.setEnded(); expect((await create()).status).toBe(503); // Full daily budget still applies after ending.
+  expect((await room.ctx.storage.get('room')).ended).toBe(true);
+});
+
+test('concurrent creation replays allocate once and cannot resurrect expired invitations', async () => {
+  const f = await fixture();
+  const body = { v: 2, room: hex(502), receiverHash: hash(hex(900)), multi: true, creationToken: hex(602) };
+  const responses = await Promise.all(Array.from({ length: 6 }, (_, i) => f.request('/rooms', { method: 'POST', body: JSON.stringify(body) }, 'parallel-' + i)));
+  expect(responses.map(r => r.status).sort()).toEqual([200, 200, 200, 200, 200, 201]);
+  expect(f.rooms.size).toBe(1); expect(f.gateContext.data.get('admission').daily).toBe(1);
+  f.clock.now += 30 * 60000;
+  expect((await f.request('/rooms', { method: 'POST', body: JSON.stringify(body) }, 'expired-replay')).status).toBe(410);
+});
+
+test('a lost post-commit response can recover after verification without verifying the same challenge again', async () => {
+  const f = await fixture({ TURNSTILE_SITE_KEY: 'public-site-key', TURNSTILE_SECRET_KEY: 'private' });
+  for (let i = 1; i <= 3; i++) await f.create(i);
+  const body = { v: 2, room: hex(503), receiverHash: hash(hex(900)), multi: true, creationToken: hex(603), challenge: 'single-use' };
+  f.scope.verification = { success: true, hostname: 'pizzasend.dpdns.org', action: 'create-share', cdata: body.room };
+  const room = f.env.ROOMS.get(body.room); let broken = true;
+  room.ctx.storage.setAlarm = async () => { if (broken) { broken = false; throw Error('Ambiguous post-commit failure'); } };
+  const create = () => f.request('/rooms', { method: 'POST', body: JSON.stringify(body) });
+  expect((await create()).status).toBe(503);
+  f.scope.verification = { success: false };
+  const retry = await create(); expect(retry.status).toBe(200);
+  expect((await retry.json()).sender).toBe(body.creationToken);
+  expect(f.access.siteverify).toBe(1); expect(f.gateContext.data.get('admission').daily).toBe(4);
+  f.env.CREATE_LIMITER = { limit: async () => ({ success: false }) };
+  expect((await create()).status).toBe(429);
+});
+
+test('invalid creation credentials and legacy room collisions cannot recover sender privileges', async () => {
+  const f = await fixture(); const original = await (await f.create(504)).json();
+  for (const creationToken of ['', null, 1, 'invalid']) {
+    expect((await f.request('/rooms', { method: 'POST', body: JSON.stringify({ v: 2, room: hex(505), receiverHash: hash(hex(900)), creationToken }) }, 'invalid-' + String(creationToken))).status).toBe(400);
+  }
+  const replay = await f.request('/rooms', { method: 'POST', body: JSON.stringify({ v: 2, room: hex(504), receiverHash: hash(hex(900)), creationToken: original.sender }) }, 'legacy-replay');
+  expect(replay.status).toBe(409); expect(await replay.text()).not.toContain(original.sender);
+});
