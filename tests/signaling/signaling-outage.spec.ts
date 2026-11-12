@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '../fixtures';
+import { test, expect, type Page, useDirectTransport } from '../fixtures';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
@@ -124,6 +124,7 @@ for (const role of ['sender', 'receiver'] as const) test(`a service disconnect n
 
 test('losing only the receiver signaling socket does not restart a healthy real file transfer', async ({ page, context, browserName }) => {
   test.skip(browserName !== 'chromium', 'Real DataChannel outages run in Chromium; both engines cover lifecycle notices above.');
+  await useDirectTransport(context);
   await context.addInitScript(() => {
     localStorage.setItem('pizza-send-signal', 'http://127.0.0.1:8787'); localStorage.setItem('pizza-send-stun', '');
     Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: undefined });

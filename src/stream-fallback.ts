@@ -256,10 +256,10 @@ export class StreamFallback {
     this.hooks.changed?.();
   }
   private restoreDirect() { this.active = false; this.target = 'direct'; this.hooks.restore(); this.hooks.changed?.(); }
-  useNative() {
-    // Late native offers cannot override a relay winner. Only an authenticated
-    // explicit direct choice unlocks native negotiation again.
-    if (this.active && this.preference !== 'direct') return false;
+  useNative(legacySender = false) {
+    // Older senders can still fall back to direct without an explicit choice.
+    // The receiver applies this exception only for authenticated newer epochs.
+    if (this.active && this.preference !== 'direct' && !legacySender) return false;
     this.active = false; this.target = 'direct';
     if (this.candidate) this.abort(this.candidate, false);
     this.hooks.changed?.(); return true;

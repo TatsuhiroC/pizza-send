@@ -17,3 +17,14 @@ export const test = base.extend({
     await use(context);
   }
 });
+
+// Fixtures that instrument RTCDataChannel must exercise that route even if
+// the local relay would connect first. Leave the normal signaling API active.
+export async function useDirectTransport(context: BrowserContext) {
+  await context.route(url => url.hostname === '127.0.0.1' && url.port === '8787' && url.pathname.startsWith('/rooms/'), route => {
+    const request = route.request();
+    if (request.method() !== 'POST' || request.postDataJSON()?.type !== 'stream-connect') return route.fallback();
+    return route.fulfill({ status: 503, headers: { 'access-control-allow-origin': request.headers().origin || '*' },
+      json: { error: 'Relay unavailable in the direct transport fixture' } });
+  });
+}

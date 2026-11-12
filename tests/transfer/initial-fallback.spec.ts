@@ -220,31 +220,41 @@ test('authenticated SDP answer starts the relay race without waiting for the rou
   expect(result).toEqual({ opens: 1 });
 });
 
-test('late native offers and old route choices cannot displace relay; explicit current direct choice can', async ({ page }) => {
+for (const legacy of [false, true]) test(legacy
+  ? 'a current receiver accepts an older sender’s authenticated return to direct'
+  : 'late offers cannot override relay when the sender supports keeping it selected', async ({ page }) => {
   await page.goto('./');
-  const result = await page.evaluate(async () => {
+  const result = await page.evaluate(async legacy => {
     const { Transfer, AutoPair, signalKey } = await import('/src/protocol.ts');
     const transfer: any = new Transfer({ signalUrl: '', iceServers: [], memoryLimitBytes: 1048576 }, 'receiver', () => {});
     const pair: any = new AutoPair(transfer, await signalKey('a'.repeat(64)), () => {}, 'a'.repeat(64));
     let nativeReplacements = 0;
     pair.signal.send = async () => {};
-    pair.epoch = 4; pair.offered = true;
-    pair.streamFallback.supported = true; pair.streamFallback.useRoute('stream'); pair.streamFallback.used.add('b'.repeat(64));
     transfer.replaceTransport = async () => { nativeReplacements++; };
     transfer.answer = async () => ({});
-    const offer = { type: 'offer', epoch: 5, streamSupport: 1, description: {} };
+    const offer = { type: 'offer', epoch: 4, streamSupport: 1, description: {} };
     try {
-      await pair.handle(offer, true);
+      await pair.handle({ ...offer, ...(legacy ? {} : { stickyRelaySupport: 1 }) }, true);
+      pair.streamFallback.useRoute('stream');
+      pair.streamFallback.used.add('b'.repeat(64));
+      // Older epochs and unauthenticated offers are invalid for both peers.
+      await pair.handle({ ...offer, epoch: 3 }, true);
+      await pair.handle({ ...offer, epoch: 5 });
+      const before = { nativeReplacements, epoch: pair.epoch, current: pair.streamFallback.state.current };
+      await pair.handle({ ...offer, epoch: 5 }, true);
       await pair.handle({ type: 'stream-choice', route: 'direct', epoch: 3 }, true);
-      const locked = { nativeReplacements, epoch: pair.epoch, current: pair.streamFallback.state.current };
-      await pair.handle({ type: 'stream-choice', route: 'direct', epoch: 4 }, true);
-      await pair.handle(offer, true);
-      return { locked, nativeReplacements, current: pair.streamFallback.state.current };
+      const after = { nativeReplacements, epoch: pair.epoch, current: pair.streamFallback.state.current };
+      if (!legacy) {
+        await pair.handle({ type: 'stream-choice', route: 'direct', epoch: 4 }, true);
+        await pair.handle({ ...offer, epoch: 5 }, true);
+      }
+      return { before, after, nativeReplacements, current: pair.streamFallback.state.current };
     } finally { pair.close(); transfer.close(false); }
-  });
-  expect(result).toEqual({ locked: { nativeReplacements: 0, epoch: 4, current: 'stream' }, nativeReplacements: 1, current: 'direct' });
+  }, legacy);
+  const relay = { nativeReplacements: 0, epoch: 4, current: 'stream' };
+  const direct = { nativeReplacements: 1, epoch: 5, current: 'direct' };
+  expect(result).toEqual({ before: relay, after: legacy ? direct : relay, nativeReplacements: 1, current: 'direct' });
 });
-
 
 test('a committed relay awaiting file-protocol recovery does not immediately open another session', () => {
   let opens = 0;

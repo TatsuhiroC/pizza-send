@@ -1,4 +1,4 @@
-import { test, expect } from '../fixtures';
+import { test, expect, useDirectTransport } from '../fixtures';
 
 for (const stage of ['before-manifest', 'disconnected', 'legacy-receiver']) test(`a pending save picker accepted ${stage} during recovery starts the sender only once`, async ({ page }) => {
   await page.goto('./');
@@ -82,6 +82,7 @@ for (const kind of ['oversized', 'backlog', 'byte-backlog', 'binary'] as const) 
 
 test('a real replacement channel retains a pending save location and delivers one original file', async ({ page, context, browserName }) => {
   test.skip(browserName !== 'chromium', 'Real DataChannel recovery runs in Chromium; both engines cover the state and message limits above.');
+  await useDirectTransport(context);
   await context.addInitScript(() => {
     localStorage.setItem('pizza-send-signal', 'http://127.0.0.1:8787');
     localStorage.setItem('pizza-send-stun', '');

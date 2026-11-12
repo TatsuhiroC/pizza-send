@@ -37,6 +37,7 @@ export class AutoPair {
   private warm?: WarmSwitch;
   private directTrial?: { timer: ReturnType<typeof setTimeout>; attempted: boolean };
   private warmSupported = false;
+  private peerLocksRelay = false;
   private peerDirectSupported = true;
   private capabilitiesSent = false;
   private peerCapabilitiesReceived = false;
@@ -253,7 +254,7 @@ export class AutoPair {
     }, 100);
   }
   private async sendDescription(type: 'offer' | 'answer', description: RTCSessionDescriptionInit) {
-    await this.signal.send({ type, epoch: this.epoch, description, ...(type === 'answer' ? { peerInfo: localPeerInfo() } : {}), ...(this.streamFallback ? { streamSupport: 1, warmSupport: 1, quickRelaySupport: 1 } : {}) });
+    await this.signal.send({ type, epoch: this.epoch, description, ...(type === 'answer' ? { peerInfo: localPeerInfo() } : {}), ...(this.streamFallback ? { streamSupport: 1, warmSupport: 1, quickRelaySupport: 1, ...(type === 'offer' ? { stickyRelaySupport: 1 } : {}) } : {}) });
     this.descriptionSent = true; this.scheduleCandidates();
   }
   private async applyCandidates() {
@@ -300,7 +301,7 @@ export class AutoPair {
       });
       else if (message.type === 'stream-choice' && t.role === 'receiver') {
         if (!Number.isInteger(message.epoch) || message.epoch < this.epoch) return;
-        if (Number.isInteger(message.epoch) && message.epoch > this.epoch) {
+        if (message.epoch > this.epoch) {
           this.epoch = message.epoch; this.lastOffer = this.lastAnswer = undefined; this.resetCandidates();
         }
         clearTimeout(this.routeRequestTimer); this.pendingRoute = undefined; this.streamFallback.choose(message.route, message.directFailed === true); this.reportRoute();
@@ -347,9 +348,12 @@ export class AutoPair {
         if (this.lastAnswer) await this.sendDescription('answer', t.pc.localDescription?.toJSON() ?? this.lastAnswer);
         return;
       }
-      if (this.streamFallback && !this.streamFallback.useNative()) return;
-      if (this.streamFallback) this.streamFallback.supported = message.streamSupport === 1;
-      if (this.streamFallback) this.streamFallback.quickSupported = message.quickRelaySupport === 1;
+      if (!this.offered) this.peerLocksRelay = message.stickyRelaySupport === 1;
+      if (this.streamFallback) {
+        if (!this.streamFallback.useNative(!this.peerLocksRelay)) return;
+        this.streamFallback.supported = message.streamSupport === 1;
+        this.streamFallback.quickSupported = message.quickRelaySupport === 1;
+      }
       this.warmSupported = message.warmSupport === 1; t.enableStandby(this.warmSupported);
       if (this.offered) { t.pauseRecovery(); this.resetCandidates(); await t.replaceTransport(); }
       clearTimeout(this.waitingTimer);

@@ -1,4 +1,4 @@
-import { test, expect } from '../fixtures';
+import { test, expect, useDirectTransport } from '../fixtures';
 import { localPeerInfo, readPeerInfo } from '../../src/peer-info';
 
 test('device labels cover phones, desktop-mode tablets and common browsers without identifying details', () => {
@@ -27,6 +27,7 @@ test('peer labels accept only fixed values and discard extra fields from the pee
 
 test('two recipients keep their own encrypted labels through reconnect, language changes and completion', async ({ page, context, browserName }, info) => {
   test.skip(browserName === 'webkit', 'Real data-channel delivery runs in Chromium; parsing and authentication are covered in WebKit.');
+  await useDirectTransport(context);
   await context.addInitScript(() => {
     localStorage.setItem('pizza-send-signal', 'http://127.0.0.1:8787');
     localStorage.setItem('pizza-send-stun', '');

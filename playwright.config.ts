@@ -9,7 +9,7 @@ export default defineConfig({
   reporter: [['list']],
   webServer: [
     { cwd: projectRoot, command: 'npm run dev -- --port 5173', url: 'http://127.0.0.1:5173/', reuseExistingServer: !process.env.CI, timeout: 30000 },
-    { cwd: projectRoot, command: 'npm run signal:dev', url: 'http://127.0.0.1:8787/', reuseExistingServer: !process.env.CI, timeout: 60000, env: { WRANGLER_LOG_PATH: '/tmp/pizza-send-wrangler-tests.log', WRANGLER_SEND_METRICS: 'false', XDG_CONFIG_HOME: '/tmp/pizza-send-wrangler-tests' } }
+    { cwd: projectRoot, command: 'node tests/config/start-signal.mjs', url: 'http://127.0.0.1:8787/', reuseExistingServer: !process.env.CI, timeout: 60000, env: { WRANGLER_LOG_PATH: '/tmp/pizza-send-wrangler-tests.log', WRANGLER_SEND_METRICS: 'false', XDG_CONFIG_HOME: '/tmp/pizza-send-wrangler-tests' } }
   ]
 });
 
