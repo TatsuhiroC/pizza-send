@@ -1,4 +1,4 @@
-import { isolateLocalRequests, test, expect, chromium, type BrowserContext, type Page } from '../fixtures';
+import { isolateLocalRequests, test, expect, chromium, type BrowserContext, type Page, useDirectTransport } from '../fixtures';
 import { createHash } from 'node:crypto';
 import { readFile, mkdtemp, rm, open } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
@@ -143,7 +143,8 @@ test('quota refusal can be retried without leaking a session or falsely starting
 });
 
 test('disk write failure rejects unsaved bytes and cleans the incomplete temporary file', async ({ page, context }) => {
-  await setup(context); const receiver = await context.newPage();
+  await setup(context);
+  await useDirectTransport(context); const receiver = await context.newPage();
   await receiver.addInitScript(() => {
     const state = window as any; state.__failedDiskAcks = [];
     const send = RTCDataChannel.prototype.send;
@@ -168,6 +169,7 @@ test('disk write failure rejects unsaved bytes and cleans the incomplete tempora
 
 test('failed integrity of a later file preserves earlier verified temporary downloads', async ({ page, context }) => {
   await setup(context);
+  await useDirectTransport(context);
   await page.addInitScript(() => {
     let corrupt = false; const send = RTCDataChannel.prototype.send;
     RTCDataChannel.prototype.send = function(data: any) {

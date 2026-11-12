@@ -1,4 +1,4 @@
-import { test, expect } from '../fixtures';
+import { test, expect, useDirectTransport } from '../fixtures';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
@@ -128,6 +128,7 @@ for (const mode of ['keep', 'enable', 'reconnect', 'lost-enable'] as const) test
   const reconnect = mode === 'reconnect' || mode === 'lost-enable';
   const loseActivation = mode === 'lost-enable';
   test.skip(browserName === 'webkit', 'Real WebRTC is covered by desktop Chrome; WebKit exercises codecs, policy and bounded receiver handling.');
+  await useDirectTransport(context);
   await context.addInitScript(({ reconnect, loseActivation }) => {
     localStorage.setItem('pizza-send-signal', 'http://127.0.0.1:8787'); localStorage.setItem('pizza-send-stun', '');
     Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true });

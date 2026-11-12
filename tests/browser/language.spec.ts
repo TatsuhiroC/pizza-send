@@ -69,7 +69,9 @@ test('switching while paired preserves the session and translates completion and
   await receiver.locator('#language-toggle').click();
   await expect(receiver.locator('#status')).toHaveText('文件已收到，请保存到设备');
   await expect(receiver.locator('.download-file')).toHaveText('保存到设备');
-  await expect(receiver.locator('#connection-path')).toContainText('DTLS 加密');
+  const path = receiver.locator('#connection-path');
+  await expect(path).toContainText(/DTLS 加密|AES-GCM 端到端加密/);
+  const relay = (await path.textContent())?.includes('AES-GCM');
   await receiver.locator('#language-toggle').click();
-  await expect(receiver.locator('#connection-path')).toContainText('DTLS encrypted');
+  await expect(path).toContainText(relay ? 'AES-GCM end-to-end encrypted' : 'DTLS encrypted');
 });

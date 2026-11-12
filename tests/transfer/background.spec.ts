@@ -1,4 +1,4 @@
-import { test, expect, type BrowserContext, type Page } from '../fixtures';
+import { test, expect, type BrowserContext, type Page, useDirectTransport } from '../fixtures';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
@@ -191,6 +191,7 @@ test('a background recipient leaving clears its notice without releasing another
 
 async function transferFixture(context: BrowserContext) {
   await setup(context);
+  await useDirectTransport(context);
   await context.addInitScript(() => {
     const state = window as any, Peer = RTCPeerConnection, Socket = WebSocket;
     state.__pcs = []; state.__sockets = []; state.__starts = []; state.__sent = 0; state.__hold = false; state.__offset = 0;

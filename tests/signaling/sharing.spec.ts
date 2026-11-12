@@ -118,12 +118,13 @@ test('compact links retain a 256-bit secret, hide credentials from requests, and
   expect(result.secret).toHaveLength(64);
   expect(result.canonical).toBe(url.hash);
   expect(result.malformedRejected).toBe(true); expect(result.legacyMatches).toBe(true);
-  expect(creation).toEqual({ v: 2, room: result.room, receiverHash: result.digest, multi: true, challenge: '' });
+  expect(creation).toEqual({ v: 2, room: result.room, receiverHash: result.digest, multi: true, challenge: '', creationToken: expect.stringMatching(/^[a-f0-9]{64}$/) });
+  expect(link).not.toContain(creation.creationToken);
   expect(JSON.stringify(creation)).not.toContain(result.secret);
   expect(JSON.stringify(creation)).not.toContain(result.receiver);
   const oldLength = url.origin.length + url.pathname.length + 201;
   expect(link.length).toBeLessThan(oldLength * .4);
-  const collision = await page.evaluate(async body => (await fetch('http://127.0.0.1:8787/rooms', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).status, creation);
+  const collision = await page.evaluate(async body => (await fetch('http://127.0.0.1:8787/rooms', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).status, { ...creation, creationToken: 'f'.repeat(64) });
   expect(collision).toBe(409);
   const receiver = await context.newPage();
   await receiver.goto(link);

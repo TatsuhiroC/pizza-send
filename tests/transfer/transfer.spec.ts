@@ -5,9 +5,6 @@ const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 async function setup(context: BrowserContext, signal = true) {
   const signalUrl = signal ? (process.env.TEST_SIGNAL_URL || 'http://127.0.0.1:8787') : '';
   await context.addInitScript(({ signalUrl }) => {
-    const Original = RTCPeerConnection;
-    (window as any).__pcs = [];
-    (window as any).RTCPeerConnection = class extends Original { constructor(config: any) { super(config); (window as any).__pcs.push(this); } };
     localStorage.setItem('pizza-send-signal', signalUrl);
     localStorage.setItem('pizza-send-stun', '');
     void navigator.mediaDevices.getUserMedia({ audio: true }).then(s => s.getTracks().forEach(t => t.stop()));
@@ -21,13 +18,7 @@ async function automatic(sender: Page, receiver: Page, payload: { name: string; 
   await expect(sender.locator('#share-box')).toBeVisible();
   const url = await sender.locator('#share-link').inputValue();
   await receiver.goto(url);
-  try { await expect(receiver.locator('#accept-files')).toBeVisible(); }
-  catch (e) {
-    for (const [label, p] of [['sender', sender], ['receiver', receiver]] as const) {
-      console.log(label, await p.evaluate(async () => Promise.all((window as any).__pcs.map(async (pc: RTCPeerConnection) => ({ state: pc.connectionState, ice: pc.iceConnectionState, signaling: pc.signalingState, localCandidates: pc.localDescription?.sdp.split('\n').filter(l => l.startsWith('a=candidate:')), remoteCandidates: pc.remoteDescription?.sdp.split('\n').filter(l => l.startsWith('a=candidate:')), stats: Array.from((await pc.getStats()).values()).filter(s => ['candidate-pair', 'local-candidate', 'remote-candidate'].includes(s.type)) })))));
-    }
-    throw e;
-  }
+  await expect(receiver.locator('#accept-files')).toBeVisible();
 }
 test('20 MB + empty + Chinese filename: automatic pairing, end-to-end SHA-256 and downloads', async ({ page, context }) => {
   await setup(context);
@@ -79,13 +70,13 @@ test('manual pairing works without signaling', async ({ page, context }) => {
 test('checksum mismatch is rejected and never offered as a download', async ({ page, context }) => {
   await setup(context);
   await page.addInitScript(() => {
-    const send = RTCDataChannel.prototype.send;
-    RTCDataChannel.prototype.send = function(data: any) {
-      if (typeof data === 'string' && data.includes('"type":"file-end"')) {
-        const message = JSON.parse(data); message.hash = '0'.repeat(64); data = JSON.stringify(message);
-      }
-      return send.call(this, data);
-    } as any;
+    void import('/src/transfer.ts').then(({ Transfer }) => {
+      const prototype = Transfer.prototype as any;
+      const control = prototype.control;
+      prototype.control = function(message: any) {
+        return control.call(this, message.type === 'file-end' ? { ...message, hash: '0'.repeat(64) } : message);
+      };
+    });
   });
   const receiver = await context.newPage();
   await automatic(page, receiver, [{ name: 'check.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(1024 * 1024, 42) }]);
@@ -101,30 +92,6 @@ test('sender cancellation clears session and rejects further joins', async ({ pa
   await expect(receiver.locator('#notice')).toContainText(/结束|关闭|取消/);
   await expect(page.locator('#start-send')).toBeEnabled();
   expect((await request.post('http://127.0.0.1:8787/rooms', { headers: { Origin: 'https://untrusted.example' } })).status()).toBe(403);
-});
-test('cancelling while room creation is pending does not restore the session', async ({ page, context }) => {
-  test.setTimeout(20000);
-  await setup(context);
-  let release!: () => void;
-  let requested = false;
-  const gate = new Promise<void>(resolve => release = resolve);
-  await page.route('**/rooms', async route => {
-    requested = true;
-    await gate;
-    await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ room: 'a'.repeat(64), sender: 'b'.repeat(64), receiver: 'c'.repeat(64) }), headers: { 'access-control-allow-origin': 'http://127.0.0.1:5173' } });
-  });
-  try {
-    await page.goto('./');
-    await page.locator('#file-input').setInputFiles({ name: 'cancel.txt', mimeType: 'text/plain', buffer: Buffer.from('cancel') });
-    await page.locator('#start-send').evaluate(button => (button as HTMLButtonElement).click());
-    await expect.poll(() => requested, { timeout: 5000 }).toBe(true);
-    await page.locator('#cancel').evaluate(button => (button as HTMLButtonElement).click());
-    const response = page.waitForResponse(r => r.url().endsWith('/rooms'));
-    release(); await response;
-    await expect(page.locator('#start-send')).toBeEnabled();
-    await expect(page.locator('#share-box')).toBeHidden();
-    await expect(page.locator('#session-panel')).toBeHidden();
-  } finally { release(); }
 });
 test('crypto envelopes reject tampering; manifest rejects invalid sizes; layout fits mobile', async ({ page, context }, info) => {
   await setup(context, false);

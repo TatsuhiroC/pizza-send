@@ -1,4 +1,4 @@
-import { test, expect } from '../fixtures';
+import { test, expect, useDirectTransport } from '../fixtures';
 import { readFile } from 'node:fs/promises';
 import { webcrypto, createHash } from 'node:crypto';
 import vm from 'node:vm';
@@ -279,6 +279,7 @@ test('missing security binding returns a safe failure instead of bypassing prote
 
 test('real transfer and recovery preserve original files; credentials stay out of request URLs', async ({ page, context, browserName }) => {
   test.skip(browserName === 'webkit', 'Native WebRTC uses the Chromium fixture; WebKit verifies encrypted WSS and storage separately.');
+  await useDirectTransport(context);
   await context.addInitScript(() => {
     localStorage.setItem('pizza-send-signal', 'http://127.0.0.1:8787'); localStorage.setItem('pizza-send-stun', '');
     const Peer = RTCPeerConnection; (window as any).__pcs = [];

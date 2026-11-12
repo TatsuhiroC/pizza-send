@@ -1,4 +1,4 @@
-import { test, expect } from '../fixtures';
+import { test, expect, useDirectTransport } from '../fixtures';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
@@ -170,6 +170,7 @@ test.describe('English diagnostics', () => {
 
 for (const mode of ['both', 'sender-only', 'ordinary']) test(`real file integrity and heartbeat compatibility with diagnostics ${mode}`, async ({ page, context, browserName }) => {
   test.skip(browserName !== 'chromium', 'This WebKit runner has no real DataChannel; the pure and lifecycle checks above run in both engines.');
+  await useDirectTransport(context);
   await context.addInitScript(() => {
     localStorage.setItem('pizza-send-signal', 'http://127.0.0.1:8787'); localStorage.setItem('pizza-send-stun', '');
     Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: undefined });
