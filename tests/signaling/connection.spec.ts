@@ -1,4 +1,4 @@
-import { test, expect, type BrowserContext, type Page } from '../fixtures';
+import { test, expect, useDirectTransport, type BrowserContext, type Page } from '../fixtures';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 
@@ -20,17 +20,17 @@ async function share(sender: Page) {
 
 test('candidates arriving after the old eight-second cutoff still connect and deliver', async ({ page, context }) => {
   await setup(context);
-  await context.route('**/rooms/**', async route => {
-    const request = route.request();
-    if (request.method() === 'POST' && request.postDataJSON()?.type === 'stream-connect') {
-      await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Relay intentionally unavailable in delayed-ICE test' }) });
-    } else await route.fallback();
-  });
+  await useDirectTransport(context);
   await context.addInitScript(() => {
     const Peer = RTCPeerConnection;
     const local = Object.getOwnPropertyDescriptor(Peer.prototype, 'localDescription')!.get!;
-    (window as any).__candidateCount = 0;
-    (window as any).RTCPeerConnection = class extends Peer {
+    const state = window as any;
+    state.__candidateCount = 0;
+    state.RTCPeerConnection = class extends Peer {
+      setRemoteDescription(description: RTCSessionDescriptionInit) {
+        if (description.type === 'answer') state.__candidatesAtAnswer = state.__candidateCount;
+        return super.setRemoteDescription(description);
+      }
       get localDescription() {
         const description = local.call(this);
         if (!description) return null;
@@ -38,7 +38,7 @@ test('candidates arriving after the old eight-second cutoff still connect and de
       }
       set onicecandidate(handler: ((event: RTCPeerConnectionIceEvent) => void) | null) {
         super.onicecandidate = handler ? event => {
-          setTimeout(() => { (window as any).__candidateCount++; handler(event); }, 10000);
+          setTimeout(() => { state.__candidateCount++; handler(event); }, 10000);
         } : null;
       }
     };
@@ -48,9 +48,8 @@ test('candidates arriving after the old eight-second cutoff still connect and de
   for (const p of [page, receiver]) p.on('pageerror', error => errors.push(error.message));
   const link = await share(page);
   await receiver.goto(link);
-  await expect(receiver.locator('#status')).toHaveText('配对信息已交换，正在寻找直连路径');
-  expect(await page.evaluate(() => (window as any).__candidateCount)).toBe(0);
   await expect(receiver.locator('#accept-files')).toBeVisible({ timeout: 25000 });
+  expect(await page.evaluate(() => (window as any).__candidatesAtAnswer)).toBe(0);
   expect(await page.evaluate(() => (window as any).__candidateCount)).toBeGreaterThan(0);
   await receiver.locator('#accept-files').click();
   await expect(page.locator('#status')).toHaveText('传输完成，原样送达。');
@@ -89,6 +88,7 @@ test('expired and ended links report their cause without an endless connecting s
 
 test('signaling reconnect during initial negotiation preserves the offer and eventual file checksum', async ({ page, context }) => {
   await setup(context);
+  await useDirectTransport(context);
   await context.addInitScript(() => {
     const Peer = RTCPeerConnection, Socket = WebSocket;
     const state = window as any;
@@ -96,7 +96,9 @@ test('signaling reconnect during initial negotiation preserves the offer and eve
     state.RTCPeerConnection = class extends Peer {
       constructor(config: RTCConfiguration) { super(config); state.__pcs.push(this); }
       async setRemoteDescription(description: RTCSessionDescriptionInit) {
-        if (description.type === 'answer') await new Promise(resolve => setTimeout(resolve, 4000));
+        if (description.type === 'answer' && !state.__releaseAnswer) {
+          await new Promise<void>(resolve => { state.__releaseAnswer = resolve; });
+        }
         return super.setRemoteDescription(description);
       }
     };
@@ -105,8 +107,15 @@ test('signaling reconnect during initial negotiation preserves the offer and eve
   const receiver = await context.newPage();
   const link = await share(page);
   await receiver.goto(link);
-  await expect(receiver.locator('#status')).toHaveText('配对信息已交换，正在寻找直连路径');
-  await page.evaluate(() => { for (const socket of (window as any).__sockets) if (socket.url.includes('/rooms/')) socket.close(); });
+  await expect.poll(() => page.evaluate(() => typeof (window as any).__releaseAnswer)).toBe('function');
+  const closedSockets = await page.evaluate(() => {
+    const state = window as any;
+    const sockets = (state.__sockets as WebSocket[]).filter(socket => socket.readyState === WebSocket.OPEN && socket.url.includes('/rooms/'));
+    for (const socket of sockets) socket.close();
+    state.__releaseAnswer();
+    return sockets.length;
+  });
+  expect(closedSockets).toBeGreaterThan(0);
   await expect(receiver.locator('#accept-files')).toBeVisible();
   expect(await page.evaluate(() => (window as any).__pcs.length)).toBe(1);
   await receiver.locator('#accept-files').click();
