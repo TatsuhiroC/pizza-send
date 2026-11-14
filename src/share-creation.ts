@@ -2,15 +2,18 @@ import { abortableDelay, fetchWithTimeout } from './request-timeout';
 import { PairingResponseError, temporaryPairingError } from './security';
 import { throwIfAborted } from './cancellation';
 
-type Creation = { v: 2; room: string; receiverHash: string; multi: true; creationToken: string };
-type Session = { v: 2; room: string; sender: string; expiresAt?: number; creationRetry?: number };
+type Creation = { v: 2; room: string; receiverHash: string; creationToken: string } &
+  ({ multi: true; receiveInvite?: never } | { multi: false; receiveInvite: true });
+type Session = { v: 2; room: string; sender: string; expiresAt?: number; creationRetry?: number; receiveInvite?: true };
 type Hooks = { signal: AbortSignal; retry(): void; challenge(siteKey: string, room: string): Promise<string> };
 const timeoutMessage = '未能及时连接配对服务，文件尚未开始传输。请稍后重试。';
 
 // One independent sender capability makes replaying creation safe on the new
 // service. Old services may still create once, but cannot recover a lost reply.
 export async function createShare(api: string, creation: Creation, hooks: Hooks): Promise<Session> {
-  const options = { ...creation, challenge: '' };
+  const { receiveInvite, ...room } = creation;
+  const options = { ...room, challenge: '' };
+  const route = receiveInvite ? '/receive-invitations' : '/rooms';
   let remaining = 30000, retried = false, verified = false;
   while (true) {
     throwIfAborted(hooks.signal);
@@ -18,7 +21,7 @@ export async function createShare(api: string, creation: Creation, hooks: Hooks)
     let result: { response: Response; payload: any };
     try {
       if (remaining <= 0) throw new DOMException('Creation timed out', 'TimeoutError');
-      result = await fetchWithTimeout(api + '/rooms', {
+      result = await fetchWithTimeout(api + route, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify(options), referrerPolicy: 'no-referrer', signal: hooks.signal
       }, Math.min(15000, remaining), async response => ({ response,
@@ -52,7 +55,7 @@ export async function createShare(api: string, creation: Creation, hooks: Hooks)
       continue;
     }
     const session = result.payload;
-    if (session?.v !== 2 || session.room !== creation.room || !/^[a-f0-9]{64}$/.test(session.sender) ||
+    if (session?.v !== 2 || !!session.receiveInvite !== !!receiveInvite || session.room !== creation.room || !/^[a-f0-9]{64}$/.test(session.sender) ||
       session.creationRetry !== undefined && (session.creationRetry !== 1 || session.sender !== creation.creationToken)) throw Error('配对服务返回信息无效');
     return session;
   }

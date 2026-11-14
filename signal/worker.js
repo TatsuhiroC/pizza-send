@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 
 const TTL = 30 * 60 * 1000;
+const RECEIVE_INVITE_TTL = 2 * 60 * 1000;
 const MAX_ACTIVE_TTL = 24 * 60 * 60 * 1000;
 const validToken = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const blocked = new Map();
@@ -42,13 +43,14 @@ async function readBody(request, limit = 4096) {
   for (const part of parts) { bytes.set(part, offset); offset += part.byteLength; }
   return JSON.parse(new TextDecoder().decode(bytes));
 }
-async function roomOptions(request) {
+async function roomOptions(request, receiveInvite) {
   const value = await readBody(request);
-  if (value === null) return null;
+  if (value === null && !receiveInvite) return null;
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error('Invalid room configuration');
   if (value.challenge !== undefined && (typeof value.challenge !== 'string' || value.challenge.length > 2048)) throw Error('Invalid challenge');
   if (value.multi !== undefined && typeof value.multi !== 'boolean') throw Error('Invalid room configuration');
-  if (value.creationToken !== undefined && !validToken(value.creationToken)) throw Error('Invalid creation credential');
+  if (receiveInvite && value.multi) throw Error('Invalid receive invitation');
+  if ((receiveInvite || value.creationToken !== undefined) && !validToken(value.creationToken)) throw Error('Invalid creation credential');
   if (value?.v !== 2 || !/^[a-f0-9]{64}$/.test(value.room) || !/^[a-f0-9]{64}$/.test(value.receiverHash)) throw Error('Invalid room configuration');
   return value;
 }
@@ -78,10 +80,11 @@ export default {
       if (!allowed.includes(origin)) return deny('origin', 403, 'Origin not allowed');
       if (request.method === 'OPTIONS') return response({}, 204, origin);
       const url = new URL(request.url);
-      if (url.pathname === '/rooms' && request.method === 'POST') {
+      const receiveInvite = url.pathname === '/receive-invitations';
+      if ((url.pathname === '/rooms' || receiveInvite) && request.method === 'POST') {
         if (await limited(env, 'CREATE_LIMITER', ip)) return deny('create-edge-limit', 429, 'Too many requests');
         let options;
-        try { options = await roomOptions(request); }
+        try { options = await roomOptions(request, receiveInvite); }
         catch { return deny('body', 400, 'Invalid room configuration'); }
         const decision = await env.LIMITS.get(env.LIMITS.idFromName(ip)).creation();
         if (!decision.allowed) return deny('create-limit', 429, 'Too many requests');
@@ -89,7 +92,7 @@ export default {
         const senderHash = await digest(sender), receiverHash = options?.receiverHash || await digest(receiver);
         // This capability is independent of the invitation/file secret. Bind
         // retries to all immutable creation parameters, not the public room ID.
-        const creationHash = options?.creationToken ? await digest(JSON.stringify([senderHash, receiverHash, !!options.multi])) : undefined;
+        const creationHash = options?.creationToken ? await digest(JSON.stringify([senderHash, receiverHash, !!options.multi, ...(receiveInvite ? [true] : [])])) : undefined;
         const guard = admission(env);
         let reservation = creationHash ? await guard.recoverCreation(room, creationHash) : undefined;
         if (!reservation && decision.challenge) {
@@ -106,12 +109,12 @@ export default {
         if (creationHash) {
           // On an ambiguous RPC failure retain the reservation. The first call
           // may already have committed; a retry must keep its ownership/budget.
-          const result = await env.ROOMS.get(env.ROOMS.idFromName(room)).initializeRecoverable(senderHash, receiverHash, !!options.multi, { room, lease: reservation.lease }, creationHash);
+          const result = await env.ROOMS.get(env.ROOMS.idFromName(room)).initializeRecoverable(senderHash, receiverHash, !!options.multi, { room, lease: reservation.lease }, creationHash, receiveInvite);
           if (![200, 201].includes(result.status)) {
             if (!reservation.reused) await guard.release(room, reservation.lease);
             return deny('creation-conflict', result.status, result.status === 410 ? 'Session expired' : 'Room already exists');
           }
-          return response({ v: 2, ...(options.multi ? { multi: true } : {}), room, sender, expiresAt: result.expiresAt, creationRetry: 1 }, result.status, origin);
+          return response({ v: 2, ...(options.multi ? { multi: true } : {}), room, sender, ...(receiveInvite ? { receiveInvite: true } : {}), expiresAt: result.expiresAt, creationRetry: 1 }, result.status, origin);
         }
         let created = false;
         try {
@@ -227,17 +230,18 @@ export class Room extends DurableObject {
     if (created) await this.ctx.storage.setAlarm(Date.now() + TTL);
     return created;
   }
-  async initializeRecoverable(sender, receiver, multi, reservation, creationHash) {
+  async initializeRecoverable(sender, receiver, multi, reservation, creationHash, receiveInvite = false) {
     const result = await this.ctx.storage.transaction(async storage => {
       const current = await storage.get('room'), now = Date.now();
       if (current) {
-        if (current.creationHash !== creationHash || current.sender !== sender || current.receiver !== receiver || !!current.multi !== multi) return { status: 409 };
+        if (current.creationHash !== creationHash || current.sender !== sender || current.receiver !== receiver || !!current.multi !== multi || !!current.receiveInvite !== receiveInvite) return { status: 409 };
         if (current.ended || current.expiresAt <= now || current.inviteExpiresAt <= now) return { status: 410 };
         if (current.reservation?.lease !== reservation.lease) return { status: 409 };
         return { status: 200, expiresAt: current.inviteExpiresAt, alarmAt: current.expiresAt };
       }
-      const state = { sender, receiver, creationHash, reservation, inviteExpiresAt: now + TTL, expiresAt: now + TTL,
-        maxExpiresAt: now + MAX_ACTIVE_TTL, ended: false, ...(multi ? { multi: true, members: {}, closedClients: [] } : {}) };
+      const expiresAt = now + (receiveInvite ? RECEIVE_INVITE_TTL : TTL);
+      const state = { sender, receiver, creationHash, reservation, inviteExpiresAt: expiresAt, expiresAt,
+        maxExpiresAt: now + MAX_ACTIVE_TTL, ended: false, ...(receiveInvite ? { receiveInvite: true } : {}), ...(multi ? { multi: true, members: {}, closedClients: [] } : {}) };
       await storage.put('room', state);
       return { status: 201, expiresAt: state.inviteExpiresAt, alarmAt: state.expiresAt };
     });
@@ -261,6 +265,7 @@ export class Room extends DurableObject {
       const secret = request.headers.get('Authorization')?.replace(/^Bearer /, '') || url.searchParams.get('token') || '';
       if (!validToken(secret) || await digest(secret) !== state[role]) return new Response('Unauthorized', { status: 401 });
     }
+    if (state.receiveInvite) return this.receiveInvitation(request, role, state);
     if (client && !/^[a-f0-9]{64}$/.test(client)) return new Response('Invalid client', { status: 400 });
     if (request.method === 'POST') {
       let body;
@@ -305,6 +310,30 @@ export class Room extends DurableObject {
     for (const other of this.sockets(opposite)) other.send(JSON.stringify({ type: 'peer-ready' }));
     if (this.sockets(opposite).length) pair[1].send(JSON.stringify({ type: 'peer-ready' }));
     return new Response(null, { status: 101, webSocket: pair[0] });
+  }
+  async receiveInvitation(request, role, state) {
+    const credential = request.headers.get('Authorization')?.replace(/^Bearer /, '') || '';
+    if (!validToken(credential)) return new Response('Unauthorized', { status: 401 });
+    if (request.headers.get('Upgrade')) return new Response('Method not allowed', { status: 405 });
+    if (request.method === 'GET' && role === 'sender') return Response.json({ sealed: state.sealed || null });
+    if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
+    let body;
+    try { body = await readBody(request, 2048); } catch { return new Response('Invalid request', { status: 400 }); }
+    if (role === 'sender' && body?.type === 'end') {
+      await this.setEnded(state.sender, state.receiver);
+      return Response.json({ ended: true });
+    }
+    if (role !== 'receiver' || body?.type !== 'deliver' || typeof body.sealed !== 'string' ||
+        !/^[A-Za-z0-9_-]{96,256}$/.test(body.sealed)) return new Response('Invalid request', { status: 400 });
+    const status = await this.ctx.storage.transaction(async storage => {
+      const current = await storage.get('room');
+      if (!current?.receiveInvite || current.ended || current.expiresAt <= Date.now()) return 410;
+      if (current.sealed) return current.sealed === body.sealed ? 200 : 409;
+      current.sealed = body.sealed;
+      await storage.put('room', current);
+      return 200;
+    });
+    return Response.json({}, { status });
   }
   async issueTicket(role, client, purpose = 'signal', session = '') {
     if (!validToken(client)) return new Response('Invalid client', { status: 400 });

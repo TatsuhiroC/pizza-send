@@ -5,7 +5,7 @@ export * from '@playwright/test';
 // rate limiting is unchanged; never add this header to the deployed service.
 export async function isolateLocalRequests(context: BrowserContext, testId: string) {
   const scope = testId + '-' + randomUUID();
-  await context.route(url => url.hostname === '127.0.0.1' && url.port === '8787' && url.pathname.startsWith('/rooms'), route =>
+  await context.route(url => url.hostname === '127.0.0.1' && url.port === '8787' && (url.pathname.startsWith('/rooms') || url.pathname === '/receive-invitations'), route =>
     route.continue({ headers: { ...route.request().headers(), 'cf-connecting-ip': 'isolated-test-' + scope } }));
 }
 

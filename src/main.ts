@@ -23,6 +23,7 @@ import { setSignalPreconnect } from './signal-preconnect';
 import { cleanupSourceArchives, packageSources, releaseSourceArchive, stopSourceArchives } from './folder-archive';
 import { remainingTime } from './remaining-time';
 import { createShare } from './share-creation';
+import { deliverReceiveInvitation, openReceiveInvitation, readReceiveInvitation } from './receive-invitation';
 import { deviceLabel, browserLabel } from './peer-info';
 import type { CompressionStatus } from './compression';
 import { connectionDiagnosticsEnabled, mountConnectionDiagnostics } from './connection-diagnostics';
@@ -37,6 +38,8 @@ mountConnectionDiagnostics(app);
 registerStatic(app);
 if (TEST_BUILD) setText(document.getElementById('test-label')!, '测试版 · {version}', { version: TEST_REVISION });
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
+const receiveQRDialog = $<HTMLDialogElement>('receive-qr-dialog');
+const receiveQR = $<HTMLCanvasElement>('receive-qr');
 const deliveryMotion = new DeliveryMotion(document.querySelector<HTMLElement>('.hero-pizza')!, $('transfer-complete'));
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 let config: Config = { signalUrl: '', iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }], memoryLimitBytes: 268435456 };
@@ -71,6 +74,8 @@ let originalHash = location.hash;
 let originalShareRevision = 0;
 let sessionRevision = 0;
 let scannerSession = 0;
+let scanMode: 'share' | 'receive' = 'share';
+let receiveInvitationAbort: AbortController | undefined;
 let scanFeedback: AbortController | undefined;
 let diskStorageAvailable = false;
 let storedFiles: StoredFile[] = [];
@@ -265,12 +270,17 @@ function closeScanner() {
   resetScanFeedback(); scannerSession++; scanner.stop();
   if ($<HTMLDialogElement>('scan-dialog').open) $<HTMLDialogElement>('scan-dialog').close();
 }
-async function openScanner() {
-  if (busy || scanFeedback) return;
+function canScan(mode: typeof scanMode) {
+  return mode === 'receive' ? !!shareLink && !!senderGroup && !$('share-box').hidden && !$<HTMLButtonElement>('scan-receive-qr').disabled : !busy;
+}
+async function openScanner(mode: typeof scanMode = scanMode) {
+  if (!canScan(mode) || scanFeedback) return;
   resetScanFeedback();
+  scanMode = mode;
   const dialog = $<HTMLDialogElement>('scan-dialog');
+  setText($('scan-heading'), mode === 'receive' ? '扫描接收二维码' : '扫描分享二维码');
   if (!dialog.open) { scannerSession++; dialog.showModal(); }
-  scanMessage('请允许相机权限，将对方的二维码放入画面。');
+  scanMessage(mode === 'receive' ? '请扫描接收方在 PizzaSend 中生成的接收二维码。' : '请允许相机权限，将对方的二维码放入画面。');
   await scanner.start();
 }
 async function connectValue(input: string) {
@@ -290,10 +300,14 @@ async function connectValue(input: string) {
   }
 }
 async function scannedCode(text: string): Promise<boolean> {
-  const session = scannerSession, value = text.trim();
-  if (!$<HTMLDialogElement>('scan-dialog').open || busy || scanFeedback) return false;
+  const session = scannerSession, value = text.trim(), mode = scanMode, link = shareLink;
+  const dialog = $<HTMLDialogElement>('scan-dialog');
+  const current = () => session === scannerSession && dialog.open && canScan(mode) && (mode !== 'receive' || link === shareLink);
+  if (!current() || scanFeedback) return false;
+  let invite;
   try {
-    if (value.startsWith('PS1.')) await unpackDescription(value, 'offer');
+    if (mode === 'receive') invite = await readReceiveInvitation(value, new URL(location.href));
+    else if (value.startsWith('PS1.')) await unpackDescription(value, 'offer');
     else {
       const url = new URL(value);
       if (!isSharingURL(url, new URL(location.href))) throw Error('Unknown website');
@@ -302,12 +316,11 @@ async function scannedCode(text: string): Promise<boolean> {
       else await parseShare(url.hash);
     }
   } catch {
-    if (session === scannerSession) scanMessage('这不是有效的 PizzaSend 分享二维码，请扫描对方生成的二维码。');
+    if (current()) scanMessage(mode === 'receive' ? '这不是有效的 PizzaSend 接收二维码。' : '这不是有效的 PizzaSend 分享二维码，请扫描对方生成的二维码。');
     return false;
   }
-  if (session !== scannerSession || !$<HTMLDialogElement>('scan-dialog').open || busy || scanFeedback) return false;
+  if (!current() || scanFeedback) return false;
   const feedback = new AbortController(); scanFeedback = feedback;
-  const dialog = $<HTMLDialogElement>('scan-dialog');
   // Preserve only a small local still while stopping the actual camera immediately.
   const video = $<HTMLVideoElement>('scan-video'), frozen = $<HTMLCanvasElement>('scan-freeze');
   if (video.videoWidth && video.videoHeight) {
@@ -318,14 +331,30 @@ async function scannedCode(text: string): Promise<boolean> {
     } catch { frozen.hidden = true; }
   }
   scanner.stop(); $('scan-success').hidden = false; dialog.classList.add('scan-succeeded');
-  scanMessage('扫描成功，正在连接发送方…');
+  const detail = invite ? '正在发送分享链接…' : '正在连接发送方…';
+  setText($('scan-success-detail'), detail);
+  scanMessage(invite ? detail : '扫描成功，正在连接发送方…');
   $<HTMLButtonElement>('choose-qr-image').disabled = true;
+  if (invite) {
+    try { await deliverReceiveInvitation(endpoint(), invite, link, feedback.signal); }
+    catch (error) {
+      if (scanFeedback !== feedback) return false;
+      if (!current()) closeScanner();
+      else {
+        resetScanFeedback();
+        scanMessage(error instanceof TypeError ? '无法发送分享链接，请检查网络后重试。' : errorMessage(error), true);
+      }
+      return false;
+    }
+  }
   if (!await motionPause(reducedMotion() ? 150 : 650, feedback.signal)) return false;
-  if (session !== scannerSession || !dialog.open || busy) { resetScanFeedback(); return false; }
+  if (!current()) { if (scanFeedback === feedback) closeScanner(); return false; }
   dialog.classList.add('is-leaving');
   if (!await motionPause(reducedMotion() ? 0 : 180, feedback.signal)) return false;
-  if (session !== scannerSession || !dialog.open || busy) { resetScanFeedback(); return false; }
-  closeScanner(); view('receiver'); $<HTMLTextAreaElement>('receive-code').value = value;
+  if (!current()) { if (scanFeedback === feedback) closeScanner(); return false; }
+  closeScanner();
+  if (invite) { toast('分享链接已发送，等待对方确认接收。'); return true; }
+  view('receiver'); $<HTMLTextAreaElement>('receive-code').value = value;
   status('正在连接发送方', '扫码成功，正在与发送方建立加密连接。');
   const connecting = run(() => connectValue(value));
   const revision = sessionRevision;
@@ -425,6 +454,7 @@ function setBusy(value: boolean) {
   document.querySelectorAll<HTMLButtonElement>('.remove-file').forEach(b => b.disabled = value || packagingFiles);
   $<HTMLButtonElement>('connect-receive').disabled = value || !transferSupported;
   $<HTMLButtonElement>('open-scanner').disabled = value;
+  $<HTMLButtonElement>('show-receive-qr').disabled = value || !transferSupported || !configurationReady || !preferredSignalUrl();
   $<HTMLButtonElement>('paste-receive').disabled = value || pasting;
   $<HTMLButtonElement>('retry-config').disabled = value || configurationLoading;
   syncAwake();
@@ -464,7 +494,7 @@ function reset() {
   compressionState = { active: false }; $('compression-hint').hidden = true;
   cancelChallenge();
   sessionRevision++; pendingSaveScroll = undefined; saveRequests.clear(); systemSaveRequests.clear(); cancelAllDownloads();
-  closeScanner();
+  closeScanner(); closeReceiveQR();
   senderGroup?.close(); senderGroup = undefined; leaveReceiverGroup();
   signaling?.close(); signaling = undefined;
   transfer?.close(); transfer = undefined;
@@ -669,6 +699,7 @@ function leaveReceiverGroup() {
 function renderRecipients(peers: Recipient[], expired: boolean) {
   backgroundNote(peers.some(peer => peer.background));
   $('share-box').hidden = !shareLink;
+  $<HTMLButtonElement>('scan-receive-qr').disabled = expired;
   setText($('share-note'), expired ? '邀请已过期，正在进行的传输可以继续。' : '链接 30 分钟内可加入，最多 10 位同时接收。请只分享给预期接收者。');
   $('recipients').hidden = !peers.length;
   const active = peers.filter(peer => !['done', 'error', 'left'].includes(peer.phase));
@@ -777,7 +808,7 @@ async function automaticSender(t: Transfer) {
   clearShare(); shareLink = url.toString(); $<HTMLInputElement>('share-link').value = shareLink;
   await renderShareQR();
   if (transfer !== t || t.stopped) { group.close(); return; }
-  $('share-box').hidden = false; setText($('cancel'), '结束分享');
+  $('share-box').hidden = false; $<HTMLButtonElement>('scan-receive-qr').disabled = false; setText($('cancel'), '结束分享');
   status('等待接收方', '把同一个链接或二维码发给多位接收者，请保持本页打开。');
   await group.connect();
   if (transfer !== t || senderGroup !== group) group.close();
@@ -955,10 +986,58 @@ $('paste-receive').onclick = async () => {
     pasting = false; $<HTMLButtonElement>('paste-receive').disabled = busy;
   }
 };
-$('open-scanner').onclick = () => { void openScanner(); };
+function stopReceiveQR() {
+  if (receiveInvitationAbort) { receiveInvitationAbort.abort(); receiveInvitationAbort = undefined; cancelChallenge(); }
+  receiveQR.hidden = true; receiveQR.width = receiveQR.height = 0;
+}
+function closeReceiveQR() {
+  stopReceiveQR();
+  if (receiveQRDialog.open) receiveQRDialog.close();
+}
+$('show-receive-qr').onclick = async () => {
+  if (busy || !transferSupported || receiveQRDialog.open) return;
+  const controller = receiveInvitationAbort = new AbortController();
+  const current = () => receiveInvitationAbort === controller && receiveQRDialog.open && !busy;
+  const message = $('receive-qr-status');
+  setText(message, '正在生成接收二维码…');
+  receiveQRDialog.showModal();
+  let invitation;
+  try {
+    invitation = await openReceiveInvitation(endpoint(), new URL(location.href), {
+      signal: controller.signal,
+      retry: () => {},
+      challenge: (siteKey, room) => challenge(siteKey, room, current)
+    });
+    if (!current()) return;
+    if (!await renderQR(receiveQR, invitation.code, current, 300, 4)) return;
+    setText(message, '请让发送方用分享链接旁的小扫码按钮扫描。二维码 2 分钟内有效。');
+    const value = await invitation.wait();
+    if (!current()) return;
+    closeReceiveQR();
+    $<HTMLTextAreaElement>('receive-code').value = value;
+    status('正在连接发送方', '扫码成功，正在与发送方建立加密连接。');
+    const connecting = run(() => connectValue(value));
+    revealInvitation();
+    await connecting;
+    if (!busy) revealInvitation();
+  } catch (error) {
+    if (current()) {
+      stopReceiveQR();
+      setText(message, error instanceof TypeError ? '无法发送分享链接，请检查网络后重试。' : errorMessage(error));
+    }
+  } finally {
+    invitation?.close();
+    if (receiveInvitationAbort === controller) receiveInvitationAbort = undefined;
+  }
+};
+$('close-receive-qr').onclick = closeReceiveQR;
+receiveQRDialog.addEventListener('cancel', event => { event.preventDefault(); closeReceiveQR(); });
+receiveQRDialog.addEventListener('close', () => { if (!receiveQRDialog.open) stopReceiveQR(); });
+$('open-scanner').onclick = () => { void openScanner('share'); };
+$('scan-receive-qr').onclick = () => { void openScanner('receive'); };
 $('scan-again').onclick = () => { void openScanner(); };
 $('close-scanner').onclick = closeScanner;
-$<HTMLDialogElement>('scan-dialog').addEventListener('close', () => { resetScanFeedback(); scannerSession++; scanner.stop(); });
+$<HTMLDialogElement>('scan-dialog').addEventListener('close', () => { if (!$<HTMLDialogElement>('scan-dialog').open) closeScanner(); });
 $<HTMLDialogElement>('scan-dialog').addEventListener('cancel', () => { resetScanFeedback(); scannerSession++; scanner.stop(); });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && $<HTMLDialogElement>('scan-dialog').open) {
@@ -1009,14 +1088,17 @@ async function copyValue(input: HTMLInputElement | HTMLTextAreaElement, message:
   toast(copied ? message : '无法自动复制，请长按或选中链接后复制。');
 }
 $('copy-link').onclick = () => run(() => copyValue($<HTMLInputElement>('share-link'), '分享链接已复制'));
-async function renderShareQR() {
-  const canvas = $<HTMLCanvasElement>('share-qr'), revision = ++shareQRRevision, link = shareLink;
-  if (!link) return;
+async function renderQR(canvas: HTMLCanvasElement, text: string, current: () => boolean, width: number, margin: number) {
   const rendered = document.createElement('canvas');
-  await QRCode.toCanvas(rendered, link, { width: 224, margin: 2, color: { dark: '#342c24', light: '#ffffff' } });
-  if (revision !== shareQRRevision || link !== shareLink) return;
+  await QRCode.toCanvas(rendered, text, { width, margin, color: { dark: '#342c24', light: '#ffffff' } });
+  if (!current()) return false;
   canvas.width = rendered.width; canvas.height = rendered.height;
   canvas.getContext('2d')!.drawImage(rendered, 0, 0); canvas.hidden = false;
+  return true;
+}
+async function renderShareQR() {
+  const revision = ++shareQRRevision, link = shareLink;
+  if (link) await renderQR($<HTMLCanvasElement>('share-qr'), link, () => revision === shareQRRevision && link === shareLink, 224, 2);
 }
 $('copy-code').onclick = () => run(() => copyValue($<HTMLTextAreaElement>('outgoing-code'), '配对码已复制'));
 $('pair-qr-button').onclick = () => run(async () => {
@@ -1064,7 +1146,7 @@ window.addEventListener('beforeunload', event => {
   if (packagingFiles || senderGroup?.active || (transfer && !transfer.completed && !transfer.stopped)) { event.preventDefault(); event.returnValue = ''; }
 });
 window.addEventListener('pagehide', event => {
-  screenAwake.setActive(false); closeScanner();
+  screenAwake.setActive(false); closeScanner(); closeReceiveQR();
   // A cached page still owns its files and session. Sending "end" here would
   // invalidate the link while the user briefly visits another app/page.
   if (event.persisted) return;
@@ -1082,7 +1164,7 @@ function readPreference(key: string) {
 }
 function originalSharePending() {
   const params = new URLSearchParams(originalHash.slice(1));
-  return !busy && sessionRevision === originalShareRevision && (originalHash.startsWith('#2.') || params.has('r') || params.has('offer') || !!originalHash && new URLSearchParams(location.search).get('receive') === '1');
+  return !busy && !receiveQRDialog.open && sessionRevision === originalShareRevision && (originalHash.startsWith('#2.') || params.has('r') || params.has('offer') || !!originalHash && new URLSearchParams(location.search).get('receive') === '1');
 }
 function revealInvitation(revision = sessionRevision) {
   requestAnimationFrame(() => {
@@ -1113,6 +1195,7 @@ window.addEventListener('hashchange', () => {
   if (!nextHash || nextHash === originalHash && sessionRevision === originalShareRevision) return;
   if (busy && transfer && !transfer.stopped && !transfer.completed) { toast('请先结束当前传输，再打开新的分享链接。'); return; }
   if (busy) reset();
+  else closeReceiveQR();
   originalHash = nextHash; originalShareRevision = sessionRevision;
   void connectOriginalShare();
 });
